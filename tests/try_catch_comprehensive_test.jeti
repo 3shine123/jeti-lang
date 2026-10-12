@@ -1,5 +1,5 @@
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface MathUtils : NPObject
 + (int)divide:(int)a by:(int)b @throws;

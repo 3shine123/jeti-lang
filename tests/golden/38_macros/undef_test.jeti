@@ -1,5 +1,5 @@
 // probe: #undef removes a jeti macro (invocations after it stay literal → parse error if used)
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 #define TAG(o) [o tag]

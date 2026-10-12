@@ -1,5 +1,5 @@
 #include <stdio.h>
-#import "dog.jth"
+#import "dog.hje"
 int main(void) {
     Dog *d = [[Dog alloc] init];
     int n = [d trickCount];

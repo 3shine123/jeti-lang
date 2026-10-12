@@ -1,5 +1,5 @@
 // 差分用例 5:typed catch 链 —— 类型不匹配的 catch 必须放行给外层
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface A : NPObject @end
 @implementation A

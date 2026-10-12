@@ -1,6 +1,6 @@
 // test: cross-namespace references in method params and @using inside @namespace
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @namespace Game
     @interface Player : NPObject {

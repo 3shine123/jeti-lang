@@ -18,7 +18,7 @@
  * tests/golden/45_nullability/nullability.jeti for the narrowing forms that
  * satisfy the checker.
  */
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Sink : NPObject
 - (void)need:(nonnull NPString *)v;

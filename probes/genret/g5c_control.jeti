@@ -2,7 +2,7 @@
 // 判定 g5 的报错是否泛型特有：若这里同样报 "instance method 'make'
 // cannot be called on a class name"，则 mixed-kind 类发送被 checker
 // 一律拒绝（与泛型无关的保守规则）；若这里放行，则是泛型路径特有。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Pair : NPObject
 + (NPString *)make;

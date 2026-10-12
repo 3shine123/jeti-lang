@@ -1,6 +1,6 @@
 // test: nested @namespace with deep qualified access
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @namespace Game
     @namespace Entities

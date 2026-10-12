@@ -1,7 +1,7 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
-/* client TU: sees only the .jth. `size` and `label` are resolved by the
+/* client TU: sees only the .hje. `size` and `label` are resolved by the
    predicate engine through the KVC table that lib.jeti owns — if the weak
    metadata from this TU won the merge, both lookups would come back empty and
    the predicates below would quietly evaluate to NO. */

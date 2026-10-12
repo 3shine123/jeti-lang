@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 /* client TU: names the same instantiation the lib TU defined */

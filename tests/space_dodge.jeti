@@ -5,7 +5,7 @@
 #import <termios.h>
 #import <unistd.h>
 #import <sys/select.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ==========================================================
 // 1. 终端原始模式管理（非阻塞按键读取，Tick 时间缩短到 100ms 增加速度感）

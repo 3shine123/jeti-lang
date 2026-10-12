@@ -273,7 +273,7 @@ mod tests {
             },
             SourceEntry {
                 id: 1,
-                path: "lib.jth".into(),
+                path: "lib.hje".into(),
                 hash: hash_tag(b"L"),
             },
         ];

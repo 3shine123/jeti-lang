@@ -1,7 +1,7 @@
-#import <Foundation/NPPredicate.jth>
-#import <Foundation/NPString.jth>
-#import <Foundation/NPNumber.jth>
-#import <Foundation/NPArray.jth>
+#import <Foundation/NPPredicate.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPNumber.hje>
+#import <Foundation/NPArray.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

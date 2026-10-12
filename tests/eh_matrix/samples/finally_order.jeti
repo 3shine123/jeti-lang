@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Scenario 4 of the EH acceptance matrix: @finally ordering.
 //

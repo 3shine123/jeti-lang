@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * LibUI.jth — ObjC-style declarations for the libui-ng wrapper.
+ * LibUI.hje — ObjC-style declarations for the libui-ng wrapper.
  *
  * Pure Jeti: no `struct uiXxx` ever leaks out of LibUI.jeti. Every widget
  * inherits from `Control`, so `append:`/`setContent:` take a `Control *`

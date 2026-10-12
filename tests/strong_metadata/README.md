@@ -16,8 +16,8 @@ metadata linkage is correct:
 | 2 | a declaration-only client links against the strong library and runs | the actual P3 end-to-end path |
 | 3 | the deleted `-fstrong-metadata` spelling is rejected with `Unknown argument` | plan A removed the manual switch — ownership is by construction (R2), so a legacy script carrying the flag must fail loudly, not half-work |
 | 4 | two TUs that both `@implementation` the same class fail with `duplicate symbol` (**no flag involved**) | rule R2: ownership is derived from the main file, so a second owner must never merge silently |
-| 5 | a standalone TU — a self-contained `.jth` **or** a `.jeti` holding an `@implementation` — emits **strong** metadata for its owned class **with no flag** (vtable + meta vtable, `nm`-verified) | the flag must never be something to remember by hand: R2 ownership is derived from the main file, so the standalone-TU workflow is automatic |
-| 6 | a declaration-only `.jth` stays **weak** with no flag | its NULL-filled stubs are the client side of R2 and must lose to the owner's table |
+| 5 | a standalone TU — a self-contained `.hje` **or** a `.jeti` holding an `@implementation` — emits **strong** metadata for its owned class **with no flag** (vtable + meta vtable, `nm`-verified) | the flag must never be something to remember by hand: R2 ownership is derived from the main file, so the standalone-TU workflow is automatic |
+| 6 | a declaration-only `.hje` stays **weak** with no flag | its NULL-filled stubs are the client side of R2 and must lose to the owner's table |
 | 7 | a main file that owns the root classes (`NPObject.jeti` compiled standalone) compiles clean — `jeti_root`/`NPObject` defined **exactly once** in the generated file | stable-slots §9 blocker 1: Section 4's guarded fallbacks used to be re-emitted unguarded by the class-layout section — a hard C redefinition error |
 
 There is no flag left to remember: the old `-fstrong-metadata` was deleted when

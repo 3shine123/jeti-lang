@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // 定义一个“可配置/可描述”的协议
 @protocol NPStringParsable

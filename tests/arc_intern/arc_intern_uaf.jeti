@@ -9,7 +9,7 @@
 //
 // Needs AddressSanitizer to be meaningful (a plain build may or may not
 // crash): tests/arc_intern/run_arc_intern_test.sh.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 @interface Holder : NPObject {

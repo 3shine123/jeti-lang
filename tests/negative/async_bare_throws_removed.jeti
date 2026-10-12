@@ -3,7 +3,7 @@
 // `@throws(ErrType *)` (same as the sync side). This file MUST fail with a
 // plain syntax error on the bare `throws` token — kept as documentation, the
 // runner skips tests/negative (verified by hand / cargo unit tests).
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Svc : NPObject
 - (async int)fetch:(int)x throws;

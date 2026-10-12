@@ -3443,7 +3443,7 @@ AstExprData::Subscript { object, key, .. } => {
     }
 
     /// §5.1/§5.2: a subclass of a bounded generic must re-declare every
-    /// inherited bound (explicit spelling — `.jth` readers see the whole
+    /// inherited bound (explicit spelling — `.hje` readers see the whole
     /// constraint, same philosophy as full ivar layouts in shared headers)
     /// and must not weaken it (the re-declared bound must be equal or a
     /// sub-protocol/subclass of the inherited one). Unit-level pass, same

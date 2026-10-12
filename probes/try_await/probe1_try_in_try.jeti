@@ -12,7 +12,7 @@
 // body hits the async-frame self-typing gap (frame `self_obj` is `NPObject *`
 // — delegated separately, predates B′). A typed local/param receiver is the
 // supported path.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #import <stdio.h>
 
 @interface UserService : NPObject

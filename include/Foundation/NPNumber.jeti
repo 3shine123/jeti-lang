@@ -1,4 +1,4 @@
-#import <Foundation/NPNumber.jth>
+#import <Foundation/NPNumber.hje>
 #import <Foundation/NPObject.jeti>
 #include <stdio.h>
 

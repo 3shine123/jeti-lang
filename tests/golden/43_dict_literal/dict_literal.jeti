@@ -8,7 +8,7 @@
 // Keys compare with `isEqual:` (value semantics for NPString/NPNumber), so a
 // lookup by an equal-but-distinct literal finds the entry — the point of a
 // dictionary, and what makes a fresh `@"key"` usable at all.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 int main(void) {

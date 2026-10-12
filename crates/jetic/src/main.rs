@@ -317,8 +317,8 @@ fn import_quoted_target(t: &str) -> Option<&str> {
 /// precompiled library would add a competing strong copy of the class
 /// tables whose Foundation-only vtable sig wins the weak merge and trips
 /// the cross-TU `__sig` check (tests/multi_tu/12_native_multi_input, and
-/// cross_file_test.jeti whose Foundation arrives via `diamond_base.jth`).
-/// Declaration-only clients (`Foundation.jth`) do not match and stay
+/// cross_file_test.jeti whose Foundation arrives via `diamond_base.hje`).
+/// Declaration-only clients (`Foundation.hje`) do not match and stay
 /// auto-linkable — the ObjC library model.
 ///
 /// Checked at the SOURCE level on purpose: generated-C text markers cannot
@@ -353,7 +353,7 @@ fn foundation_impl_scan(
             Some(x) => x,
             None => continue,
         };
-        if !(target.ends_with(".jth") || target.ends_with(".jeti")) { continue; }
+        if !(target.ends_with(".hje") || target.ends_with(".jeti")) { continue; }
         // Resolution order mirrors the preprocessor: the importing file's
         // own directory first, then the bundle's include roots.
         let mut roots: Vec<std::path::PathBuf> = Vec::new();
@@ -431,7 +431,7 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
         clang_args.push(a.to_string());
     }
     // Debug symbols (plan 阶段 3): `-g -O0` so DWARF (via the `#line`
-    // directives when enabled) points back at the .jeti/.jth. Kept separate from
+    // directives when enabled) points back at the .jeti/.hje. Kept separate from
     // any future user-facing -O: -g never implies an optimization level on
     // its own; this preset couples them for the debug workflow.
     if debug_symbols {
@@ -519,7 +519,7 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
     // implementations (`foundation_impl_inlined`, computed at the source
     // level in main): the archive's STRONG Foundation-only vtable would win
     // the weak merge and trip the __sig cross-TU check (multi_tu case 12).
-    // Auto-link is for declaration-only clients (`Foundation.jth`) — the
+    // Auto-link is for declaration-only clients (`Foundation.hje`) — the
     // ObjC model. An explicit `-l jetifoundation` suppresses the auto one
     // (no duplicate).
     if !no_libc && !shared && !foundation_impl_inlined && !libs.iter().any(|l| l == "jetifoundation") {
@@ -812,16 +812,16 @@ fn main() {
         println!("  -fjeti-arc                           Enable ARC (default)");
         println!("  -g                                   Emit debug symbols (-g -O0 to the C");
         println!("                                     compiler); with -line-directives, LLDB/");
-        println!("                                     GDB show .jeti/.jth file and line numbers");
+        println!("                                     GDB show .jeti/.hje file and line numbers");
         println!("  -line-directives                     Emit #line <file> in generated C so");
         println!("                                     clang diagnostics point back at");
-        println!("                                     the .jeti/.jth source (default: on)");
+        println!("                                     the .jeti/.hje source (default: on)");
         println!("  -fno-line-directives                 Disable #line emission: clang");
         println!("                                     diagnostics then report <stdin>");
-        println!("                                     instead of .jeti/.jth locations");
+        println!("                                     instead of .jeti/.hje locations");
         println!("  -np-map                              Emit a versioned .jeti.map sidecar next");
         println!("                                     to the .jeti source, mapping generated");
-        println!("                                     C lines back to .jeti/.jth sources");
+        println!("                                     C lines back to .jeti/.hje sources");
         println!("  -fno-jeti-arc                        Disable ARC (MRC)");
         println!("  -ffreestanding                       Bare-metal/freestanding output");
         println!("                                     (no libc headers, no TLS, no bundled");
@@ -1245,7 +1245,7 @@ fn main() {
     // the builtin type list and its shape heuristics.
     pipeline.no_ctype_probe = std::env::var_os("JETI_NO_CTYPE_PROBE").is_some();
     // `-line-directives` (plan 阶段 2, DEFAULT ON): emit `#line` in the
-    // generated C so clang diagnostics point back at the .jeti/.jth.
+    // generated C so clang diagnostics point back at the .jeti/.hje.
     // `-fno-line-directives` turns it off.
     pipeline.line_directives = !args.iter().any(|a| a == "-fno-line-directives" || a == "--fno-line-directives");
     // `-np-map` (plan 阶段 4): the pipeline extracts the sidecar from the final

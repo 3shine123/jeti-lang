@@ -406,7 +406,7 @@ Block 字面量**与 gcc 后端共用同一套 struct+invoke 展开**（见 §8.
 | 8 | 在 `@try` body 中生成空块或 `/* stub */` | 异常处理必须实际生效 |
 | 9 | `jeti_release` 直接 `free(obj)` 而不调用 `dealloc` | 导致 ivar 内存泄漏 |
 | 10 | `@autoreleasepool` 生成空壳 push/pop 而不管理对象 | 对象永不释放 |
-| 11 | `.jth` 头文件中包含 `@implementation` | 多重导入导致链接期符号重复定义 |
+| 11 | `.hje` 头文件中包含 `@implementation` | 多重导入导致链接期符号重复定义 |
 | 12 | `--backend=portable` 模式下发出 `^` Block 字面量 | `^` 是 clang 专属语法（`-fblocks`），portable 必须展开为 struct 形式 |
 | 13 | gcc 后端发出 `^` block 语法 | GCC 不支持 `-fblocks`，必须展开为 struct |
 | 14 | clang 后端展开 Block 为 struct | 浪费性能，clang 自己的 `-fblocks` 已经处理了 |

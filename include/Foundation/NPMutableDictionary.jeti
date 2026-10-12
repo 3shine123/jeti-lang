@@ -1,4 +1,4 @@
-#import <Foundation/NPMutableDictionary.jth>
+#import <Foundation/NPMutableDictionary.hje>
 #import <Foundation/NPDictionary.jeti>
 #include <string.h>
 #include <stdlib.h>

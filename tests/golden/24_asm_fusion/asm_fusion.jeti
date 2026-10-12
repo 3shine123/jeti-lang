@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ---- 外部汇编符号声明 ----
 extern unsigned asm_crc32(const unsigned char* buf, int len);

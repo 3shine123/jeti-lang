@@ -2,7 +2,7 @@
 // 专为 jetic 设计的「匿名多态、不透明指针劫持与复合边界」极限测试
 // 基准框架：NPFoundation
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

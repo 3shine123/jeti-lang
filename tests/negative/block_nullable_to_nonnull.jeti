@@ -14,7 +14,7 @@
  *
  * The fix is a guard: `if (s) { sink(s); }`.
  */
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 typedef void (^SinkBlock)(nonnull NPString *s);
 

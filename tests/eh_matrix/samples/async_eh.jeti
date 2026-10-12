@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Scenario 15 of the EH acceptance matrix: await coexisting with the
 // exception machinery.

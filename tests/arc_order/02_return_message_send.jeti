@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ARC order 02: `return [w text];` — the local IS used by the exit expression
 // and must still be released after it, but the old `extract_returned_var`

@@ -6,7 +6,7 @@
 //
 // 配套 tests/full_syntax_test.s（ARM64 外部汇编，test_all 自动链接同名 .s）。
 // 预期：exit=0，输出确定（无地址/无时序依赖）。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>

@@ -4,7 +4,7 @@
 // arithmetic and BOOL operands can be boxed. ObjC would box an NSNumber from an
 // NSString, but Jeti has no string boxing; silently emitting the pointer where a
 // number is expected would hide the mistake, so the checker rejects it.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main(void) {
     NPString *s = @"hi";

@@ -1,4 +1,4 @@
-#import "NPObject.jth"
+#import "NPObject.hje"
 
 @implementation jeti_root
 - (id)init {

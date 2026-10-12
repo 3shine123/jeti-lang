@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 
 /* Jeti monomorphises generics by *usage*: codegen scans for type references
    carrying type args (`Stack<int *>`) and clones the generic implementation

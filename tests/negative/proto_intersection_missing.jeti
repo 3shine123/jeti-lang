@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 // EXPECT_FAIL: missing required method 'serialize' from protocol 'Serializable'
 // via the id<P & Q> conjunction on @interface Bad <Drawable & Serializable>.
 @protocol Drawable

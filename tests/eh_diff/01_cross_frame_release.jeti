@@ -1,6 +1,6 @@
 // 差分用例 1:跨帧释放 —— 中间帧持有 owned 对象,异常穿透时必须释放
 // ObjC 基准:unwind 经过 middle 时 ARC 释放 m;catch 结束后运行时释放被抛对象
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Item : NPObject @end
 @implementation Item

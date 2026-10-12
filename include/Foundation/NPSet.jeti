@@ -1,5 +1,5 @@
-#import <Foundation/NPSet.jth>
-#import <Foundation/NPString.jth>
+#import <Foundation/NPSet.hje>
+#import <Foundation/NPString.hje>
 #include <string.h>
 #include <stdlib.h>
 

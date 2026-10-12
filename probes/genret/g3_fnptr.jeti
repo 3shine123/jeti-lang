@@ -2,7 +2,7 @@
 // 检查点：checker 把 [Box<NPString *> defaultValue] 的静态类型判为
 // NPString *（能直接过 fn-ptr 参数检查）；生成 C 的 call 表达式类型
 // 与 fn-ptr 形参类型一致（不是 id 隐转）。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Box<T> : NPObject
 + (T)defaultValue;

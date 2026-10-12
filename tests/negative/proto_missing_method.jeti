@@ -1,5 +1,5 @@
 // Protocol conformance: missing required method — checker must report an error.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @protocol Drawable
 @required

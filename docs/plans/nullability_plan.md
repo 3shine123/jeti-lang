@@ -172,7 +172,7 @@ for (kstr, kw) in KW_TABLE { if *kstr == s { return *kw; } }
 
 - **lexer**：作为**标识符**识别（不是关键词，守 C 超集铁律）—— 两条路径都要在，且**必须原样透传进生成的 C**（clang 需要它们生效），故走既有 `RawLine` 通道
 - **parser**：声明列表维护 `nonnull_region: bool`；在区内，每个**指针类型缺省标注**改为 `Nonnull`
-- **区域状态按文件作用域**：进入新文件（`#import` 边界）清零，`Foundation.jth` 内部不受用户的区域状态影响
+- **区域状态按文件作用域**：进入新文件（`#import` 边界）清零，`Foundation.hje` 内部不受用户的区域状态影响
 - **未闭合即 `#import`**：报 warning（`assume_nonnull region left open at #import`）
 
 ## 6. 已知难点（如实记录，不假装简单）

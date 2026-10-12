@@ -1,6 +1,6 @@
 // negative: jeti macro invocation not closed on one line
 // jetic must refuse with a clear error (multi-line calls unsupported).
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 #define TAG(o) [o tag]

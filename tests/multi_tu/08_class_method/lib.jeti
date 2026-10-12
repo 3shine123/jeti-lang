@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 
 @implementation Factory : NPObject
 + (Factory *)make {

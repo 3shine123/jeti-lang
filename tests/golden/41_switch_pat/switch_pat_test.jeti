@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // M1 pattern-switch lowering (crate jeti-pattern, Step 3.95).
 // Exercises: Bind arm (isKindOfClass:), object-literal arm (isEqual:),

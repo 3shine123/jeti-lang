@@ -1,4 +1,4 @@
-#import <Foundation/NPMutableArray.jth>
+#import <Foundation/NPMutableArray.hje>
 #import <Foundation/NPArray.jeti>
 #include <string.h>
 #include <stdlib.h>

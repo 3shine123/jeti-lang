@@ -1,7 +1,7 @@
 // 差分用例 8:迟求值 —— 三元未选中分支、&& 短路右操作数不得求值
 // (C 语义。EH 提升求值若越过分支边界,未选中分支的调用会照跑:
 //  副作用可见,且对接收者类未实现的 selector 会派发 NULL 槽 → 崩)
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Bumper : NPObject {
 @public

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // 定义一个 Block 类型：接收一个 id 类型的参数（触发事件时携带的数据）
 typedef void (^NPEventBlock)(id data);

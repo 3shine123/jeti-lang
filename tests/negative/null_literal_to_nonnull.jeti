@@ -12,7 +12,7 @@
  *     to a callee that requires a non-null argument — pass a real object, or
  *     declare the parameter 'nullable'
  */
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Greeter : NPObject
 - (void)greet:(nonnull NPString *)name;

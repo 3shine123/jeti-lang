@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Negative: an object-literal subject with a dangling-comparison arm and no
 // object arm. `__auto_type __jeti_sw = @7;` still yields a *pointer*, so

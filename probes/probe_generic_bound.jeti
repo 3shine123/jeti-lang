@@ -2,7 +2,7 @@
 // Expected verdict: either a clear "not supported" diagnostic, a silent
 // miscompile, or acceptance — the probe decides which.
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @protocol Greetable
 - (NPString *)greeting;

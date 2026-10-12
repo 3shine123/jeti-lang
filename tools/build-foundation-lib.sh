@@ -10,8 +10,8 @@
 #
 #   jetic app.jeti -I include -L<outdir> -ljetifoundation -o app
 #
-# The client imports `Foundation.jth` — the DECLARATION-ONLY umbrella (per the
-# project's .jth = declarations / .jeti = implementations convention).
+# The client imports `Foundation.hje` — the DECLARATION-ONLY umbrella (per the
+# project's .hje = declarations / .jeti = implementations convention).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -73,7 +73,7 @@ check_strong() {
 
 echo "[1/4] transpile + compile each Foundation TU (wrapper = decl surface + implementation)"
 # Each TU is a generated WRAPPER: the full declaration surface
-# (Foundation.jth, the declaration-only umbrella) first, then the
+# (Foundation.hje, the declaration-only umbrella) first, then the
 # implementation .jeti's own text — the
 # @implementation lands in the MAIN FILE (not via #import), so R2 ownership
 # still applies and this TU's metadata is strong. The full surface gives
@@ -81,7 +81,7 @@ echo "[1/4] transpile + compile each Foundation TU (wrapper = decl surface + imp
 # references to sibling implementations resolve from the archive at final
 # link. The source .jeti files stay UNPOLLUTED — self-contained TUs that inline
 # them keep exactly the declaration surface they asked for.
-# Note: NPObject.jeti imports "NPObject.jth" in quoted form; the extra
+# Note: NPObject.jeti imports "NPObject.hje" in quoted form; the extra
 # -I include/Foundation keeps that resolvable from the wrapper's location.
 objs=()
 tus="$outdir/_tus"
@@ -98,7 +98,7 @@ for gm in include/Foundation/*.jeti; do
     # (doc/async_nptask_plan.md §Foundation 壳层).
     [[ "$name" == "Foundation" || "$name" == "NPTask" ]] && continue
     wrap="$tus/$name.jeti"
-    { echo '#import <Foundation/Foundation.jth>'; cat "$gm"; } > "$wrap"
+    { echo '#import <Foundation/Foundation.hje>'; cat "$gm"; } > "$wrap"
     c="$outdir/$name.c"
     o="$outdir/$name.o"
     "$jetic" -rewrite-jeti "$wrap" -o "$c" -I include -I include/Foundation

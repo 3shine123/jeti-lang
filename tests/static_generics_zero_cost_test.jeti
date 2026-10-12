@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ============================================================================
 // 1. 泛型类声明与实现：向量图元固定缓冲区 (Capacity = 2)

@@ -54,10 +54,10 @@ fn is_directive(line: &str) -> Option<(bool, String)> {
     let name = body[..end].to_string();
 
     // For #import: only treat as a jeti import if the file is a jeti header
-    // (.jth) or jeti implementation (.jeti).
+    // (.hje) or jeti implementation (.jeti).
     let is_jeti_import = if is_import {
         let ext = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("");
-        ext == "jth" || ext == "jeti"
+        ext == "hje" || ext == "jeti"
     } else {
         false
     };
@@ -306,7 +306,7 @@ fn resolve_source(
             // forces the flat (non-preserved) emission.
             if is_jeti_import {
                 poison_top_guard(cond_stack, c_out);
-                // #import of .jth/.jeti (or .jeti) → recursively resolve
+                // #import of .hje/.jeti (or .jeti) → recursively resolve
                 let mut search = search_dirs.to_vec();
                 // Add source directory first
                 if !search.contains(&dir) {

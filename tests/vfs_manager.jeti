@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ==========================================================
 // 1. @class 前向声明测试

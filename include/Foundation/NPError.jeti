@@ -1,4 +1,4 @@
-#import <Foundation/NPError.jth>
+#import <Foundation/NPError.hje>
 #import <Foundation/NPObject.jeti>
 #import <Foundation/NPString.jeti>
 #include <stdio.h>

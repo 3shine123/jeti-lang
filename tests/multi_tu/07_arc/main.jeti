@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 /* client TU: an object allocated here and stored into an object owned by the

@@ -384,11 +384,11 @@ mod tests {
         let sm = SourceMap::new(vec![
             ("main.jeti".into(), 1),
             ("main.jeti".into(), 2),
-            ("foo.jth".into(), 10),
+            ("foo.hje".into(), 10),
         ]);
         assert_eq!(sm.locate(1), ("main.jeti".to_string(), 1));
         assert_eq!(sm.locate(2), ("main.jeti".to_string(), 2));
-        assert_eq!(sm.locate(3), ("foo.jth".to_string(), 10));
+        assert_eq!(sm.locate(3), ("foo.hje".to_string(), 10));
         assert_eq!(sm.locate(4), (String::new(), 4));
     }
 

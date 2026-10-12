@@ -1,6 +1,6 @@
 // test: NPObject basic lifecycle
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Counter : NPObject {
     @public

@@ -4,7 +4,7 @@
 // NPString *. Checker-side: `NPString *s = ...` must not error; codegen-side:
 // the vtable cast must carry the specialized return type.
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Box<T> : NPObject
 + (T)defaultValue;

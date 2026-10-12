@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ARC order 17: a `return` inside `@finally` overrides the `@try`'s return
 // value, and the owned local is still released exactly once on the way out.

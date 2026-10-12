@@ -21,7 +21,7 @@
         ],
         "extensions": [
           ".jeti",
-          ".jth"
+          ".hje"
         ],
         "configuration": "./language-configuration.json"
       }

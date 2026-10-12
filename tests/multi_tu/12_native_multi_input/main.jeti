@@ -1,8 +1,8 @@
-#import "model.jth"
-#import <Foundation/Foundation.jth>
+#import "model.hje"
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
-/* client TU: sees only the .jth, never lib.jeti */
+/* client TU: sees only the .hje, never lib.jeti */
 int main() {
     Greeter *g = [[Greeter alloc] init];
     printf("%s\n", [g greeting:"world"]);

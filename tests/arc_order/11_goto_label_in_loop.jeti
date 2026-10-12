@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ARC order 11: `goto` out of a loop body releases the iteration's local. The
 // label lives outside the loop, so the jump leaves the body scope.

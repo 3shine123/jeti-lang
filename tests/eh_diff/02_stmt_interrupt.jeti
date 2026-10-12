@@ -1,6 +1,6 @@
 // 差分用例 2:语句中断 —— 同一表达式内,boom 抛出后后续调用 bar 不得执行
 // (clang 与 jeti codegen 实际均按左到右求值;本用例锁定该行为,见 README)
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface T : NPObject @end
 @implementation T

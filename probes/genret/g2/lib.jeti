@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 
 // 注意：方法体刻意不提及任何 `Factory<...>` 实例化 —— 驱动器会从
 // sibling TU 收集需求并转发给这里，这是跨 TU 自动单态化的核心。

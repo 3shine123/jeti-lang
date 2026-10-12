@@ -12,7 +12,7 @@
 //   裸 launch 与标识符歧义（`int launch = 1;` 必须仍能编过）——与 @await 同判。
 
 #import <Foundation/Foundation.jeti>
-#import <Foundation/NPAsync.jth>        // 提案：与 NPString / NPArray 并列入 Foundation
+#import <Foundation/NPAsync.hje>        // 提案：与 NPString / NPArray 并列入 Foundation
 
 @interface Cooker : NPObject
 - (int)slowAdd:(int)a b:(int)b;        // 体含 @await → async（无标注，链式传染）

@@ -1,7 +1,7 @@
 // lang-test/diamond_impl-F.jeti
 // 混合实现文件
 
-#import "diamond_base.jth"
+#import "diamond_base.hje"
 #include <stdio.h>
 
 @interface NPCraftPilot : NPObject

@@ -1,5 +1,5 @@
 // 差分用例 4:catch 内 rethrow —— 必须传播到外层 catch,不得重入本层
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Err : NPObject @end
 @implementation Err

@@ -124,7 +124,7 @@ static void test_import_no_cycle(void) {
     fclose(h);
 
     FILE *f = fopen("/tmp/jeti_test_import_main.jeti", "w");
-    fputs("#import \"jeti_test_imported.jth\"\n", f);
+    fputs("#import \"jeti_test_imported.hje\"\n", f);
     fputs("int main_var;\n", f);
     fclose(f);
 

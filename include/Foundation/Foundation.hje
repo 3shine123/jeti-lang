@@ -1,10 +1,10 @@
 // Foundation —— 纯声明伞头（declaration-only）。
 //
-// 按项目约定（`.jth` = 声明，`.jeti` = 实现），导入本头**不会**内联任何
+// 按项目约定（`.hje` = 声明，`.jeti` = 实现），导入本头**不会**内联任何
 // Foundation 实现：你的 TU 只生成你自己的代码，Foundation 的实现只在
 // 预编译库里存一份 —— 也就是 Objective-C 的模型。
 //
-//     #import <Foundation/Foundation.jth>            // 纯声明
+//     #import <Foundation/Foundation.hje>            // 纯声明
 //     jetic app.jeti -I include -L <libdir> -ljetifoundation -o app
 //
 // 自包含单 TU 构建（实现内联进每个使用者，无需库）导入实现伞头：
@@ -17,17 +17,17 @@
 
 #include "jeti/runtime.h"
 
-#import "NPObject.jth"
-#import "NPString.jth"
-#import "NPMutableString.jth"
-#import "NPArray.jth"
-#import "NPMutableArray.jth"
-#import "NPDictionary.jth"
-#import "NPMutableDictionary.jth"
-#import "NPSet.jth"
-#import "NPMutableSet.jth"
-#import "NPOrderedSet.jth"
-#import "NPPredicate.jth"
-#import "NPNumber.jth"
-#import "NPError.jth"
-#import "NPTask.jth"
+#import "NPObject.hje"
+#import "NPString.hje"
+#import "NPMutableString.hje"
+#import "NPArray.hje"
+#import "NPMutableArray.hje"
+#import "NPDictionary.hje"
+#import "NPMutableDictionary.hje"
+#import "NPSet.hje"
+#import "NPMutableSet.hje"
+#import "NPOrderedSet.hje"
+#import "NPPredicate.hje"
+#import "NPNumber.hje"
+#import "NPError.hje"
+#import "NPTask.hje"

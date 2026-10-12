@@ -1,4 +1,4 @@
-// lang-test/diamond_base.jth
+// lang-test/diamond_base.hje
 // 菱形继承与多重协议的前置声明文件
 
 #import <Foundation/Foundation.jeti>

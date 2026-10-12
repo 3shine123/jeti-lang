@@ -21,7 +21,7 @@ into "the test told me this feature cannot cross a TU boundary."
 ## The rule
 
 **Every instance method a class exposes publicly must be visible to every TU
-that links against it** — declare them in the shared `.jth`. Since R3, a method
+that links against it** — declare them in the shared `.hje`. Since R3, a method
 that exists only in an `@implementation` (TU-local private) no longer breaks the
 link: R1 gives the private tail slots no other TU indexes, R2 keeps its dispatch
 inside the owning TU, and the `__sig` fingerprint covers the shared segment only.
@@ -55,7 +55,7 @@ louder diagnostic, not a weaker one, so `EXPECT_FAIL_MATCH` looks for
 
 | Case | What it pins down |
 |---|---|
-| `01_basic` | Plain cross-TU method dispatch through a shared `.jth`. |
+| `01_basic` | Plain cross-TU method dispatch through a shared `.hje`. |
 | `02_inheritance` | Subclass allocated in the lib TU, driven through a base-class pointer — every send is a real cross-TU vtable dispatch, and the subclass's struct must physically embed the parent's ivars. |
 | `03_generic` | Monomorphised generic. **Requires the lib TU to name the instantiation** (`Stack<int *>`) inside a method body or variable declaration — instantiation is collected by *usage*, so an `@implementation` that never mentions it emits no specialised struct or vtable. |
 | `04_namespace` | `::` → `__` C symbol encoding must round-trip: the client names `Geo::Origin`, the lib defines it. |
@@ -65,9 +65,9 @@ louder diagnostic, not a weaker one, so `EXPECT_FAIL_MATCH` looks for
 | `08_class_method` | `+` methods dispatch through `JETI_META_VTABLE_$_X`, a *second* per-class layout that must agree across the link independently of the instance vtable. |
 | `09_layout_mismatch` | **Negative case.** Both TUs `@implementation` the same class, so each owns it and the linker rejects the duplicate metadata (rule R2). Must fail loudly and mention the diagnosis — the contract is "fails legibly", not merely "fails", so a case that crashed for an unrelated reason does not pass by accident. Marked with `EXPECT_FAIL` + `EXPECT_FAIL_MATCH` (checked at link *and* at run). |
 | `10_slots_manifest` | `--slots` manifest mode: the manifest defines the complete layout (methods unknown to it appended at the end, never renumbered), so TUs compiled with the same manifest link correctly even with different method sets. The manifest is also the `__sig` segment. |
-| `11_vtable_private_slots` | The legal split R3 exists for: the lib implements `Widget` plus a TU-local private helper, the client sees only the shared `.jth` and defines its own `App`. Under R1+R2+R3 the shared segments agree (the `__sig` guard stays silent) and each TU dispatches its own privates — the case runs to `run=42`. |
+| `11_vtable_private_slots` | The legal split R3 exists for: the lib implements `Widget` plus a TU-local private helper, the client sees only the shared `.hje` and defines its own `App`. Under R1+R2+R3 the shared segments agree (the `__sig` guard stays silent) and each TU dispatches its own privates — the case runs to `run=42`. |
 | `12_native_multi_input` | The compiler's own multi-input mode (`jetic main.jeti lib.jeti -o app`): one command transpiles each TU (its own jetic subprocess), compiles, and links — no manual clang. Same cross-TU dispatch as `01_basic`; marked with a `NATIVE` file so the runner drives the native path. |
-| `13_kvc_predicate` | KVC accessor tables ride the *same* metadata merge: the lib TU owns `Widget` and emits the strong `JETI_KVC_$_Widget` table while the client sees only the `.jth`. If the client's weak metadata won, `size` / `label` would resolve to nothing and the predicates would quietly print `0` instead of the expected hits. |
+| `13_kvc_predicate` | KVC accessor tables ride the *same* metadata merge: the lib TU owns `Widget` and emits the strong `JETI_KVC_$_Widget` table while the client sees only the `.hje`. If the client's weak metadata won, `size` / `label` would resolve to nothing and the predicates would quietly print `0` instead of the expected hits. |
 | `14_category_present` / `15_category_absent` | Category methods across TUs: the category TU contributes method bodies without claiming class ownership; present links and absent fails clearly. |
 | `16_category_protocol` | A category TU adds a protocol conformance to an owner class. The category constructor merges its protocol list into the owner's static metadata, and protocol symbols are weak-coalesced across TUs so `@protocol(P)` has one link-unit identity. |
 
@@ -75,9 +75,9 @@ louder diagnostic, not a weaker one, so `EXPECT_FAIL_MATCH` looks for
 
 ```
 NN_name/
-  model.jth      shared declarations — the only channel between the TUs
+  model.hje      shared declarations — the only channel between the TUs
   lib.jeti        "library" TU: defines the classes
-  main.jeti       "client" TU: sees only model.jth, has main()
+  main.jeti       "client" TU: sees only model.hje, has main()
   expected.txt  exact stdout the program must print (optional)
 ```
 
@@ -88,10 +88,10 @@ Notes that cost time when the cases were first written:
 - `id` is a lexer keyword — `- (int)id;` does not parse. Name it `widgetId`.
 - ARC rejects a bare `[x autorelease]`. Use `@noarc { }`, or have the factory
   method return `+1` and let the caller release.
-- Most cases need `#import <Foundation/Foundation.jth>`: the generated C gets
+- Most cases need `#import <Foundation/Foundation.hje>`: the generated C gets
   `NPObject` / `SEL` / `JETI_CLASS_$_*` from the C headers Foundation inlines.
 
 ## Not covered
 
-- Category-added protocols that are not declared in a shared category interface are only visible to the category TU; put the category method declaration in the shared `.jth` to keep the public vtable segment identical.
+- Category-added protocols that are not declared in a shared category interface are only visible to the category TU; put the category method declaration in the shared `.hje` to keep the public vtable segment identical.
 - Generic monomorphisation triggered only from a class-method return type.

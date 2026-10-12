@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 /* client TU: allocates Circle (lib TU) and drives it through a Shape pointer,

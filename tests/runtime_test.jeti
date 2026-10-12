@@ -1,7 +1,7 @@
 // NPRuntimeTest.h -> 专为测试终极 @ 关键字与运行时异常编写的测试文件
 // 基于 NPFoundation 框架的 Objective-C 风格黑魔法级测试
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -5,7 +5,7 @@
 // lexing — the definition never reaches the C prelude.
 // Track 2 (C): plain C bodies pass through verbatim and are expanded by the
 // C compiler as before.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 // ── jeti-track macros (expanded by jetic) ──

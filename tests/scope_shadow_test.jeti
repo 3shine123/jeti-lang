@@ -2,7 +2,7 @@
 // 专为 jetic 设计的「多层阴阳作用域遮蔽与生命周期逃逸」极限测试
 // 基准框架：NPFoundation
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

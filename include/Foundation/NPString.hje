@@ -1,7 +1,7 @@
 #ifndef NPSTRING_NH
 #define NPSTRING_NH
 
-#import <Foundation/NPObject.jth>
+#import <Foundation/NPObject.hje>
 
 typedef struct {
     size_t location;

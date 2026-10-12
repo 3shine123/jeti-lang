@@ -1,7 +1,7 @@
 #ifndef NPMUTABLEARRAY_NH
 #define NPMUTABLEARRAY_NH
 
-#import <Foundation/NPArray.jth>
+#import <Foundation/NPArray.hje>
 
 // Mutable counterpart of NPArray. Inherits NPArray's storage ivars
 // (_items / _count / _capacity) and the immutable querying API

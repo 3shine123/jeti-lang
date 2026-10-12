@@ -1,5 +1,5 @@
-#import "model.jth"
-#import <Foundation/Foundation.jth>
+#import "model.hje"
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 /* lib TU: defines the class and a helper the client can call. */

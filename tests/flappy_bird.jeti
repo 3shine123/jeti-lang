@@ -5,7 +5,7 @@
 #import <termios.h>
 #import <unistd.h>
 #import <sys/select.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ==========================================================
 // 1. 终端非阻塞模式控制（Tick 调整为 150ms，手感最佳）

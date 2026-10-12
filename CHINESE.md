@@ -188,7 +188,7 @@ jetic run hello.jeti
 
 ```jeti
 // app.jeti
-#import <Foundation/Foundation.jth>   // 纯声明——不内联任何东西
+#import <Foundation/Foundation.hje>   // 纯声明——不内联任何东西
 
 int main() {
     NPLog(@"hello %@", [NPString stringWithUTF8String:"world"]);
@@ -1128,7 +1128,7 @@ M1 限制（编译期强制）：`@defer` 必须直接位于块内；defer 体�
 
 ### `async T` —— async 方法修饰符
 
-裸 `await` 单用有个软肋：头文件里看不出方法会挂起。`async` 修饰符把 async-ness 扶正为**签名级标记**：写在返回类型之前、直接修饰**业务类型**（`async int`），`.jth` 里可见。裸 `NPTask<T>` 返回则相反——只是返回任务对象的同步方法。
+裸 `await` 单用有个软肋：头文件里看不出方法会挂起。`async` 修饰符把 async-ness 扶正为**签名级标记**：写在返回类型之前、直接修饰**业务类型**（`async int`），`.hje` 里可见。裸 `NPTask<T>` 返回则相反——只是返回任务对象的同步方法。
 
 ```jeti
 @interface Fetcher : NPObject
@@ -1188,26 +1188,26 @@ m[0] = @"hello";               // → [m setObject:@"hello" atIndex:0] —— �
 为了让写法仍然接近 Objective-C，跨 TU 编译时 jetic 会先扫描同一次构建中的全部 `.jeti` 输入，收集客户端实际使用的具体特化，再把需求传给各个 TU。包含泛型实现的 TU 负责生成特化；只有声明的客户端 TU 只引用同一个稳定的特化符号。因此不需要在库 TU 里写一个“假的变量”来触发实例化：
 
 ```jeti
-// model.jth
+// model.hje
 @interface Factory<T> : NPObject
 + (T)make;
 @end
 
 // lib.jeti：真正拥有实现的 TU
-#import "model.jth"
+#import "model.hje"
 @implementation Factory
 + (T)make { return nil; }
 @end
 
 // main.jeti：客户端 TU
-#import "model.jth"
+#import "model.hje"
 int main(void) {
     NPString *s = [Factory<NPString *> make];
     return s == nil ? 0 : 1;
 }
 ```
 
-用一次命令把两个 TU 放进同一个构建：`jetic main.jeti lib.jeti -I . -o app`。泛型实现必须随输入源码或模块一起提供；只有 `.jth` 声明而没有实现体时，编译器无法凭空生成方法。预编译库可以携带一组已经生成的特化，但不能为发布后才出现、且库中没有实现模板的新参数类型发明方法体。若两个 TU 同时提供同一个特化，仍按 owner/strong-metadata 规则在链接期报重复定义，避免悄悄选出不一致的 ABI。
+用一次命令把两个 TU 放进同一个构建：`jetic main.jeti lib.jeti -I . -o app`。泛型实现必须随输入源码或模块一起提供；只有 `.hje` 声明而没有实现体时，编译器无法凭空生成方法。预编译库可以携带一组已经生成的特化，但不能为发布后才出现、且库中没有实现模板的新参数类型发明方法体。若两个 TU 同时提供同一个特化，仍按 owner/strong-metadata 规则在链接期报重复定义，避免悄悄选出不一致的 ABI。
 
 这就是 Jeti 的取舍：调用语法接近 Objective-C，泛型语义和代码生成更接近 C++ 模板；类型参数是真实类型，特化按使用生成，未使用的特化不会进入最终程序。
 
@@ -1251,7 +1251,7 @@ container's element type is unchecked; add an explicit cast if the contents are 
 // 多参数：只有 V 被约束
 @interface Pair<K, V : Comparable> : NPObject { ... }
 
-// 子类必须重申继承的 bound（显式拼写——与共享 .jth 保留完整 ivar 布局
+// 子类必须重申继承的 bound（显式拼写——与共享 .hje 保留完整 ivar 布局
 // 同一哲学），且不得弱化
 @interface MutableBox<T : Greetable> : Box<T> { ... }
 ```
@@ -1376,7 +1376,7 @@ cargo test --workspace
 客户端随后只导入声明头：
 
 ```jeti
-#import <Foundation/Foundation.jth>    // 纯声明——不内联任何实现
+#import <Foundation/Foundation.hje>    // 纯声明——不内联任何实现
 
 int main() {
     NPString *s = [NPString stringWithUTF8String:"hello"];
@@ -1395,7 +1395,7 @@ jetic app.jeti -o app
 要点：
 
 - **无需记任何旗标**——主文件持有 `@implementation` 自动为强；纯声明客户端保持弱，这正是正确的（库的真表在链接中胜出）。
-- **自动链接**——jetic 找得到 `libjetifoundation.a`（二进制旁、`target/foundation`、`/opt/jeti/lib`、`/usr/local/lib/jeti` 或你的 `-L` 目录）就自动链。只对**纯声明客户端**生效：内联了 Foundation 实现（`Foundation.jeti`——直接或经导入的 `.jth` 传递）的 TU 会跳过，自包含程序与多 TU 构建永远见不到库的强 vtable。`-ffreestanding`、shared 模式、显式 `-ljetifoundation` 都会抑制自动链接。
+- **自动链接**——jetic 找得到 `libjetifoundation.a`（二进制旁、`target/foundation`、`/opt/jeti/lib`、`/usr/local/lib/jeti` 或你的 `-L` 目录）就自动链。只对**纯声明客户端**生效：内联了 Foundation 实现（`Foundation.jeti`——直接或经导入的 `.hje` 传递）的 TU 会跳过，自包含程序与多 TU 构建永远见不到库的强 vtable。`-ffreestanding`、shared 模式、显式 `-ljetifoundation` 都会抑制自动链接。
 - **`jeti_metaInit()`** 只对通过 `#import "*.jeti"` 获取实现的伞形构建（单 TU 构建、无任何 TU 持有元数据）**真正必需**。用预编译库——以及所有常规 `jetic` 工作流——元数据在加载期静态初始化，该调用是幂等空操作。
 - 客户端重实现库类，对归档而言是标准 C 覆盖语义（库成员未被引用就保持休眠）——但未实现方法的槽位是 NULL，所以派发到的方法必须全部自己实现。
 

@@ -4,38 +4,38 @@
 //
 //     #import <Foundation/Foundation.jeti>
 //
-// 按 `.jth`/`.jeti` 约定，纯声明伞头是 `Foundation.jth` —— 配合预编译库
+// 按 `.hje`/`.jeti` 约定，纯声明伞头是 `Foundation.hje` —— 配合预编译库
 // （tools/build-foundation-lib.sh）使用，让 Foundation 的实现只存一份。
 #include <stdint.h>
 #include <stddef.h>
 
 #include "jeti/runtime.h"
 
-#import "NPObject.jth"
+#import "NPObject.hje"
 #import "NPObject.jeti"
-#import "NPString.jth"
+#import "NPString.hje"
 #import "NPString.jeti"
-#import "NPMutableString.jth"
+#import "NPMutableString.hje"
 #import "NPMutableString.jeti"
-#import "NPArray.jth"
+#import "NPArray.hje"
 #import "NPArray.jeti"
-#import "NPMutableArray.jth"
+#import "NPMutableArray.hje"
 #import "NPMutableArray.jeti"
-#import "NPDictionary.jth"
+#import "NPDictionary.hje"
 #import "NPDictionary.jeti"
-#import "NPMutableDictionary.jth"
+#import "NPMutableDictionary.hje"
 #import "NPMutableDictionary.jeti"
-#import "NPSet.jth"
+#import "NPSet.hje"
 #import "NPSet.jeti"
-#import "NPMutableSet.jth"
+#import "NPMutableSet.hje"
 #import "NPMutableSet.jeti"
-#import "NPOrderedSet.jth"
+#import "NPOrderedSet.hje"
 #import "NPOrderedSet.jeti"
-#import "NPPredicate.jth"
+#import "NPPredicate.hje"
 #import "NPPredicate.jeti"
-#import "NPNumber.jth"
+#import "NPNumber.hje"
 #import "NPNumber.jeti"
-#import "NPError.jth"
+#import "NPError.hje"
 #import "NPError.jeti"
-#import "NPTask.jth"
+#import "NPTask.hje"
 #import "NPTask.jeti"

@@ -6,7 +6,7 @@
 //                   cannot use `_Generic`)
 //   @YES / @NO    — boxed BOOL
 //   @'c'          — boxed character
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main(void) {
     int i = 41;

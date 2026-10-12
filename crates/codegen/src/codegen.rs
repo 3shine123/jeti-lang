@@ -11,7 +11,7 @@ use attrs::Backend;
 /// `#line` emission context (plan 阶段 2): when enabled, `emit_stmt` emits a
 /// `#line <src> "<file>"` directive whenever the statement's mapped source
 /// position (via the preprocessor's SourceMap) differs from the last one
-/// emitted, so clang diagnostics point back at the `.jeti`/`.jth` the user
+/// emitted, so clang diagnostics point back at the `.jeti`/`.hje` the user
 /// wrote. Regions with no single source line (generated metadata, macro
 /// expansion past the invocation site) map to the virtual file
 /// `<jeti-generated>`; every function body entry resets to it first so user
@@ -228,7 +228,7 @@ fn vtable_sig_segment(
 /// and then mis-dispatch the awaited value — exactly what R3 exists to catch.
 ///
 /// The marker is derived from the *declaration* AST, which every TU sees (the
-/// owner from its `@implementation`, a client from the `#import`ed `.jth`), so
+/// owner from its `@implementation`, a client from the `#import`ed `.hje`), so
 /// both sides compute the same string without any extra metadata.
 ///
 /// Format: `<name>|async[:<business C spelling>]` — the type part is the
@@ -7766,7 +7766,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
                     //    this TU) → keep NULL; the slot is preserved for
                     //    layout stability and the owner TU's instance (strong
                     //    under R2) wins the merge with the real reference.
-                    //  * category-introduced method (declared in a shared .jth
+                    //  * category-introduced method (declared in a shared .hje
                     //    category @interface, implemented in another TU) →
                     //    reference `Owner_method` as a strong extern (D1
                     //    backup plan): the category TU emits the definition

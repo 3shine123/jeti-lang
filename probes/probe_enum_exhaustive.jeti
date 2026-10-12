@@ -1,7 +1,7 @@
 // Probe: enum switch exhaustiveness. A switch over a known enum without
 // `default:` must cover every member; a missing one is an error naming it.
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 enum Color { Red, Green, Blue };
 

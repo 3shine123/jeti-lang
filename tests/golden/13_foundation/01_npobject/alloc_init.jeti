@@ -1,6 +1,6 @@
 // test: alloc/init pattern (chained message send)
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Widget : NPObject {
     @public

@@ -1,7 +1,7 @@
 // Probe: NPSet / NPMutableSet / NPOrderedSet — uniqueness (isEqual:), value
 // semantics, order preservation, and for-in over allObjects.
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 int main() {

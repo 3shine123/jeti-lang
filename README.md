@@ -190,7 +190,7 @@ jetic run hello.jeti
 
 ```jeti
 // app.jeti
-#import <Foundation/Foundation.jth>   // declarations only — nothing inlined
+#import <Foundation/Foundation.hje>   // declarations only — nothing inlined
 
 int main() {
     NPLog(@"hello %@", [NPString stringWithUTF8String:"world"]);
@@ -1174,7 +1174,7 @@ Implementation: pure desugar (`crates/defer`, pipeline step 3.9 — after the `-
 
 ### `async T` — Async Method Modifier
 
-Bare `await` alone left one soft spot: a header cannot tell you whether a method suspends. The `async` modifier promotes async-ness to a **signature-level flag**: it sits before the return type and takes the **business type** directly (`async int`), visible in the `.jth`. A bare `NPTask<T>` return means the opposite — a synchronous method that merely returns a task object.
+Bare `await` alone left one soft spot: a header cannot tell you whether a method suspends. The `async` modifier promotes async-ness to a **signature-level flag**: it sits before the return type and takes the **business type** directly (`async int`), visible in the `.hje`. A bare `NPTask<T>` return means the opposite — a synchronous method that merely returns a task object.
 
 ```jeti
 @interface Fetcher : NPObject
@@ -1234,19 +1234,19 @@ Jeti's generics are deliberately different from Objective-C lightweight generics
 In a multi-TU build, the compiler first scans all `.jeti` inputs for concrete specializations and forwards that demand to every TU. A TU emits the specialization only when it contains the generic implementation body; declaration-only TUs emit references to the same mangled specialization. This makes the following work without a dummy variable in the library TU:
 
 ```jeti
-// model.jth — shared declaration
+// model.hje — shared declaration
 @interface Factory<T> : NPObject
 + (T)make;
 @end
 
 // lib.jeti — implementation TU
-#import "model.jth"
+#import "model.hje"
 @implementation Factory
 + (T)make { return nil; }
 @end
 
 // main.jeti — client TU
-#import "model.jth"
+#import "model.hje"
 int main(void) {
     NPString *s = [Factory<NPString *> make];
     return s == nil ? 0 : 1;
@@ -1298,7 +1298,7 @@ Type parameters accept class-level constraints — ObjC spelling (`T : id<Summab
 @interface Pair<K, V : Comparable> : NPObject { ... }
 
 // subclass must RE-DECLARE the inherited bound (explicit spelling, same
-// philosophy as full ivar layouts in shared .jth headers) and must not
+// philosophy as full ivar layouts in shared .hje headers) and must not
 // weaken it
 @interface MutableBox<T : Greetable> : Box<T> { ... }
 ```
@@ -1423,7 +1423,7 @@ The script transpiles each Foundation `.jeti` as its **own translation unit** (a
 Clients then import only the declaration header:
 
 ```jeti
-#import <Foundation/Foundation.jth>    // declarations only — no implementations inlined
+#import <Foundation/Foundation.hje>    // declarations only — no implementations inlined
 
 int main() {
     NPString *s = [NPString stringWithUTF8String:"hello"];
@@ -1442,7 +1442,7 @@ jetic app.jeti -o app
 Notes:
 
 - **No flags to remember** — a main file holding `@implementation` is strong automatically; declaration-only clients stay weak, which is correct (the library's tables win the link).
-- **Auto-link** — jetic links `libjetifoundation.a` automatically when it can find one (next to the binary, `target/foundation`, `/opt/jeti/lib`, `/usr/local/lib/jeti`, or your `-L` dirs). It only fires for **declaration-only clients**: a TU that inlines Foundation implementations (`Foundation.jeti`, directly or through an imported `.jth`) is skipped, so self-contained programs and multi-TU builds never see the library's strong vtables. `-ffreestanding`, shared mode, and an explicit `-ljetifoundation` all suppress the auto link.
+- **Auto-link** — jetic links `libjetifoundation.a` automatically when it can find one (next to the binary, `target/foundation`, `/opt/jeti/lib`, `/usr/local/lib/jeti`, or your `-L` dirs). It only fires for **declaration-only clients**: a TU that inlines Foundation implementations (`Foundation.jeti`, directly or through an imported `.hje`) is skipped, so self-contained programs and multi-TU builds never see the library's strong vtables. `-ffreestanding`, shared mode, and an explicit `-ljetifoundation` all suppress the auto link.
 - **`jeti_metaInit()`** is only *required* for umbrella builds that reach implementations through `#import "*.jeti"` (single-TU builds where no TU owns the metadata). With the precompiled library — and with every normal `jetic` workflow — metadata is statically initialized at load time and the call is an idempotent no-op.
 - Re-implementing a library class in a client is standard C override semantics against the archive (the library's member stays dormant unless referenced) — but slots for methods you do not implement stay NULL, so implement everything you dispatch.
 

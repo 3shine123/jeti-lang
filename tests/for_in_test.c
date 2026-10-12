@@ -252,7 +252,7 @@ __attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, uns
             "\n"
             "Re-running jetic does NOT help: the method sets really do differ. The usual\n"
             "cause is a method defined in an @implementation but absent from the shared\n"
-            ".jth, so only the TU holding the implementation sees it. Declare every\n"
+            ".hje, so only the TU holding the implementation sees it. Declare every\n"
             "method in the header, or build the affected classes as a single TU.\n"
             "See tests/multi_tu/ for worked examples of what does and does not link.\n"
             "\nMethods known to this TU:\n  %s\n",

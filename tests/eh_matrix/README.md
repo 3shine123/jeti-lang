@@ -110,7 +110,7 @@ JETIC=target/release/jetic ./tests/eh_matrix/gen_quality.sh
    即 use-after-free。最小复现：
 
    ```jeti
-   #import <Foundation/Foundation.jth>
+   #import <Foundation/Foundation.hje>
    // Holder 持有 NPString *_s；- (NPString *)text { return _s; }
    int main() {
        Holder *h = [[Holder alloc] init];

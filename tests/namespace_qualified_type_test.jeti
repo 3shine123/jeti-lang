@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ============================================================================
 // 1. 深层多级命名空间定义

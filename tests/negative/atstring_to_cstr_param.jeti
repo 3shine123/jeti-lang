@@ -1,5 +1,5 @@
 // #4 反向检查负例：@"..." 对象传入 C 串（char *）参数位 —— 静默乱码 bug，checker 必须拒绝。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 static void takes_cstr(const char *s) {

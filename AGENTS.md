@@ -1,7 +1,7 @@
 # AGENTS.md — Jeti Language Project
 
 > **Read first:** `doc/architecture.md` is the single source of truth for the current
-> architecture (pipeline, `.jth`/`.jeti` semantics, Foundation modes, owner/strong/weak
+> architecture (pipeline, `.hje`/`.jeti` semantics, Foundation modes, owner/strong/weak
 > metadata, vtable rules, EH backends). This file covers layout, commands, and the
 > rules code changes must follow.
 > **Source locations / debugging / LSP plan:** `doc/source_locations_debug_lsp_plan.md`
@@ -32,8 +32,8 @@ jeti-lang/
 │   └── jetic/               # CLI driver + pipeline (main.rs, pipeline.rs)
 ├── include/
 │   ├── jeti/                # runtime.h / runtime.c / runtime_freestanding.c
-│   └── Foundation/          # 9 classes, each as a .jth (decl) + .jeti (impl) pair,
-│                            #   plus Foundation.jth (decl umbrella) and
+│   └── Foundation/          # 9 classes, each as a .hje (decl) + .jeti (impl) pair,
+│                            #   plus Foundation.hje (decl umbrella) and
 │                            #   Foundation.jeti (self-contained umbrella)
 ├── tests/
 │   ├── multi_tu/            # 12 cross-TU scenarios (vtable/metadata rules)
@@ -49,16 +49,16 @@ jeti-lang/
 
 ## File Extension Convention
 
-- **`.jth`** — Jeti header: declarations (`@interface`, `@protocol`, typedefs, structs).
+- **`.hje`** — Jeti header: declarations (`@interface`, `@protocol`, typedefs, structs).
   Inlined by the preprocessor via `#import`, never compiled directly.
 - **`.jeti`** — Jeti implementation: `@implementation`, functions, `int main`.
   Two uses: compiled as its own translation unit (multi-TU mode), or inlined via
   `#import` (self-contained mode).
-- `#import` of `.jth`/`.jeti` is a jeti import; `#include` of `.h`/`.c` passes through to
-  the C compiler verbatim. `.jth` (not `.h`) avoids colliding with C/ObjC system headers.
+- `#import` of `.hje`/`.jeti` is a jeti import; `#include` of `.h`/`.c` passes through to
+  the C compiler verbatim. `.hje` (not `.h`) avoids colliding with C/ObjC system headers.
 - jetic always defines `__JETI__`; headers shared with plain C compilers guard
   jeti-only syntax with `#ifdef __JETI__` / `#else`.
-- A `.jth` consumed in multi-TU mode must keep **full struct layouts** (ivar section) —
+- A `.hje` consumed in multi-TU mode must keep **full struct layouts** (ivar section) —
   Jeti is a C superset, so `@public` ivars, struct fields, and member function pointers
   require clients to see the layout. Do not treat opaque structs as the default rule.
 
@@ -90,10 +90,10 @@ cargo test --workspace           # Rust unit tests
   `JETI_CLASS_$_NP*` symbols for zero gain). Same for lib names: `libjeti.a` /
   `libjetifoundation.a` (not libjetia*, a legacy spelling that was removed).
 - Mode names: **self-contained / unity mode** (`#import <Foundation/Foundation.jeti>`) and
-  **precompiled Foundation / multi-TU mode** (`#import <Foundation/Foundation.jth>` +
+  **precompiled Foundation / multi-TU mode** (`#import <Foundation/Foundation.hje>` +
   auto-linked `libjetifoundation.a`) — the recommended mode for real projects.
 - TU roles: **owner TU** (its main file holds the class's `@implementation`) and
-  **declaration-only client** (imports `.jth` only). Historical synonyms
+  **declaration-only client** (imports `.hje` only). Historical synonyms
   (`decl-only`, `pure header`, `P3 header`) are deprecated.
 
 ## Multi-TU / Metadata / Vtable Constraints (iron laws)
@@ -104,10 +104,10 @@ cargo test --workspace           # Rust unit tests
    implementations of the same class fail at link time with a duplicate symbol —
    by design. `-fstrong-metadata` **does not exist**; ownership is derived.
 2. **vtable layout (R1):** `[public segment]` = methods declared in the expanded
-   `#import` set (shared `.jth`), sorted; `[private segment]` = methods only in this
+   `#import` set (shared `.hje`), sorted; `[private segment]` = methods only in this
    TU's main file, appended at the end. Public-segment offsets are identical in all
    TUs. **Private methods only dispatch inside their owner TU** — cross-TU methods
-   must be declared in the shared `.jth`.
+   must be declared in the shared `.hje`.
 3. **`__sig` (R3):** the startup layout-signature check covers the **public segment
    only**; private tail differences are legal. A mismatch aborts loudly (never
    silently misdispatches).
@@ -142,8 +142,8 @@ cargo test --workspace           # Rust unit tests
 - **Parser discipline:** a failed `consume()` must not advance (it would eat the next
   declaration's first token); avoid positional line-number surgery when editing
   `parser.rs` (stale line numbers cut files — match content or diff against git).
-- **Do not resurrect deleted things:** `Foundation.decl.jth`, `make-decl-headers.sh`,
-  and `-fstrong-metadata` are gone on purpose. `Foundation.jth` = declarations only,
+- **Do not resurrect deleted things:** `Foundation.decl.hje`, `make-decl-headers.sh`,
+  and `-fstrong-metadata` are gone on purpose. `Foundation.hje` = declarations only,
   `Foundation.jeti` = self-contained umbrella.
 - **auto-link gating:** jetic auto-links `libjetifoundation.a` only for
   declaration-only clients (source-level transitive `#import` scan decides); a TU

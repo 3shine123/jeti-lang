@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ARC order 13: `goto` inside a @try body. The jump leaves the inner block
 // (so its local is released), stays inside the @try (so the @finally still

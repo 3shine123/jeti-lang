@@ -1,7 +1,7 @@
 #!/bin/bash
 # examples/03_LibUI/run_libui.sh — transpile, compile, link, run the libui-ng demo.
 #
-# Pure Jeti: the only sources are .jeti/.jth files. The demo inlines the wrapper
+# Pure Jeti: the only sources are .jeti/.hje files. The demo inlines the wrapper
 # (include/LibUI.jeti → one .c file), which is compiled and linked with the
 # Jeti runtime — no hand-written .c/.m files anywhere.
 #

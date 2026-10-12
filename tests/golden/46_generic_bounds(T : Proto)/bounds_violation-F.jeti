@@ -5,7 +5,7 @@
 //   'Box<T : Greetable>' — add <Greetable> to Cat's declaration or use a
 //   conforming type argument
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @protocol Greetable
 - (NPString *)greeting;

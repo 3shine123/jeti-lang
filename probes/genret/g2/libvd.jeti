@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 
 // Variant: the lib TU also mentions the instantiation via a plain variable.
 // The result must be the same specialization as g2: demand collection is

@@ -1,7 +1,7 @@
 #ifndef NPMUTABLEDICTIONARY_NH
 #define NPMUTABLEDICTIONARY_NH
 
-#import <Foundation/NPDictionary.jth>
+#import <Foundation/NPDictionary.hje>
 
 // Mutable counterpart of NPDictionary. Inherits the storage ivars
 // (_keys / _values / _count / _capacity) and the querying API

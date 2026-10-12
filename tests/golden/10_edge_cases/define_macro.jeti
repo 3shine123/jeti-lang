@@ -1,5 +1,5 @@
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 #define DOUBLE(x) ((x) * 2)
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

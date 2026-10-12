@@ -334,11 +334,11 @@ mod tests {
 
     #[test]
     fn basic_regions_spans_and_offsets() {
-        let c_text = "#include <stdio.h>\n\n#line 3 \"main.jeti\"\nint a = 1;\nint b = 2;\n#line 1 \"<jeti-generated>\"\nvoid glue(void) {}\nstatic int x;\n#line 7 \"lib.jth\"\nreturn7;\n";
+        let c_text = "#include <stdio.h>\n\n#line 3 \"main.jeti\"\nint a = 1;\nint b = 2;\n#line 1 \"<jeti-generated>\"\nvoid glue(void) {}\nstatic int x;\n#line 7 \"lib.hje\"\nreturn7;\n";
         let m = extract_source_map(c_text, &opts(&[]));
         assert_eq!(m.sources.len(), 2);
-        // Sorted by path: lib.jth < main.jeti.
-        assert_eq!(m.sources[0].path, "lib.jth");
+        // Sorted by path: lib.hje < main.jeti.
+        assert_eq!(m.sources[0].path, "lib.hje");
         assert_eq!(m.sources[0].id, 0);
         assert_eq!(m.sources[1].path, "main.jeti");
         assert_eq!(m.sources[1].id, 1);

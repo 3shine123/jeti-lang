@@ -3,7 +3,7 @@
 // Every case here must COMPILE AND RUN. The error paths live in
 // tests/negative/ (nullable_to_nonnull.jeti etc.) — this file is the positive
 // half: annotations that are correct must stay silent, and narrow must work.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Port : NPObject
 // Unannotated → unspecified, accepts anything (progressive adoption).

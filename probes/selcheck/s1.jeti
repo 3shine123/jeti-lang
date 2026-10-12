@@ -3,7 +3,7 @@
 //   s1b — undeclared selector on a typed receiver: checker ERROR
 //         (was a warning; the per-method scope-frame fix killed the
 //         receiver mis-resolution that forced the downgrade).
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main(void) {
     NPString *s = [[NPString alloc] init];

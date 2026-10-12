@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Block 比较器类型：返回 a < b（升序）
 typedef BOOL (^CompareBlock)(int, int);

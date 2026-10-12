@@ -5,7 +5,7 @@
 #import <termios.h>
 #import <unistd.h>
 #import <sys/select.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 // ==========================================================

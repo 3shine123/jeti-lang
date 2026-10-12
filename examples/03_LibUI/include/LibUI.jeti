@@ -1,4 +1,4 @@
-#import <LibUI.jth>
+#import <LibUI.hje>
 #import <Cocoa.jeti>
 #import <Foundation/Foundation.jeti>
 #include <stdio.h>

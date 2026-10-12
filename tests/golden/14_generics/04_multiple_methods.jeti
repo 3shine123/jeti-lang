@@ -1,5 +1,5 @@
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Test: generic class with get/set methods
 @interface Holder<T> : NPObject {

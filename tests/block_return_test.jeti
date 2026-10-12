@@ -1,5 +1,5 @@
 // Block literal return type inference (golden: no explicit ^T → inferred from return exprs)
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 typedef int (^IntBlock2)(int, int);
 typedef double (^DblBlock)(double);

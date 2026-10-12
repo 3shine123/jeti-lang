@@ -17,7 +17,7 @@
 #include <time.h>
 #include <setjmp.h>
 #import <Foundation/Foundation.jeti>
-#import "toml_editor_types.jth"
+#import "toml_editor_types.hje"
 
 // ── C helpers ────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 // `(NPObject *)0` (a block body that actually uses `self` here is already a
 // checker error). Statement position auto-drives (hosted, §5.1). Expected:
 //   main done
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #import <stdio.h>
 
 int main(void) {

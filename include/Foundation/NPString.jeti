@@ -1,4 +1,4 @@
-#import <Foundation/NPString.jth>
+#import <Foundation/NPString.hje>
 #import <Foundation/NPObject.jeti>
 #include <string.h>
 #include <ctype.h>

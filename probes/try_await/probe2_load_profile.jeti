@@ -21,7 +21,7 @@
 //     sync context too.
 //   * `user.userID->_cstr` — the properties are real @property declarations,
 //     so their dot access is the supported path.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #import <stdio.h>
 
 @interface User : NPObject

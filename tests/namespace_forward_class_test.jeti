@@ -1,7 +1,7 @@
 // lang-test/namespace_forward_class_test.jeti
 // 前向声明 @class + 跨命名空间继承 + @using 组合测试
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @namespace Engine::Graphics
     @interface Renderable

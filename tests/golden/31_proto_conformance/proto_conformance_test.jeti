@@ -1,5 +1,5 @@
 // Protocol conformance: all required methods implemented — must compile cleanly.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 @protocol Drawable

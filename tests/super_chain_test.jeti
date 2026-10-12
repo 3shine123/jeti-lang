@@ -1,5 +1,5 @@
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // 3-level inheritance chain testing [super method] dispatch
 

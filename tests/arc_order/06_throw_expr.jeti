@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ARC order 06: `@throw <expr>` — the thrown expression must be fully
 // evaluated before the enclosing locals are released. The old analyzer only

@@ -5,7 +5,7 @@
 两个 TU 分工完全合法：
 
 * `lib.jeti` 实现 `Widget`，外加一个**头文件没声明**的私有方法 `privateHelper`；
-* `main.jeti` 只通过 `model.jth` 的声明调用 `Widget`，另外定义自己的类 `App`。
+* `main.jeti` 只通过 `model.hje` 的声明调用 `Widget`，另外定义自己的类 `App`。
 
 R1/R2/R3 合力下的预期行为：
 

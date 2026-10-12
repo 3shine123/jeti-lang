@@ -1,6 +1,6 @@
 // test: @using basic — import single class with short name
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @namespace Game
     @interface Player : NPObject {

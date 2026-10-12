@@ -3,7 +3,7 @@
 /* NEGATIVE CASE — the suite asserts this one FAILS, loudly and legibly.
  *
  * Jeti's uniform vtable is built per translation unit from the set of instance
- * method names that TU sees. Here `model.jth` declares only `show`, so the
+ * method names that TU sees. Here `model.hje` declares only `show`, so the
  * client TU's layout has one slot. The lib TU implements an EXTRA method that
  * the header never mentions, so its layout has two. The linker weak-merges the
  * two vtable instances into a single allocation, and dispatch through the

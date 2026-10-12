@@ -4,7 +4,7 @@
 // returns NULL); plain arithmetic ternaries are untouched. Expected:
 //   r=10
 //   z=10 d=1.0
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #import <stdio.h>
 
 @interface Svc : NPObject

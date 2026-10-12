@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Negative: M1 cannot lower a switch that mixes a plain constant `case` arm
 // with pattern arms — the constant arm needs the original C body, while the

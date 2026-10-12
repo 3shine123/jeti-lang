@@ -1,4 +1,4 @@
-#import "dog.jth"
+#import "dog.hje"
 @implementation Dog (Tricks)
 - (int)trickCount { return 3; }
 @end

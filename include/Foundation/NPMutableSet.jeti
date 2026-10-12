@@ -1,4 +1,4 @@
-#import <Foundation/NPMutableSet.jth>
+#import <Foundation/NPMutableSet.hje>
 #include <string.h>
 #include <stdlib.h>
 
@@ -62,7 +62,7 @@
 }
 
 // addObject:/_grow/addObjectsFromArray: are implemented on NPSet (the vtable
-// slots live there — see the note in NPSet.jth). The mutable subclass only
+// slots live there — see the note in NPSet.hje). The mutable subclass only
 // adds removal.
 
 // Remove by identity of position after an isEqual: scan; the tail shifts down

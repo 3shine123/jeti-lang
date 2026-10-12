@@ -2,7 +2,7 @@
 // (The desugar's own _N-suffixed temporaries ARE declared and stay legal —
 // only the never-declared runtime globals are reserved.)
 #include "jeti/runtime.h"
-#import "Foundation/NPObject.jth"
+#import "Foundation/NPObject.hje"
 #import "Foundation/NPObject.jeti"
 
 int main() {

@@ -10,7 +10,7 @@
 //   mut count=2 first=alice
 //   set count=2 first=alice
 //   nilpred count=3
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 @interface Person : NPObject {

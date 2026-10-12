@@ -1,9 +1,9 @@
 #ifndef NPSET_NH
 #define NPSET_NH
 
-#import <Foundation/NPObject.jth>
-#import <Foundation/NPArray.jth>
-#import <Foundation/NPPredicate.jth>
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPArray.hje>
+#import <Foundation/NPPredicate.hje>
 
 // Immutable unordered collection of unique objects — the ObjC NSSet model.
 //

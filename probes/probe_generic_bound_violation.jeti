@@ -3,7 +3,7 @@
 // A silent acceptance means bounds are parsed-as-decorations (ObjC lightweight
 // style) or ignored entirely.
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @protocol Greetable
 - (NPString *)greeting;

@@ -62,7 +62,7 @@ Result *result2 = try await [service performTask];
 
 ### 2.1 用户完整示例(第二批定案,2026-10-10;验收基准)
 
-> 原例为 NS 拼写,按本节头注纪律转写:Foundation.h→Foundation.jth、
+> 原例为 NS 拼写,按本节头注纪律转写:Foundation.h→Foundation.hje、
 > NSObject→NPObject、NSString→NPString、NSArray→NPArray、NSLog→NPLog。
 > 展示形态:语句位 IIFE 异步块(两例)、`try await` + 尾随 `throws`(§9)、
 > async × 泛型返回(§9.2)、`try await` 与 `@try` 共存(例1)、`@[]` 数组
@@ -98,7 +98,7 @@ Result *result2 = try await [service performTask];
 
 ```objc
 // 例2:async 方法尾随 throws;异步块定义于同步方法体内,定义即调用
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface User : NPObject
 @property (nonatomic, copy) NPString *name;

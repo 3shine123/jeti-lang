@@ -1,4 +1,4 @@
-// Foundation/NPTask.jth —— `NPTask<T>` 的声明面（路线 A：薄别名，**不是** Foundation 类）。
+// Foundation/NPTask.hje —— `NPTask<T>` 的声明面（路线 A：薄别名，**不是** Foundation 类）。
 //
 // `NPTask<T>` 是**任务句柄的类型名**：语言侧 `async NPTask<int>`、变量、参数、ivar 位
 // 合法；生成 C 里统一渲染为运行时句柄 `NPTask *`（`include/jeti/runtime.h`）——没有
@@ -14,9 +14,9 @@
 //     await t                 → jeti_task_await(t)     // 未 start 自动 start，取结果
 //     await [f compute:1]     → create + start + await // 形态 C 糖
 //
-// 本头不声明任何符号：`NPTask` 的 C 类型来自 jeti/runtime.h（Foundation.jth 已包含）。
-// 它存在只为保持「每个 Foundation 类型都有 .jth/.jeti 对」的目录约定，以及给
-// `#import <Foundation/NPTask.jth>` 一个合法落点。
+// 本头不声明任何符号：`NPTask` 的 C 类型来自 jeti/runtime.h（Foundation.hje 已包含）。
+// 它存在只为保持「每个 Foundation 类型都有 .hje/.jeti 对」的目录约定，以及给
+// `#import <Foundation/NPTask.hje>` 一个合法落点。
 #ifndef JETI_FOUNDATION_NPTASK_NH
 #define JETI_FOUNDATION_NPTASK_NH
 #endif

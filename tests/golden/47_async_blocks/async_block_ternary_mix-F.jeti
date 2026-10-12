@@ -2,7 +2,7 @@
 // with an arithmetic value is NOT a valid await operand — the checker must
 // reject it ("ternary branches have incompatible types"). Kept in-tree so a
 // checker regression that silently accepts the mix fails the suite.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Svc : NPObject
 - (async int)a:(int)x;

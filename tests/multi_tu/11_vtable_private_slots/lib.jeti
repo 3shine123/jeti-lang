@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 
 // Library TU: implements `Widget` and adds a private helper the header never
 // declares. A private method must only ever occupy a slot that no other TU

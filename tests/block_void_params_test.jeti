@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // `^T(void)` and `^T()` must both mean "no parameters" — the first is the C
 // spelling, the second the ObjC one.

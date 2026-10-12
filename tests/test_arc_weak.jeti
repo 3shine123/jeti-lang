@@ -1,5 +1,5 @@
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Minimal NSObject-like class for ARC weak ref test
 @interface MyObject : NPObject

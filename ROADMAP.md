@@ -28,7 +28,7 @@
 - [x] **Container classes** — `NPSet` / `NPMutableSet` / `NPOrderedSet` exist
   (isEqual: value semantics, insertion order preserved by NPOrderedSet;
   mutator slots live on NPSet so the subclass vtables resolve — see the
-  notes in `NPSet.jth`).
+  notes in `NPSet.hje`).
 - [x] **`NPPredicate`** (the `NSPredicate` model) — shipped: a runtime
   format-string parser + evaluation engine (`NPPredicate.jeti`), compile-time KVC
   accessor tables (`JETI_KVC_$_X`, see `doc/architecture.md` §12) and the host

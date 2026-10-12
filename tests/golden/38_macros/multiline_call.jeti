@@ -6,7 +6,7 @@
 // call had to be closed on one line. The lines it collapses are attributed to
 // the line the call *starts* on, so a diagnostic inside (or after) the
 // expansion still names the line the author wrote.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 // jeti-track bodies (contain message sends) — expanded by jetic, not clang.

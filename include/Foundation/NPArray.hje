@@ -1,8 +1,8 @@
 #ifndef NPARRAY_NH
 #define NPARRAY_NH
 
-#import <Foundation/NPObject.jth>
-#import <Foundation/NPPredicate.jth>
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPPredicate.hje>
 
 // Generic since the modernization pass: `NPArray<T>` specializes via
 // monomorphization (objectAtIndex: returns T, addObject-style params take T).

@@ -1,5 +1,5 @@
 // 差分用例 3:嵌套 @finally 执行顺序 —— inner finally 在传播给外层 catch 之前执行
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main() {
     @try {

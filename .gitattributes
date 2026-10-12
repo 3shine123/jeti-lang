@@ -1,3 +1,3 @@
 *.jeti linguist-language=Objective-C
-*.jth linguist-language=Objective-C
+*.hje linguist-language=Objective-C
 tests/*.c linguist-generated=true

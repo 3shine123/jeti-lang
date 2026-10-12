@@ -2,7 +2,7 @@
 #import <stdlib.h>
 #import <string.h>
 #import <time.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // ==========================================================
 // 1. @class 前向声明测试 (白名单过滤 BOOL, id 等)

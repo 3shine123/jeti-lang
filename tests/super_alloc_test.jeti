@@ -1,7 +1,7 @@
 // Super class-method dispatch: `[super msg]` inside a class method (+)
 // must dispatch through the PARENT's meta vtable (`class_vtable`), not the
 // uniform instance vtable (which has no class-method members → invalid C).
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Animal : NPObject
 + (NPString *)kingdom;

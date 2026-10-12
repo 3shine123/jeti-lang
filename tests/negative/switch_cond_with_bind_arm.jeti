@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 // Negative: a dangling-comparison arm (`case > 10:`) coexisting with a
 // type-binding or object-literal arm. The object arm forces the switch subject

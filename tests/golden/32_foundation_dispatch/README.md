@@ -14,9 +14,9 @@ ObjC 多路分发的标准词汇补齐（**Sep 2026**，路线图待做 #1）。
 
 | 方法 | 声明位置 | 实现路径 | 改动层 |
 |------|----------|----------|--------|
-| `isKindOfClass:` | `NPObject.jth` 的 `jeti_root`（全类继承） | runtime helper `jeti_isKindOfClass` 沿 `isa->superclass` 链比较 | runtime.c + Foundation |
+| `isKindOfClass:` | `NPObject.hje` 的 `jeti_root`（全类继承） | runtime helper `jeti_isKindOfClass` 沿 `isa->superclass` 链比较 | runtime.c + Foundation |
 | `respondsToSelector:` | **无声明**（编译器伪方法） | codegen MsgSend 特判 → `jeti_resp_<member>(recv)`：`__o && ((struct jeti_vtable *)__o->isa->vtable)->member != 0` | codegen |
-| `isEqual:` | `NPObject.jth` 的 `jeti_root` | 根类默认指针相等（同 NSObject）；`NPString`/`NPNumber` 按内容重写 | Foundation |
+| `isEqual:` | `NPObject.hje` 的 `jeti_root` | 根类默认指针相等（同 NSObject）；`NPString`/`NPNumber` 按内容重写 | Foundation |
 
 ## respondsToSelector: 设计要点（编译器伪方法）
 

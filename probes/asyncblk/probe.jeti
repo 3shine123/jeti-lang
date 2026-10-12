@@ -2,7 +2,7 @@
 // Shapes: full form (void / object / scalar return), ellided form, IIFE at
 // statement position (auto-drive, hosted), bare literal (created ≠ executed).
 #include <stdio.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Logger : NPObject
 - (void)log:(NPString *)msg;

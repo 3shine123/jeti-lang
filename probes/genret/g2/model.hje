@@ -1,7 +1,7 @@
 // g2 — 跨 TU：实例化只出现在类方法发送的 receiver 处（非变量声明）。
 // jetic 的 multi-input 驱动会把这个使用点收集后转发给 lib TU，因此
 // lib.jeti 无需写一个假的变量来触发 Factory<NPString *> 的真单态化。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Factory<T> : NPObject
 + (T)make;

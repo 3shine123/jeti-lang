@@ -1,7 +1,7 @@
 // g1 — 多实例化同 TU：两个特化的类方法返回类型互不串扰。
 // 检查点（生成 C）：Box_NPString_ptr 与 Box_NPNumber_ptr 两套 vtable 的
 // defaultValue cast 分别是 NPString * / NPNumber *，不是 erased id。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Box<T> : NPObject
 + (T)defaultValue;

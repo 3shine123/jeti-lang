@@ -3,7 +3,7 @@
 // 先例），经泛型 T 流出后 call-site 不得双重 release；-value 同。
 // 检查点：-farc 编译干净；生成 C 的 call-site 对返回值不做多余释放；
 // vtable cast 带特化返回类型。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 @interface Box<T> : NPObject

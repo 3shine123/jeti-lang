@@ -1,6 +1,6 @@
 // 基于 NPFoundation 框架的 Objective-C 风格工具类测试
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -68,7 +68,7 @@ pub struct Pipeline {
     pub no_ctype_probe: bool,
     /// `-line-directives` (DEFAULT ON): emit `#line <src> "<file>"` in the
     /// generated C (plan 阶段 2), so clang diagnostics point back at the
-    /// `.jeti`/`.jth`. `-fno-line-directives` turns it off.
+    /// `.jeti`/`.hje`. `-fno-line-directives` turns it off.
     pub line_directives: bool,
     /// `-np-map` (plan 阶段 4): extract a versioned sidecar source map from
     /// the FINAL generated C. The map is stashed in [`Pipeline::last_source_map`]
@@ -467,7 +467,7 @@ impl Pipeline {
         cg.owned_classes = owned_classes;
         // 阶段 2: `-line-directives` emits `#line` at user-statement positions
         // (mapped through the preprocessor's SourceMap) so clang diagnostics
-        // point back at the .jeti/.jth. Off by default; -rewrite-jeti output
+        // point back at the .jeti/.hje. Off by default; -rewrite-jeti output
         // follows the same flag (a reviewer can inspect the directives).
         let line_sm = if self.line_directives { Some(&pre.source_map) } else { None };
         let c_code = emit_unit_with_headers_mapped(&cg, &pre.c_headers, &self.search_dirs, self.no_libc, self.backend, !self.no_comments, self.eh_checked, line_sm);
@@ -646,7 +646,7 @@ fn translate_lines(msg: &str, sm: &jeti_cst::source_map::SourceMap) -> String {
 /// Only `@interface` declarations count (`is_implementation: false`). A
 /// selector that appears solely in an imported `@implementation` is private to
 /// the file that defines it: counting it made the library TU (which imports
-/// `*.jeti`) and a client TU (which sees only `*.jth`) disagree on where a
+/// `*.jeti`) and a client TU (which sees only `*.hje`) disagree on where a
 /// property-synthesised accessor such as `NPError.localizedDescription` sits,
 /// so their layouts split. Restricting to `@interface` makes the two align.
 ///

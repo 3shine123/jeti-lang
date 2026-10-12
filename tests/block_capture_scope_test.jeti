@@ -1,6 +1,6 @@
 // Block capture rewriting must be function-granular:
 // a __block var in main() must NOT corrupt same-named params/locals elsewhere.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 typedef int (^AddBlock)(int);
 

@@ -6,7 +6,7 @@
 //   p3 a=0 b=1   (NOT (age = 30))
 //   p4 a=0 b=1   (age BETWEEN {10, 20})
 //   p5 a=1 b=0   (name LIKE 'a*i*e')
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 
 @interface Person : NPObject {

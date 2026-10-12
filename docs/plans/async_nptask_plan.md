@@ -2,7 +2,7 @@
 
 > 状态：**设计定稿（2026-10-09 定案）；入口语义已实施**——hosted 语句位自动驱动已落地
 > （`crates/async`：`drive_entry_call` / `lower_task_starts_expr(drive=true)`），golden 37 绿；
-> Foundation `NPTask.jth/.jeti` 薄壳与单态化接线尚未实施（见 §实施计划）。本文取代 `NPAsync<T>` 声明标记旧案（见
+> Foundation `NPTask.hje/.jeti` 薄壳与单态化接线尚未实施（见 §实施计划）。本文取代 `NPAsync<T>` 声明标记旧案（见
 > `doc/archive/agents-history-2026-10.md` "NPAsync<T> 声明标记"节，该案被本设计反转）。
 > `@await` 的表达式位语法（`@` 前缀、状态机 desugar、C++20 式"体内自证"判定）沿用既有
 > M1/M2 定案，不在本文重复；本文只定义**声明侧标记、任务类型与调度语义**的新一轮反转。
@@ -51,7 +51,7 @@
 ## 语法
 
 ```objc
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Fetcher : NPObject
 - (async NPTask<int>)compute:(int)n;   // 异步方法：会挂起，完成后给 int
@@ -78,7 +78,7 @@ int main(void) {
 | 规则 | 内容 |
 |------|------|
 | `async` 修饰符 | **正式定义为返回类型前的方法修饰符**，不是类型限定符：`(async NPTask<int>)`、`(async NPTask<void>)`。parser 在返回类型位识别裸关键字 `async`，要求其后恰为 `NPTask<T>`；`async int`、`async NPString *` 等一律 error（`'async' requires return type 'NPTask<T>'`）。interface 与 implementation 必须同时标或同时不标（签名一致性检查，沿用既有哲学） |
-| `NPTask<T>` | 任务**句柄**的类型名（路线 A：**不是** Foundation 类，无单态化、无消息派发）；生成 C 统一 `NPTask *`，Foundation 侧只有 `NPTask.jth`/`NPTask.jeti` 薄别名壳 + 运行时 C API。`T` 允许 `int`/对象指针/`void`。变量、参数、ivar 位**合法**（与 NPAsync 旧案相反——任务句柄本来就是值） |
+| `NPTask<T>` | 任务**句柄**的类型名（路线 A：**不是** Foundation 类，无单态化、无消息派发）；生成 C 统一 `NPTask *`，Foundation 侧只有 `NPTask.hje`/`NPTask.jeti` 薄别名壳 + 运行时 C API。`T` 允许 `int`/对象指针/`void`。变量、参数、ivar 位**合法**（与 NPAsync 旧案相反——任务句柄本来就是值） |
 | 无 async 的 `NPTask<T>` 返回 | 合法同步方法，返回任务对象。其任务体**不得含 `@await`**：无 async 修饰却体内含 `@await` → **error**（修饰符是签名的一部分，撒谎直接 error——比 NPAsync 时代的 warning 更干净，因为现在签名有能力说真话） |
 | async 方法体内无 `@await` | error：`'X' is declared 'async' but its body never suspends`（防修饰符撒谎；对齐旧案"必须真挂起"哲学） |
 | 裸 `T` 返回 + 体内 `@await` | error：`'X' contains '@await' but is not declared 'async NPTask<T>'`（原 warning 升级——现在不是"忘了标"，是"签名在撒谎"） |
@@ -101,7 +101,7 @@ int y = @await [f compute:2];       // 形态 C：@await 调用表达式 → 糖
 | `@await` 非 task | `@await` 作用于非 `NPTask` 表达式 → error（`'@await' requires an async call or an 'NPTask'`） |
 | 环等待 | task 体内 `@await` 自身句柄（直接或经引用环）→ 运行时检测 abort（`jeti_task_await` 入口查环）；checker 只拦直接自等 |
 | `NPTask<void>` | `@await t` 合法（等完成，无值可取）；`[task start]` 同普通任务 |
-| 跨 TU | `async` 修饰符是签名一部分：`.jth` 声明与 `.jeti` 实现必须一致，不一致 → 链接期由 `__sig` 捕获（返回类型进签名哈希）+ 编译期对账 error |
+| 跨 TU | `async` 修饰符是签名一部分：`.hje` 声明与 `.jeti` 实现必须一致，不一致 → 链接期由 `__sig` 捕获（返回类型进签名哈希）+ 编译期对账 error |
 
 ## 静态分析（checker 新增）
 
@@ -146,20 +146,20 @@ void  jeti_sched_run(void);            /* 泵：跑完就绪队列中所有可�
 | 零 libc | `runtime_freestanding.c` 不引 `<stdlib.h>`/`<pthread.h>`；`<thread>/<future>` 类托管设施明确**不做**（C++ 标准库 hosted-only 的教训：future 绑条件变量即失去裸机） |
 | 挂起事件源 | 裸机无阻塞 I/O；`@await` 的真实来源是中断/DMA 回调调 `jeti_task_mark_ready`。协作式单线程下无抢占 = 无数据竞争 |
 
-## Foundation 壳层（`include/Foundation/NPTask.jth` / `NPTask.jeti`）——路线 A：薄别名
+## Foundation 壳层（`include/Foundation/NPTask.hje` / `NPTask.jeti`）——路线 A：薄别名
 
 **`NPTask<T>` 不是 Foundation 类，而是任务句柄的类型名。** 语言侧 `async NPTask<int>`、
 变量、参数、ivar 位合法；生成 C 里统一渲染为运行时句柄 `NPTask *`（`include/jeti/runtime.h`）——
 **无单态化类**（不存在 `NPTask_int`）、无消息派发、不进 vtable。
 
-- `NPTask.jth` 是声明面（说明 + 落点，**不声明任何符号**），`NPTask.jeti` 是空壳；伞头分别导入
-  （声明伞头 `Foundation.jth` 导入 `.jth`；自包含伞头 `Foundation.jeti` 导入两个）。
+- `NPTask.hje` 是声明面（说明 + 落点，**不声明任何符号**），`NPTask.jeti` 是空壳；伞头分别导入
+  （声明伞头 `Foundation.hje` 导入 `.hje`；自包含伞头 `Foundation.jeti` 导入两个）。
 - `tools/build-foundation-lib.sh` 按与跳过 `Foundation.jeti` 同一理由跳过 `NPTask.jeti`——没有 vtable 可验。
 - `[t start]` / `@await` **不是消息发送**，desugar 期直接降为 `jeti_task_*` C API：
   `[t start];`（hosted 语句位）→ `jeti_task_await(t)`；`@await t` → `jeti_task_await(t)`（未 start 自动 start）；
   `@await [f compute:1]` → create + start + await。
 - 机制层 C API 在 hosted 与裸机都完整可用——句柄本来就只是 C 类型，与「裸机不链 Foundation」无关。
-- 注意 KVC 门控教训：新增 .jth 的 import 闭包改动后必须复跑 tests/ 全量基线。
+- 注意 KVC 门控教训：新增 .hje 的 import 闭包改动后必须复跑 tests/ 全量基线。
 
 > 存档（未采纳）：路线 B = `NPTask<T> : NPObject` 真泛型类 + 单态化类型键，壳持 `jeti_task *`、
 > 暴露 `- (void)start`。不采纳原因：任务句柄是**值**，而裸机不链 Foundation——做成类会把
@@ -192,7 +192,7 @@ void  jeti_sched_run(void);            /* 泵：跑完就绪队列中所有可�
 
 - `crates/async` desugar 改造：async 方法编译为 step_fn 状态机（活过 await 的局部变量提升进 task 帧，释放结算归 ARC 汇合点——M3 既有思路）；裸调用 → `jeti_task_create`（lazy，不 start）；`@await task` → `jeti_task_await`；`@await 调用` → create+start+await 糖。
 - 返回类型从 `T` 改为 `NPTask<T>*`：vtable、`__sig`（返回类型进签名哈希）、multi-TU 元数据联动；`-emit-bridge-header` 对 async 方法特判（跳过或按 task 签名发 wrapper）。
-- Foundation 增 `NPTask.jth`/`NPTask.jeti` **薄别名壳**（路线 A，非单态化类——见 §Foundation 壳层）；改动后复跑 tests/ 全量。
+- Foundation 增 `NPTask.hje`/`NPTask.jeti` **薄别名壳**（路线 A，非单态化类——见 §Foundation 壳层）；改动后复跑 tests/ 全量。
 - hosted 语句位入口自动驱动保留（hosted-only；无 main 退出兜底泵）；裸机不泵。
 - 验收：`tests/golden/` 既有 async golden 更新 + 新增 lazy/双 await/NPTask 变量传递用例；`./test_all.sh`、`multi_tu`、`cargo test --workspace` 全绿。
 

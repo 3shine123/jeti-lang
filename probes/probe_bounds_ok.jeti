@@ -5,7 +5,7 @@
 //   - multi-param bounds: Pair<K, V : Comparable> constrains only V
 //   - subclass re-declares the bound; instantiation checks along the chain
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @protocol Greetable
 - (NPString *)greeting;

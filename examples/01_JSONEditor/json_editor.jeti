@@ -11,7 +11,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#import "json_editor_types.jth"
+#import "json_editor_types.hje"
 
 // Raw-mode input reader: handles arrow keys for cursor movement, no echo of escape sequences
 // Falls back to fgets when stdin is not a terminal (piped input)

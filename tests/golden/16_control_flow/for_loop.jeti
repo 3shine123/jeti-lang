@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main() {
     int sum = 0;

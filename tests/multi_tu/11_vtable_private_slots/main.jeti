@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 // Client TU: calls `Widget` through the public header only, and defines its own

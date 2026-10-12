@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 typedef struct { int x; int y; } Point;
 typedef enum { RED, GREEN, BLUE } Color;

@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 @implementation Shape : NPObject

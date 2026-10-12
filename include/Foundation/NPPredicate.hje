@@ -1,7 +1,7 @@
 #ifndef NPPREDICATE_NH
 #define NPPREDICATE_NH
 
-#import <Foundation/NPObject.jth>
+#import <Foundation/NPObject.hje>
 
 // Predicate object — the ObjC NSPredicate model, backed by compile-time KVC
 // accessor tables (JETI_KVC_$_<Class>, emitted by codegen when this header is

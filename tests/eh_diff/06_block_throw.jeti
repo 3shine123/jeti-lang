@@ -1,6 +1,6 @@
 // 差分用例 6:block 字面量内 @throw —— checked 支持(block 体按独立函数降级,
 // 旗标跨 invoke 边界保留,调用方守卫尾段接管)
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 typedef void (^ThrowerBlock)(void);
 

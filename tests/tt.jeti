@@ -1,7 +1,7 @@
 // NPKeywordTest.h -> 专为测试 @ 关键字编写的进阶工具类
 // 基于 NPFoundation 框架的 Objective-C 风格高阶测试
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -7,7 +7,7 @@
  * ───────────────────────────────────────────────────────────────────────── */
 
 #import <Foundation/Foundation.jeti>
-#import <LibUI.jth>
+#import <LibUI.hje>
 /* Single-TU build: the wrapper's implementation is inlined into this same
  * translation unit. (jetic's uniform-vtable layout is currently per-TU, so
  * classes defined in a separate TU must not mix selector sets — inlining

@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 
 /* The owner TU never sees this category declaration. The category TU must
    publish the conformance into Widget's owner metadata at startup. */

@@ -5,7 +5,7 @@
 // continue/break firing body defers, NO double-fire of outer defers on break,
 // nested plain blocks, same-function @throw, block-literal fresh scope, ARC
 // order (defer runs before the scope-end release). See AGENTS.md `@defer`.
-#import "Foundation/Foundation.jth"
+#import "Foundation/Foundation.hje"
 #include <stdio.h>
 
 @interface Tracker : NPObject

@@ -1,5 +1,5 @@
 // Negative: inserting a boxed scalar into a typed container must be rejected.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main() {
     NPMutableArray<NPString *> *m = [[NPMutableArray<NPString *> alloc] init];

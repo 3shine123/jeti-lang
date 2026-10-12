@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 /* client TU: hands a Jeti block to the lib TU, which stores and later fires

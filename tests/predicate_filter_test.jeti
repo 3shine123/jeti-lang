@@ -7,7 +7,7 @@
 //
 // The program self-checks: a mismatch prints FAIL and the exit status is
 // non-zero, so test_all.py reports a regression as a failure.
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <string.h>
 

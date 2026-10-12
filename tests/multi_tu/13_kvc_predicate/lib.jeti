@@ -1,4 +1,4 @@
-#import "model.jth"
+#import "model.hje"
 #include <stdio.h>
 
 /* library TU: owns Widget's @implementation, so it emits the strong metadata

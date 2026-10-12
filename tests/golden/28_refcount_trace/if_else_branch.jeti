@@ -1,5 +1,5 @@
 #include "jeti/runtime.h"
-#import "Foundation/NPObject.jth"
+#import "Foundation/NPObject.hje"
 #import "Foundation/NPObject.jeti"
 
 @interface Item : NPObject {

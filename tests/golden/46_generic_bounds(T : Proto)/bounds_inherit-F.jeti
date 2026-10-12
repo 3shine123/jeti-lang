@@ -4,7 +4,7 @@
 //   2) LoudBox re-declares 'Loud', which is unrelated to (weaker than)
 //      the inherited bound 'Greetable'
 
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @protocol Greetable
 - (NPString *)greeting;

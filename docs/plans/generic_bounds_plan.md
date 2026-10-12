@@ -82,8 +82,8 @@ error: 'NPNumber' does not conform to protocol 'Greetable' required by
 ## 5. 继承与传播规则
 
 1. **子类必须重申 bound**：`MutableBox<T> : Box<T>` 且父类有 bound 时，
-   子类声明若不写 bound 报 error（不隐式继承——显式拼写让 `.jth` 读者一眼
-   看到约束，这正是 `.jth` 必须保留完整布局的同一哲学：客户端要看到全部事实）。
+   子类声明若不写 bound 报 error（不隐式继承——显式拼写让 `.hje` 读者一眼
+   看到约束，这正是 `.hje` 必须保留完整布局的同一哲学：客户端要看到全部事实）。
 2. **子类 bound 不得弱于父类**：`MutableBox<T : Specific>` : `Box<T : General>`
    要求 Specific 在 General 的协议继承链上，否则 error。
 3. **实例化时沿类链收集全部 bound 一并检查**（父类约束对子类特化同样生效），
@@ -91,9 +91,9 @@ error: 'NPNumber' does not conform to protocol 'Greetable' required by
 
 ## 6. 跨 TU 约束
 
-bound 信息活在 `.jth`（共享声明面）里，与协议声明同轨——纯声明客户端 import
-`.jth` 即拿到完整 bound 表，检查在客户端 TU 本地完成，**不依赖链接期、不碰
-vtable 布局（R1/R3 零影响）、不产生新符号（R2 零影响）**。`.jth` 过期（客户端
+bound 信息活在 `.hje`（共享声明面）里，与协议声明同轨——纯声明客户端 import
+`.hje` 即拿到完整 bound 表，检查在客户端 TU 本地完成，**不依赖链接期、不碰
+vtable 布局（R1/R3 零影响）、不产生新符号（R2 零影响）**。`.hje` 过期（客户端
 看到旧版无 bound 的头）的后果是检查静默放行——与所有 checker 功能的降级
 方向一致（漏报优于误报）。
 

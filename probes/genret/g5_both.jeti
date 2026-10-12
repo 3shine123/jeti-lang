@@ -2,7 +2,7 @@
 // 且两侧用不同实例化。检查点：生成 C 中类方法与实例方法的符号/cast
 // 不冲突，两侧返回类型各自按 receiver 的实例化替换（NPString * vs
 // NPNumber *）。
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 @interface Box<T> : NPObject
 + (T)make;

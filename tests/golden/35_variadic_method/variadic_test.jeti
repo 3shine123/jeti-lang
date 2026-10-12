@@ -1,7 +1,7 @@
 // golden/35_variadic_method — 真 variadic 方法支持
 // 覆盖：单段 selector、多段 selector、C-style 形态、继承、嵌套消息发送多实参、
 //       字符串实参、va_list 转发（printf 家族封装的标准形态）
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdarg.h>
 #include <stdio.h>
 

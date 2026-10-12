@@ -19,11 +19,11 @@
 #   4. R2 OWNERSHIP — two TUs that both `@implementation` the same class are
 #      both owners and must be a duplicate symbol (no flag involved).
 #   5. AUTO-STRONG — the flag is NOT required for the standalone-TU workflow:
-#      a main file (.jth or .jeti) holding an `@implementation` emits STRONG
+#      a main file (.hje or .jeti) holding an `@implementation` emits STRONG
 #      metadata for its owned class with no flag at all (ownership is derived
 #      from the main file). Guards the rule from regressing into
 #      "must remember -fstrong-metadata by hand".
-#   6. CLIENT STAYS WEAK — a declaration-only `.jth` (no @implementation
+#   6. CLIENT STAYS WEAK — a declaration-only `.hje` (no @implementation
 #      reaching the TU) must NOT go strong: its stubs are the client side of
 #      rule R2 and must lose to the owner's table.
 #
@@ -54,7 +54,7 @@ bad()  { echo "FAIL  $1"; fail=$((fail+1)); }
 lib="$work/lib"
 client="$work/client.jeti"
 cat > "$client" <<'EOF'
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 int main() {
     @autoreleasepool {
@@ -91,7 +91,7 @@ fi
 # (R2), so there must be no manual strong-metadata path left. A script still
 # carrying the old spelling must be rejected, not silently accepted.
 cat > "$work/flag_probe.jeti" <<'EOF'
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 int main() { return 0; }
 EOF
 # Flag AFTER the input hits the option loop → "Unknown argument"; flag BEFORE
@@ -112,25 +112,25 @@ fi
 # ── 4. rule R2: two owners of the same class must not merge silently ──
 # No flag involved: ownership is derived from the main file, so two TUs that
 # both `@implementation` Widget are both owners and the link must reject them.
-cat > "$work/model.jth" <<'EOF'
+cat > "$work/model.hje" <<'EOF'
 @interface Widget
 - (void)show;
 @end
 EOF
 cat > "$work/lib_a.jeti" <<'EOF'
-#import "model.jth"
+#import "model.hje"
 @implementation Widget
 - (void)show { }
 @end
 EOF
 cat > "$work/lib_b.jeti" <<'EOF'
-#import "model.jth"
+#import "model.hje"
 @implementation Widget
 - (void)show { }
 @end
 EOF
 cat > "$work/driver.jeti" <<'EOF'
-#import "model.jth"
+#import "model.hje"
 int main() { Widget *w = 0; if (w) { [w show]; } return 0; }
 EOF
 if "$jetic" -rewrite-jeti "$work/lib_a.jeti" -I "$work" -I include -o "$work/a.c" > "$work/a.log" 2>&1 \
@@ -186,15 +186,15 @@ check_weak() {
 }
 
 # ── 5. AUTO-STRONG: a main file holding @implementation needs no flag ──
-# Both spellings of a standalone TU — a self-contained .jth and a .jeti — must
+# Both spellings of a standalone TU — a self-contained .hje and a .jeti — must
 # emit STRONG metadata for the class they own, with no -fstrong-metadata.
-cat > "$work/own_iface.jth" <<'EOF'
+cat > "$work/own_iface.hje" <<'EOF'
 @interface OwnGm : NPObject
 - (int)ping;
 @end
 EOF
-cat > "$work/own.jth" <<'EOF'
-#import <Foundation/Foundation.jth>
+cat > "$work/own.hje" <<'EOF'
+#import <Foundation/Foundation.hje>
 @interface OwnGh : NPObject
 - (int)ping;
 @end
@@ -203,19 +203,19 @@ cat > "$work/own.jth" <<'EOF'
 @end
 EOF
 cat > "$work/own.jeti" <<'EOF'
-#import <Foundation/Foundation.jth>
-#import "own_iface.jth"
+#import <Foundation/Foundation.hje>
+#import "own_iface.hje"
 @implementation OwnGm : NPObject
 - (int)ping { return 7; }
 @end
 EOF
 gh_ok=1 gm_ok=1
-"$jetic" -rewrite-jeti "$work/own.jth" -I include -o "$work/owngh.c" > "$work/owngh.log" 2>&1 \
+"$jetic" -rewrite-jeti "$work/own.hje" -I include -o "$work/owngh.c" > "$work/owngh.log" 2>&1 \
     && clang -c -w "$work/owngh.c" -o "$work/owngh.o" -I include || gh_ok=0
 "$jetic" -rewrite-jeti "$work/own.jeti" -I "$work" -I include -o "$work/owngm.c" > "$work/owngm.log" 2>&1 \
     && clang -c -w "$work/owngm.c" -o "$work/owngm.o" -I include || gm_ok=0
 if [[ $gh_ok -eq 1 && $gm_ok -eq 1 ]]; then
-    check_strong "$work/owngh.o" "_JETI_VTABLE_\$_OwnGh" "5a. standalone .jth with @implementation auto-strong (no flag)"
+    check_strong "$work/owngh.o" "_JETI_VTABLE_\$_OwnGh" "5a. standalone .hje with @implementation auto-strong (no flag)"
     check_strong "$work/owngh.o" "_JETI_META_VTABLE_\$_OwnGh_inst" "5b. ... and its meta vtable too"
     check_strong "$work/owngm.o" "_JETI_VTABLE_\$_OwnGm" "5c. standalone .jeti with @implementation auto-strong (no flag)"
     check_strong "$work/owngm.o" "_JETI_META_VTABLE_\$_OwnGm_inst" "5d. ... and its meta vtable too"
@@ -224,18 +224,18 @@ else
     sed 's/^/      /' "$work/owngh.log" "$work/owngm.log" | tail -12
 fi
 
-# ── 6. CLIENT STAYS WEAK: a declaration-only .jth must not go strong ──
+# ── 6. CLIENT STAYS WEAK: a declaration-only .hje must not go strong ──
 # Its NULL-filled stubs are the client side of rule R2; they must lose to the
 # owner's table, so they have to stay weak even without any flag.
-cat > "$work/client_decl.jth" <<'EOF'
-#import <Foundation/Foundation.jth>
+cat > "$work/client_decl.hje" <<'EOF'
+#import <Foundation/Foundation.hje>
 @interface ClientGadget : NPObject
 - (int)ping;
 @end
 EOF
-if "$jetic" -rewrite-jeti "$work/client_decl.jth" -I include -o "$work/client_decl.c" > "$work/cd.log" 2>&1 \
+if "$jetic" -rewrite-jeti "$work/client_decl.hje" -I include -o "$work/client_decl.c" > "$work/cd.log" 2>&1 \
         && clang -c -w "$work/client_decl.c" -o "$work/client_decl.o" -I include; then
-    check_weak "$work/client_decl.o" "_JETI_VTABLE_\$_ClientGadget" "6. declaration-only .jth stub stays weak (no flag)"
+    check_weak "$work/client_decl.o" "_JETI_VTABLE_\$_ClientGadget" "6. declaration-only .hje stub stays weak (no flag)"
 else
     bad "6. could not transpile/compile the declaration-only probe"
     sed 's/^/      /' "$work/cd.log" | tail -12

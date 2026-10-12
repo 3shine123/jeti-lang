@@ -1,6 +1,6 @@
 // 差分用例 7:未捕获异常 —— 必须 abort 且输出 ObjC 措辞
 // (runner 只比措辞前缀;Foundation 内部类名 __NSCFConstantString vs NPString 属实现细节)
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 
 int main() {
     NPLog(@"before throw");

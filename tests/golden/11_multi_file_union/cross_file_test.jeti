@@ -1,7 +1,7 @@
 // lang-test/cross_file_test.jeti
 // 主程序入口：联动编译压测
 
-#import "diamond_base.jth"
+#import "diamond_base.hje"
 // 引入具体的实现细节类声明（这里假设转译器能够感知同目录或通过命令行联动编译）
 #import "diamond_impl-F.jeti"
 #include <stdio.h>

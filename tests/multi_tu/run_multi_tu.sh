@@ -17,9 +17,9 @@
 # not as a mystery crash three weeks later.
 #
 # Each case is a directory containing:
-#   *.jth   declarations shared by both TUs (the only channel between them)
+#   *.hje   declarations shared by both TUs (the only channel between them)
 #   lib.jeti the "library" TU: defines the classes, exposes entry points
-#   main.jeti the "client" TU: sees only the .jth, drives the classes
+#   main.jeti the "client" TU: sees only the .hje, drives the classes
 #   expected.txt  the stdout the program must print (optional; absent = no
 #                 output assertion, only "it must run and exit 0")
 #
@@ -52,7 +52,7 @@ trap 'rm -rf "$WORK"' EXIT
 FILTER="${1:-}"
 PASS=0; FAIL=0; FAILED_CASES=()
 
-# Emitted C needs -I include (jeti/runtime.h) and the case dir (its own .jth).
+# Emitted C needs -I include (jeti/runtime.h) and the case dir (its own .hje).
 # Note: Foundation is NOT imported by most cases — a case that only needs a
 # base class uses the implicit root, which keeps the method set (and therefore
 # the vtable layout) as small as possible. That is deliberate: the fewer

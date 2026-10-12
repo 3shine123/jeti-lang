@@ -1,4 +1,4 @@
-#import <Foundation/NPMutableString.jth>
+#import <Foundation/NPMutableString.hje>
 #include <string.h>
 #include <stdlib.h>
 

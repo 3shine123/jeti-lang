@@ -6,7 +6,7 @@
 > 状态：**已完成**——R1/R2/R3 已于 2026-10-02/03 落地并全量验证（见 §9–§11）；
 > 原验收用例 `tests/multi_tu/11_vtable_private_slots/` 已从 `EXPECT_FAIL` 摘牌转为
 > `expected.txt` 正向比对。下文按时间顺序保留计划、探索、回退与验证记录；
-> 与现状不符的表述（`Foundation.decl.jth`、`-fstrong-metadata`、`jeti_metaInit` 旧限制等）
+> 与现状不符的表述（`Foundation.decl.hje`、`-fstrong-metadata`、`jeti_metaInit` 旧限制等）
 > 为历史记录：**当前状态见 §11 / `doc/architecture.md`**。
 > 原始验收目标：“待实施。验收用例已入库：`tests/multi_tu/11_vtable_private_slots/`”
 
@@ -30,7 +30,7 @@ jeti: fatal: vtable layout mismatch across translation units.
 复现（已入库）：
 
 * `lib.jeti` 实现 `Widget` + 一个头文件没声明的私有方法 `privateHelper`；
-* `main.jeti` 只通过 `model.jth` 调用 `Widget`，并定义自己的类 `App`。
+* `main.jeti` 只通过 `model.hje` 调用 `Widget`，并定义自己的类 `App`。
 
 两者对 `Widget` 的公共认知完全一致，却被判为布局冲突。
 
@@ -141,13 +141,13 @@ A+B 完成后动手做 C，试了两条路，都只走到一半：
 
 ### 已完成
 
-* **`include/Foundation/Foundation.decl.jth`** —— 纯声明头（14 行）。只需剥掉
-  `Foundation.jth` 里的 9 行 `#import "*.jeti"`：**其它 `.jth` 本来就是纯声明**，所以这一步是
+* **`include/Foundation/Foundation.decl.hje`** —— 纯声明头（14 行）。只需剥掉
+  `Foundation.hje` 里的 9 行 `#import "*.jeti"`：**其它 `.hje` 本来就是纯声明**，所以这一步是
   删 9 行，不是重新组织头文件。
 * **库构建已验证**（86K）：
 
   ```bash
-  jetic -rewrite-jeti -fstrong-metadata include/Foundation/Foundation.jth -o Foundation.c -I include   # 3175 行
+  jetic -rewrite-jeti -fstrong-metadata include/Foundation/Foundation.hje -o Foundation.c -I include   # 3175 行
   clang -c Foundation.c -o Foundation.o -I include
   ar rcs libjetifoundation.a Foundation.o
   ```
@@ -158,7 +158,7 @@ A+B 完成后动手做 C，试了两条路，都只走到一半：
   ⚠️ 建库**必须**带 `-fstrong-metadata`（P3 落地时新增）：否则库里的元数据仍是
   `weak`，客户 TU 的空桩会在链接期胜出 → 段错误（详见下方「剩余一步」）。
 
-* **实测效果**（`#import <Foundation/Foundation.decl.jth>` + 链接库）：
+* **实测效果**（`#import <Foundation/Foundation.decl.hje>` + 链接库）：
 
   | | 自包含模式（现状） | P3 模式 |
   |---|---|---|
@@ -205,7 +205,7 @@ sig：库 TU == 客户 TU（0xbe99f65a63e20021）
 回归门槛：`test_all` 343/351（0 failed）、`cargo test --workspace` 149/149、
 `tests/multi_tu/run_multi_tu.sh` 11/11（`09`、`11` 仍 `EXPECT_FAIL`，未假绿）。
 
-> 工具：`Foundation.decl.jth` 引用的两个脚本已补入库
+> 工具：`Foundation.decl.hje` 引用的两个脚本已补入库
 > （`tools/make-decl-headers.sh`、`tools/build-foundation-lib.sh`）。建库**统一走脚本**——
 > 它自带 `-fstrong-metadata`，并用 `nm` 校验元数据的确是强符号（弱符号会让守卫直接失败）。
 > 保护测试：`tests/strong_metadata/run_strong_metadata_test.sh`（四项：强符号 / 弱客户端链接 /
@@ -228,7 +228,7 @@ sig：库 TU == 客户 TU（0xbe99f65a63e20021）
 
 ### 为什么判据必须是「main 文件」而不是「本 TU 里有 @implementation」
 
-自包含模式下 `#import <Foundation/Foundation.jth>` 会把 Foundation 的 `.jeti` 内联进
+自包含模式下 `#import <Foundation/Foundation.hje>` 会把 Foundation 的 `.jeti` 内联进
 **每一个** TU。若「有 `@implementation` 就算拥有」，则每个 TU 都拥有 `NPString`，两边都发
 强符号 → `duplicate symbol`，现有 01–08 会全部链接失败（**实测如此**）。
 
@@ -250,7 +250,7 @@ sig：库 TU == 客户 TU（0xbe99f65a63e20021）
 > `-fstrong-metadata` 已删除；当前状态见 `doc/architecture.md` §6/§7。
 
 自动判据覆盖不到**库自身**：`tools/build-foundation-lib.sh` 编译的是
-`include/Foundation/Foundation.jth`，其 `@implementation` 全部来自 `#import "*.jeti"`，
+`include/Foundation/Foundation.hje`，其 `@implementation` 全部来自 `#import "*.jeti"`，
 按 R2 判据都算弱符号。要让库自动变强，需要「按 `.jeti` 分别编译」的构建形态（每个 `.jeti`
 作为 main 文件 → 各自拥有自己的类），但该形态目前**不受支持**：
 
@@ -274,12 +274,12 @@ sig：库 TU == 客户 TU（0xbe99f65a63e20021）
 
 | 形态 | 命令 | 自有类元数据（无旗标，nm 实证） |
 |------|------|------------------------------|
-| 自包含 `.jth`（带 `@implementation`） | `jetic -rewrite-jeti main.jth` | **STRONG**（vtable + meta-vtable） |
+| 自包含 `.hje`（带 `@implementation`） | `jetic -rewrite-jeti main.hje` | **STRONG**（vtable + meta-vtable） |
 | `.jeti` 主文件（带 `@implementation`） | `jetic -rewrite-jeti main.jeti` | **STRONG**（同上） |
-| 纯声明 `.jth`（无实现进 TU） | `jetic -rewrite-jeti decl.jth` | WEAK（正确：R2 客户端空桩必须输给 owner 的表） |
-| `Foundation.jth`（实现经 `#import "*.jeti"` 进来） | 库构建脚本 | WEAK——`#import` 不授 ownership，**这正是库构建仍必须带旗标的原因** |
+| 纯声明 `.hje`（无实现进 TU） | `jetic -rewrite-jeti decl.hje` | WEAK（正确：R2 客户端空桩必须输给 owner 的表） |
+| `Foundation.hje`（实现经 `#import "*.jeti"` 进来） | 库构建脚本 | WEAK——`#import` 不授 ownership，**这正是库构建仍必须带旗标的原因** |
 
-- 守护：`tests/strong_metadata` 增至 **9 项**（新增 5a–5d：`.jth`/`.jeti` 两形态自动 strong
+- 守护：`tests/strong_metadata` 增至 **9 项**（新增 5a–5d：`.hje`/`.jeti` 两形态自动 strong
   正例；6：decl-only 反例），`nm` 直读符号强弱。**编译器零改动**——本节只是把既有行为
   钉进回归。
 - 注意：jetic 无 `-c` 模式（`-o x.o` 产出的是可执行文件），独立 TU 的转译命令是
@@ -377,21 +377,21 @@ P3+自有类端到端             rc=0（len=5 s=hello run=42；App 为客户端
 
 ### 落地记录 ✅（2026-10-03，本会话）——方案 A 全链完成
 
-**库构建（wrapper TU 形态）**：`tools/build-foundation-lib.sh` 重写为逐 TU 编译——每个 Foundation `.jeti` 生成一个 wrapper（`#import <Foundation/Foundation.decl.jth>` 前置 + 原 `.jeti` 全文），`@implementation` 落在 wrapper 的主文件里 → R2 ownership 保持、元数据自动 STRONG（nm 校验 9/9 强符号）。声明面 = decl.jth 全集，与客户端一致 → `__sig` 公共段一致。库 372K（`target/foundation/libjetifoundation.a`）。
+**库构建（wrapper TU 形态）**：`tools/build-foundation-lib.sh` 重写为逐 TU 编译——每个 Foundation `.jeti` 生成一个 wrapper（`#import <Foundation/Foundation.decl.hje>` 前置 + 原 `.jeti` 全文），`@implementation` 落在 wrapper 的主文件里 → R2 ownership 保持、元数据自动 STRONG（nm 校验 9/9 强符号）。声明面 = decl.hje 全集，与客户端一致 → `__sig` 公共段一致。库 372K（`target/foundation/libjetifoundation.a`）。
 
 **`-fstrong-metadata` 删除**（能删就删，无过渡期）：CLI 参数、clap Arg、`DOUBLE_TO_SINGLE`、flag 表、手动 help、两处解析点、pipeline 赋值、`Pipeline.strong_metadata` 字段、`CgUnit.strong_metadata` 字段、codegen 全部 `unit.strong_metadata ||` 合取（R2 独占判定）、multi-input 转发注释与提示。旧拼写两种参数位置都响亮失败（`Unknown argument` / `cannot read`），check 3 双序断言守护。
 
 **metaInit 退役实证**：客户端 TU 的 9 个 `NPClass` 全部走 §10 静态初始化（`__data` 段，非 BSS）；用 `.o` 位置参数直链强空 `jeti_metaInit` 覆盖弱合并副本 → 客户端全程正常（`[metaInit: strong-empty override ran]`，输出逐字节不变）——metaInit 在 R2 归属世界只剩幂等回填，仅对 `#import "*.jeti"` 的库构建路径仍有意义。
 
-**P3 端到端**：`Foundation.decl.jth` + `-ljetifoundation` 客户端探针全绿（string/array/for-in/dict/isEqual，exit=0）。
+**P3 端到端**：`Foundation.decl.hje` + `-ljetifoundation` 客户端探针全绿（string/array/for-in/dict/isEqual，exit=0）。
 
 **实施中挖出并修掉的两个真 bug（探针实证，勿重蹈）**：
 
 1. **meta-vtable 对"声明可见但本 TU 未实现"的类方法无条件引用函数符号** → 链接 undefined（`NPError_errorWithCode_domain_` 等）。实例 vtable 在多 TU 会话已立"槽位保留、引用不发"的 EMITTED_METHODS 规则，meta-vtable 实例循环漏镜像。修法：同款 `method_is_emitted(owner, mname) || owner != 本类` 判定，own 未实现槽位 NULL（codegen.rs Meta vtable instances 循环）。decl-only 客户端 TU 现在完全不产生兄弟类的 undefined 引用。
-2. **给 9 个 `.jeti` 源文件直接补 decl.jth import 是方向性错误**（已回退，`git diff` 归零）：`#import` 链让声明面泄漏进所有内联方——自包含 TU（如 trace golden 只 import NPObject）突然"看见" NPString/NPArray 的声明 → 桩 vtable 继承槽位引用 `NPArray_count` 等库符号 → 无库链接 undefined（7 个 test_all 失败）。正确形态是**wrapper TU 只存在于库构建时**：声明面扩大不污染源文件，自包含 TU 保持它要求的声明面。
+2. **给 9 个 `.jeti` 源文件直接补 decl.hje import 是方向性错误**（已回退，`git diff` 归零）：`#import` 链让声明面泄漏进所有内联方——自包含 TU（如 trace golden 只 import NPObject）突然"看见" NPString/NPArray 的声明 → 桩 vtable 继承槽位引用 `NPArray_count` 等库符号 → 无库链接 undefined（7 个 test_all 失败）。正确形态是**wrapper TU 只存在于库构建时**：声明面扩大不污染源文件，自包含 TU 保持它要求的声明面。
 
 **回归门槛（全部实测）**：cargo 153/0、multi_tu 12/12、strong_metadata 10/10（check 3 已改测旗标删除的响亮拒绝）、arc_intern ASan PASS、test_all **347/355, 0 failed**（6 canceled 交互式、2 个 `-F` 既有基线、SUSPECT=0）——与基线精确一致。
 
-**残留挂账**：`jeti_metaInit` 弱合并漏初始化对 R2 归属类已被静态强 `NPClass` 缓解；`#import "*.jeti"` 的库构建路径（Foundation.jth 单 TU）仍需 metaInit 真身——已在构建脚本注释与 AGENTS 中如实声明。
+**残留挂账**：`jeti_metaInit` 弱合并漏初始化对 R2 归属类已被静态强 `NPClass` 缓解；`#import "*.jeti"` 的库构建路径（Foundation.hje 单 TU）仍需 metaInit 真身——已在构建脚本注释与 AGENTS 中如实声明。
 
-> **追记（2026-10-03）——伞头交换**：用户拍板 `Foundation.decl.jth` 命名太怪，按 `.jth`/`.jeti` 约定交换：**`Foundation.jth` 现为纯声明伞头**（本文 136–152 行等处写的 `Foundation.decl.jth` 一律读作它），**`Foundation.jeti` 为自包含伞头**（原 `Foundation.jth` 的实现内联形态），`Foundation.decl.jth` 与 `tools/make-decl-headers.sh` 已删除。`build-foundation-lib.sh` 的 wrapper 前置行相应换为 `Foundation.jth`。上文历史记录保留原样，仅作对照。
+> **追记（2026-10-03）——伞头交换**：用户拍板 `Foundation.decl.hje` 命名太怪，按 `.hje`/`.jeti` 约定交换：**`Foundation.hje` 现为纯声明伞头**（本文 136–152 行等处写的 `Foundation.decl.hje` 一律读作它），**`Foundation.jeti` 为自包含伞头**（原 `Foundation.hje` 的实现内联形态），`Foundation.decl.hje` 与 `tools/make-decl-headers.sh` 已删除。`build-foundation-lib.sh` 的 wrapper 前置行相应换为 `Foundation.hje`。上文历史记录保留原样，仅作对照。

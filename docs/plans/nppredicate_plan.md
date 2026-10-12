@@ -28,7 +28,7 @@
 
 ## 1. 支柱一：DSL 语法与求值（Foundation C）
 
-`NPPredicate.jth/.jeti`，语义取 ObjC NSPredicate 格式串的常用全集：
+`NPPredicate.hje/.jeti`，语义取 ObjC NSPredicate 格式串的常用全集：
 
 ```jeti
 @interface NPPredicate : NPObject
@@ -109,10 +109,10 @@ entries 表（`NPClass` 需新增 `const struct jeti_kvc_entry *kvc_entries;`
 ## 3. 支柱三：宿主 API
 
 ```jeti
-// NPArray.jth 增补
+// NPArray.hje 增补
 - (NPArray *)filteredArrayUsingPredicate:(NPPredicate *)pred;
 - (size_t)indexOfObjectMatchingPredicate:(NPPredicate *)pred;   // 首个命中
-// NPMutableArray.jth 增补
+// NPMutableArray.hje 增补
 - (void)filterUsingPredicate:(NPPredicate *)pred;               // 原地
 // NPSet/NPMutableSet 增补
 - (NPArray *)filteredArrayUsingPredicate:(NPPredicate *)pred;

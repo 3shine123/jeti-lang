@@ -6,7 +6,7 @@
 //   api error caught
 //   math error caught
 //   main done
-#import <Foundation/Foundation.jth>
+#import <Foundation/Foundation.hje>
 #import <stdio.h>
 
 @interface MathError : NPObject
