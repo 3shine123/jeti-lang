@@ -1,0 +1,68 @@
+// B′ 统一语法示例(plan §9.3):一个标记 @throws(ErrType *),同步/异步通用;
+// 调用点零新关键字——处理 = 普通 @try/@catch,不处理 = 失败向上传播
+// (无人接 = 顶层 abort,与同步 @throw 同构)。
+// Expected output:
+//   a=7
+//   api error caught
+//   math error caught
+//   main done
+#import <Foundation/Foundation.jth>
+#import <stdio.h>
+
+@interface MathError : NPObject
+@end
+@implementation MathError
+@end
+
+@interface ApiError : NPObject
+@end
+@implementation ApiError
+@end
+
+// ── 同步函数:既有约定(tests/golden/15 原样),@throws 带错误类型 ──
+static int divide(int a, int b) @throws(MathError *) {
+    if (b == 0) { @throw [[MathError alloc] init]; }
+    return a / b;
+}
+
+// ── 异步方法:同一个标记(B′ 统一后的形态)──
+@interface Svc : NPObject
+- (async int)fetchScore:(int)uid @throws(ApiError *);
+- (async void)run;
+@end
+
+@implementation Svc
+- (async int)fetchScore:(int)uid @throws(ApiError *) {
+    if (uid < 0) { @throw [[ApiError alloc] init]; }
+    return await uid;
+}
+
+- (async void)run {
+    // ① 正常路径:不加任何处理——失败会向上传播
+    int a = await [self fetchScore:7];
+    printf("a=%d\n", a);
+
+    // ② 处理异步失败:普通 @try/@catch,零新关键字
+    @try {
+        int b = await [self fetchScore:-1];
+        printf("b=%d\n", b);
+    } @catch (ApiError *e) {
+        printf("api error caught\n");
+    }
+
+    // ③ 同步失败同理(既有行为,一字未动)
+    @try {
+        int r = divide(1, 0);
+        printf("r=%d\n", r);
+    } @catch (MathError *e) {
+        printf("math error caught\n");
+    }
+}
+@end
+
+int main(void) {
+    Svc *s = [[Svc alloc] init];
+    [s run];
+    printf("main done\n");
+    return 0;
+}

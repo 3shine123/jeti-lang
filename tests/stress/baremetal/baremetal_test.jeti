@@ -5,7 +5,7 @@
 //   + runtime_freestanding.c (bump allocator, exception globals, pool)
 //   + helpers.c (console) + asm_ext.s (real ARM64 assembly)
 // Exercises every language feature usable without Foundation.
-// NOTE: @await IS exercised (§16 R5) — runtime_freestanding.c provides the
+// NOTE: await IS exercised — runtime_freestanding.c provides the
 // NPTask API. I/O (NPLog etc.) is intentionally absent: bare metal has no
 // console contract; use kputs-style externs from helpers.c.
 
@@ -169,9 +169,9 @@ static unsigned loopsum(int n) {
     - (int)  weight;
     - (void) setWeight:(int)w;
     - (int)  addTo:(int)v times:(int)k;           // multi-part instance method
-    - (async NPTask<int>) sumAsync:(int)v;             // async modifier (part of the signature)
-    + (async NPTask<void>) awaitMake;                  // async entries: @await lives here,
-    + (async NPTask<void>) awaitSum:(Metal::Widget *)ww;   // never in main (canonical pattern)
+    - (async int) sumAsync:(int)v;             // async modifier (part of the signature)
+    + (async void) awaitMake;                  // async entries: await lives here,
+    + (async void) awaitSum:(Metal::Widget *)ww;   // never in main (canonical pattern)
     - (id)   retain;
     - (void) release;
     - (id)   autorelease;
@@ -192,18 +192,18 @@ static unsigned loopsum(int n) {
     - (int)  weight  { return weight; }
     - (void) setWeight:(int)w { weight = w; }
     - (int)  addTo:(int)v times:(int)k { return v + k * uid; }
-    - (async NPTask<int>) sumAsync:(int)v {
-        int r = @await [self addTo:v times:2];    // 5 + 2*7 = 19 (v=5, uid=7)
-        return r + v;                             // 24
+    - (async int) sumAsync:(int)v {
+        int r = await [self addTo:v times:2];    // 5 + 2*7 = 19 (v=5, uid=7)
+        return r + v;                            // 24
     }
-    + (async NPTask<void>) awaitMake {
-        int awaited = @await [Metal::Widget make:10 plus:3];
-        kputs("[R5] @await make:plus:=");
+    + (async void) awaitMake {
+        int awaited = await [Metal::Widget make:10 plus:3];
+        kputs("[R5] await make:plus:=");
         kputdec(awaited);
         kputs("\n");
     }
-    + (async NPTask<void>) awaitSum:(Metal::Widget *)ww {
-        int av = @await [ww sumAsync:5];
+    + (async void) awaitSum:(Metal::Widget *)ww {
+        int av = await [ww sumAsync:5];
         kputs("[R8] async marker sum=");
         kputdec(av);
         kputs("\n");
@@ -637,7 +637,10 @@ skip_hit:
     if (wweak) kputs("[R4] __weak alias OK\n");
     else       kputs("[R4] __weak FAIL\n");
 
-    [Metal::Widget awaitMake];    // blocking wrapper pumps the task internally
+    // Freestanding never auto-drives: hold the handle, start, pump (plan §C).
+    NPTask<void> *mk = [Metal::Widget awaitMake];
+    [mk start];
+    jeti_sched_run();
 
     // ── 17. new-syntax batch (Sep 2026): defer / pattern switch / async
     //        marker / weak re-registration / parent-chain catch / macros ──
@@ -715,8 +718,10 @@ skip_hit:
         kputs("\n");
     }
 
-    // async NPTask<T> signature modifier + @await chain
-    [Metal::Widget awaitSum:w];
+    // async signature modifier + await chain (freestanding: manual drive)
+    NPTask<void> *sum = [Metal::Widget awaitSum:w];
+    [sum start];
+    jeti_sched_run();
 
     // __weak ASSIGN re-registration + zeroing when the object dies
     @noarc {

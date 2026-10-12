@@ -5,6 +5,8 @@
    ============================================================ */
 
 /* -------------- Section 1 · Requires & defines --------------- */
+#include <string.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
 #include "jeti/runtime.h"
@@ -16,13 +18,9 @@
 #ifndef NO
 #define NO 0
 #endif
-#include <string.h>
-#include <ctype.h>
-#include <stdlib.h>
 #define NPMUTABLESTRING_NH
 #define NPARRAY_NH
 #define NPPREDICATE_NH
-#include <stdio.h>
 #define NPMUTABLEARRAY_NH
 #define NPDICTIONARY_NH
 #define NPMUTABLEDICTIONARY_NH
@@ -34,6 +32,7 @@
 #ifndef JETI_FOUNDATION_NPTASK_NH
 #define JETI_FOUNDATION_NPTASK_NH
 #endif
+#include <stdio.h>
 /* ------------- Section 2 · Forward declarations -------------- */
 struct jeti_vtable;
 struct JETI_META_VTABLE_$_NPObject;
@@ -157,8 +156,6 @@ static const SEL __jeti_sel_doubleValue = {.name = "doubleValue", .hash = 0x4743
 static const SEL __jeti_sel_boolValue = {.name = "boolValue", .hash = 0x38CF73A2};
 static const SEL __jeti_sel_charValue = {.name = "charValue", .hash = 0x15065342};
 static const SEL __jeti_sel_isEqualToNumber_ = {.name = "isEqualToNumber:", .hash = 0xD5DDB9A7};
-static const SEL __jeti_sel__expandFormat_args_count_ = {.name = "_expandFormat:args:count:", .hash = 0x2170723D};
-static const SEL __jeti_sel_valueForKey_ = {.name = "valueForKey:", .hash = 0x813235DE};
 static const SEL __jeti_sel_errorWithCode_domain_ = {.name = "errorWithCode:domain:", .hash = 0x4FF09B7C};
 static const SEL __jeti_sel_errorWithCode_domain_userInfo_ = {.name = "errorWithCode:domain:userInfo:", .hash = 0x083BB923};
 static const SEL __jeti_sel_initWithCode_domain_userInfo_ = {.name = "initWithCode:domain:userInfo:", .hash = 0x372FE305};
@@ -229,21 +226,6 @@ typedef struct NPRange {
     size_t location;
     size_t length;
 } NPRange;
-typedef struct jeti_pred_node {
-    int tag;
-    int op;
-    int a;
-    int b;
-    char * text;
-    NPObject * val;
-} jeti_pred_node;
-typedef struct PredP {
-    const char * s;
-    jeti_pred_node * nodes;
-    size_t count;
-    size_t cap;
-    int failed;
-} PredP;
 
 /* -------------- Section 6 · Function prototypes -------------- */
 NPObject * jeti_root_init(NPObject * self, SEL _cmd);
@@ -260,7 +242,6 @@ NPObject * NPObject_init(NPObject * self, SEL _cmd);
 void NPObject_dealloc(NPObject * self, SEL _cmd);
 void NPObject_release(NPObject * self, SEL _cmd);
 NPObject * NPObject_retain(NPObject * self, SEL _cmd);
-NPObject * NPObject_description(NPObject * self, SEL _cmd);
 NPString * NPString_stringWithUTF8String_(NPClass * self, SEL _cmd, const char * cstr);
 NPString * NPString_stringWithString_(NPClass * self, SEL _cmd, NPString * str);
 NPString * NPString_initWithUTF8String_(NPObject * self, SEL _cmd, const char * cstr);
@@ -284,7 +265,6 @@ NPString * NPString_lowercaseString(NPObject * self, SEL _cmd);
 uint32_t NPString_hash(NPObject * self, SEL _cmd);
 NPString * NPString_description(NPObject * self, SEL _cmd);
 NPString * NPString_copy(NPObject * self, SEL _cmd);
-void NPString_dealloc(NPObject * self, SEL _cmd);
 NPMutableString * NPMutableString_stringWithUTF8String_(NPClass * self, SEL _cmd, const char * cstr);
 NPMutableString * NPMutableString_stringWithString_(NPClass * self, SEL _cmd, NPString * str);
 NPMutableString * NPMutableString_initWithUTF8String_(NPObject * self, SEL _cmd, const char * cstr);
@@ -313,7 +293,6 @@ NPArray * NPArray_filteredArrayUsingPredicate_(NPObject * self, SEL _cmd, NPPred
 size_t NPArray_indexOfObjectMatchingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred);
 NPObject * NPArray_copy(NPObject * self, SEL _cmd);
 NPString * NPArray_description(NPObject * self, SEL _cmd);
-void NPArray_dealloc(NPObject * self, SEL _cmd);
 NPMutableArray * NPMutableArray_arrayWithCapacity_(NPClass * self, SEL _cmd, size_t capacity);
 NPMutableArray * NPMutableArray_array(NPClass * self, SEL _cmd);
 NPMutableArray * NPMutableArray_arrayWithObject_(NPClass * self, SEL _cmd, NPObject * obj);
@@ -343,7 +322,6 @@ NPArray * NPDictionary_allValues(NPObject * self, SEL _cmd);
 _Bool NPDictionary_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 NPObject * NPDictionary_copy(NPObject * self, SEL _cmd);
 NPString * NPDictionary_description(NPObject * self, SEL _cmd);
-void NPDictionary_dealloc(NPObject * self, SEL _cmd);
 NPMutableDictionary * NPMutableDictionary_dictionary(NPClass * self, SEL _cmd);
 NPMutableDictionary * NPMutableDictionary_dictionaryWithCapacity_(NPClass * self, SEL _cmd, size_t capacity);
 NPMutableDictionary * NPMutableDictionary_dictionaryWithObject_forKey_(NPClass * self, SEL _cmd, NPObject * value, NPObject * key);
@@ -369,7 +347,6 @@ void NPSet__grow(NPObject * self, SEL _cmd);
 _Bool NPSet_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 NPObject * NPSet_copy(NPObject * self, SEL _cmd);
 NPString * NPSet_description(NPObject * self, SEL _cmd);
-void NPSet_dealloc(NPObject * self, SEL _cmd);
 NPMutableSet * NPMutableSet_set(NPClass * self, SEL _cmd);
 NPMutableSet * NPMutableSet_setWithCapacity_(NPClass * self, SEL _cmd, size_t capacity);
 NPMutableSet * NPMutableSet_setWithObject_(NPClass * self, SEL _cmd, NPObject * object);
@@ -404,9 +381,6 @@ char NPNumber_charValue(NPObject * self, SEL _cmd);
 NPString * NPNumber_description(NPObject * self, SEL _cmd);
 _Bool NPNumber_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 int NPNumber_isEqualToNumber_(NPObject * self, SEL _cmd, NPNumber * other);
-void NPPredicate_dealloc(NPObject * self, SEL _cmd);
-NPString * NPPredicate__expandFormat_args_count_(NPObject * self, SEL _cmd, NPString * format, NPObject * * args, size_t n);
-NPObject * NPPredicate_valueForKey_(NPObject * self, SEL _cmd, NPString * key);
 NPError * NPError_errorWithCode_domain_(NPClass * self, SEL _cmd, int code, NPString * domain);
 NPError * NPError_errorWithCode_domain_userInfo_(NPClass * self, SEL _cmd, int code, NPString * domain, NPDictionary * userInfo);
 NPError * NPError_initWithCode_domain_userInfo_(NPObject * self, SEL _cmd, int code, NPString * domain, NPDictionary * userInfo);
@@ -416,57 +390,13 @@ int NPError_code(NPObject * self, SEL _cmd);
 NPString * NPError_domain(NPObject * self, SEL _cmd);
 NPDictionary * NPError_userInfo(NPObject * self, SEL _cmd);
 NPString * NPError_localizedDescription(NPObject * self, SEL _cmd);
-NPString * NPError_description(NPObject * self, SEL _cmd);
 NPTask * Fetcher_compute_(NPObject * self, SEL _cmd, int n);
 NPTask * Fetcher_runAll(NPObject * self, SEL _cmd);
 NPTask * Fetcher_loadCachedValue(NPObject * self, SEL _cmd);
 int Fetcher_plain_(NPObject * self, SEL _cmd, int n);
 int jeti_async_state_compute_(NPTask * __jeti_task);
 int jeti_async_state_runAll(NPTask * __jeti_task);
-int pred_eval_idx(jeti_pred_node * nodes, int idx, NPObject * object);
-NPObject * pred_leaf(jeti_pred_node * nodes, int idx, NPObject * object);
-int pred_is_npnumber(NPObject * v);
-int pred_is_npstring(NPObject * v);
-int pred_is_nparray(NPObject * v);
-double pred_num(NPObject * v);
-int pred_compare(NPObject * a, NPObject * b, int op);
-char pred_lc(char c);
-int pred_streq_ci(const char * a, const char * b);
-int pred_has_prefix(const char * s, const char * pre, int ci);
-int pred_contains(const char * s, const char * pat, int ci);
-int pred_like(const char * s, const char * pat, int ci);
-int pred_re_seq(const char * re, const char * s, const char * end);
-char * pred_re_top_alt(const char * re);
-char * pred_re_group_end(const char * re);
-int pred_re_one(const char * re, char c);
-int pred_grep(const char * body, const char * rest, const char * s, const char * end);
-int pred_re_seq(const char * re, const char * s, const char * end);
-int pred_re_match(const char * re, const char * s);
-int pred_matches(const char * re, const char * s, int ci);
-int pred_strop(jeti_pred_node * nodes, int idx, NPObject * object);
-int pred_in(jeti_pred_node * nodes, int idx, NPObject * object);
-int pred_between(jeti_pred_node * nodes, int idx, NPObject * object);
-int pred_quant(jeti_pred_node * nodes, int idx, NPObject * object);
-int pred_eval_idx(jeti_pred_node * nodes, int idx, NPObject * object);
 int main(void);
-size_t pred_push(PredP * p, int tag, int op, int a, int b);
-size_t pred_push_key(PredP * p, const char * begin, size_t len);
-size_t pred_push_lit_str(PredP * p, const char * begin, size_t len);
-NPString * pred_str_lit(PredP * p);
-size_t pred_push_lit_num(PredP * p, double d);
-void pred_fail(PredP * p, const char * msg);
-void pred_skipws(PredP * p);
-int pred_word(PredP * p, const char * w);
-int pred_opword(PredP * p, const char * w, int * ci);
-size_t pred_or(PredP * p);
-size_t pred_cmp_rest(PredP * p, size_t left);
-size_t pred_agg_lit(PredP * p);
-size_t pred_primary(PredP * p);
-size_t pred_cmp(PredP * p);
-size_t pred_cmp_rest(PredP * p, size_t left);
-size_t pred_and(PredP * p);
-size_t pred_or(PredP * p);
-int pred_parse(const char * src, jeti_pred_node * * out_nodes, size_t * out_count, size_t * out_root);
 
 /* ------------- Section 7 · File-level variables -------------- */
 /* ------------ Section 8 · VTable & class layouts ------------- */
@@ -594,13 +524,11 @@ struct jeti_vtable {
     NPString * (*substringWithRange_)(NPObject *, SEL, NPRange);
     NPString * (*uppercaseString)(NPObject *, SEL);
     NPDictionary * (*userInfo)(NPObject *, SEL);
-    NPString * (*_expandFormat_args_count_)(NPObject *, SEL, NPString *, NPObject * *, size_t);
     NPTask * (*compute_)(NPObject *, SEL, int);
     NPTask * (*loadCachedValue)(NPObject *, SEL);
     NPString * (*localizedDescription)(NPObject *, SEL);
     int (*plain_)(NPObject *, SEL, int);
     NPTask * (*runAll)(NPObject *, SEL);
-    NPObject * (*valueForKey_)(NPObject *, SEL, NPString *);
 };
 
 struct JETI_META_VTABLE_$_NPObject {
@@ -895,9 +823,9 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .containsObject_ = NULL,
     .copy = NULL,
     .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))jeti_root_dealloc,
+    .dealloc = NULL,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
@@ -910,7 +838,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .hash = NULL,
     .indexOfObjectMatchingPredicate_ = NULL,
     .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))jeti_root_init,
+    .init = NULL,
     .initWithArray_ = NULL,
     .initWithCapacity_ = NULL,
     .initWithCode_domain_userInfo_ = NULL,
@@ -927,9 +855,9 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .intValue = NULL,
     .isEqualToNumber_ = NULL,
     .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .isEqual_ = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
     .lastObject = NULL,
     .length = NULL,
     .longLongValue = NULL,
@@ -938,7 +866,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .objectForKey_ = NULL,
     .predicateFormat = NULL,
     .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))jeti_root_release,
+    .release = NULL,
     .removeAllObjects = NULL,
     .removeLastObject = NULL,
     .removeObjectAtIndex_ = NULL,
@@ -946,7 +874,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .removeObject_ = NULL,
     .replaceCharactersInRange_withString_ = NULL,
     .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))jeti_root_retain,
+    .retain = NULL,
     .setObject_atIndex_ = NULL,
     .setObject_forKey_ = NULL,
     .setString_ = NULL,
@@ -957,13 +885,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPObject */
@@ -988,9 +914,100 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPObject = {
     .containsObject_ = NULL,
     .copy = NULL,
     .count = NULL,
+    .dealloc = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = NULL,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = NULL,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .compute_ = NULL,
+    .loadCachedValue = NULL,
+    .localizedDescription = NULL,
+    .plain_ = NULL,
+    .runAll = NULL,
+};
+
+/* VTable instance: NPDictionary */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPDictionary = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
     .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPObject_description,
+    .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
@@ -1020,7 +1037,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPObject = {
     .intValue = NULL,
     .isEqualToNumber_ = NULL,
     .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isEqual_ = NULL,
     .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
     .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
     .lastObject = NULL,
@@ -1050,106 +1067,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPObject = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
-};
-
-/* VTable instance: NPDictionary */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPDictionary = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = (NPArray * (*)(NPObject *, SEL))NPDictionary_allKeys,
-    .allObjects = NULL,
-    .allValues = (NPArray * (*)(NPObject *, SEL))NPDictionary_allValues,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = (NPObject * (*)(NPObject *, SEL))NPDictionary_copy,
-    .count = (size_t (*)(NPObject *, SEL))NPDictionary_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPDictionary_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPDictionary_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPDictionary_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = (NPObject * (*)(NPObject *, SEL, NPObject *))NPDictionary_objectForKey_,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
-    .compute_ = NULL,
-    .loadCachedValue = NULL,
-    .localizedDescription = NULL,
-    .plain_ = NULL,
-    .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPError */
@@ -1169,15 +1091,15 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPError = {
     .boolValue = NULL,
     .charValue = NULL,
     .characterAtIndex_ = NULL,
-    .code = (int (*)(NPObject *, SEL))NPError_code,
+    .code = NULL,
     .compare_ = NULL,
     .containsObject_ = NULL,
     .copy = NULL,
     .count = NULL,
     .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPError_description,
-    .domain = (NPString * (*)(NPObject *, SEL))NPError_domain,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
     .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
@@ -1192,7 +1114,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPError = {
     .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
     .initWithArray_ = NULL,
     .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = (NPError * (*)(NPObject *, SEL, int, NPString *, NPDictionary *))NPError_initWithCode_domain_userInfo_,
+    .initWithCode_domain_userInfo_ = NULL,
     .initWithDictionary_ = NULL,
     .initWithDouble_ = NULL,
     .initWithFormat_args_count_ = NULL,
@@ -1235,14 +1157,12 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPError = {
     .substringToIndex_ = NULL,
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
-    .userInfo = (NPDictionary * (*)(NPObject *, SEL))NPError_userInfo,
-    ._expandFormat_args_count_ = NULL,
+    .userInfo = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = (NPString * (*)(NPObject *, SEL))NPError_localizedDescription,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPNumber */
@@ -1259,8 +1179,8 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
     .anyObject = NULL,
     .appendString_ = NULL,
     .appendUTF8String_ = NULL,
-    .boolValue = (int (*)(NPObject *, SEL))NPNumber_boolValue,
-    .charValue = (char (*)(NPObject *, SEL))NPNumber_charValue,
+    .boolValue = NULL,
+    .charValue = NULL,
     .characterAtIndex_ = NULL,
     .code = NULL,
     .compare_ = NULL,
@@ -1269,9 +1189,9 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
     .count = NULL,
     .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPNumber_description,
+    .description = NULL,
     .domain = NULL,
-    .doubleValue = (double (*)(NPObject *, SEL))NPNumber_doubleValue,
+    .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
     .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
     .filterUsingPredicate_ = NULL,
@@ -1287,24 +1207,24 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
     .initWithCapacity_ = NULL,
     .initWithCode_domain_userInfo_ = NULL,
     .initWithDictionary_ = NULL,
-    .initWithDouble_ = (NPNumber * (*)(NPObject *, SEL, double))NPNumber_initWithDouble_,
+    .initWithDouble_ = NULL,
     .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = (NPNumber * (*)(NPObject *, SEL, long long))NPNumber_initWithLongLong_,
+    .initWithLongLong_ = NULL,
     .initWithObjects_count_ = NULL,
     .initWithSet_ = NULL,
     .initWithString_ = NULL,
     .initWithUTF8String_ = NULL,
     .insertObject_atIndex_ = NULL,
     .insertString_atIndex_ = NULL,
-    .intValue = (int (*)(NPObject *, SEL))NPNumber_intValue,
-    .isEqualToNumber_ = (int (*)(NPObject *, SEL, NPNumber *))NPNumber_isEqualToNumber_,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
     .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPNumber_isEqual_,
+    .isEqual_ = NULL,
     .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
     .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
     .lastObject = NULL,
     .length = NULL,
-    .longLongValue = (long long (*)(NPObject *, SEL))NPNumber_longLongValue,
+    .longLongValue = NULL,
     .lowercaseString = NULL,
     .objectAtIndex_ = NULL,
     .objectForKey_ = NULL,
@@ -1329,13 +1249,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: Fetcher */
@@ -1362,7 +1280,7 @@ struct jeti_vtable JETI_VTABLE_$_Fetcher = {
     .count = NULL,
     .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPObject_description,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
@@ -1422,13 +1340,11 @@ struct jeti_vtable JETI_VTABLE_$_Fetcher = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = (NPTask * (*)(NPObject *, SEL, int))Fetcher_compute_,
     .loadCachedValue = (NPTask * (*)(NPObject *, SEL))Fetcher_loadCachedValue,
     .localizedDescription = NULL,
     .plain_ = (int (*)(NPObject *, SEL, int))Fetcher_plain_,
     .runAll = (NPTask * (*)(NPObject *, SEL))Fetcher_runAll,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPPredicate */
@@ -1453,12 +1369,12 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
     .containsObject_ = NULL,
     .copy = NULL,
     .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPPredicate_dealloc,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPObject_description,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
     .domain = NULL,
     .doubleValue = NULL,
-    .evaluateWithObject_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPPredicate_evaluateWithObject_,
+    .evaluateWithObject_ = NULL,
     .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
     .filterUsingPredicate_ = NULL,
     .filteredArrayUsingPredicate_ = NULL,
@@ -1474,7 +1390,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
     .initWithCode_domain_userInfo_ = NULL,
     .initWithDictionary_ = NULL,
     .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = (NPPredicate * (*)(NPObject *, SEL, NPString *, NPObject * *, size_t))NPPredicate_initWithFormat_args_count_,
+    .initWithFormat_args_count_ = NULL,
     .initWithLongLong_ = NULL,
     .initWithObjects_count_ = NULL,
     .initWithSet_ = NULL,
@@ -1494,7 +1410,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
     .lowercaseString = NULL,
     .objectAtIndex_ = NULL,
     .objectForKey_ = NULL,
-    .predicateFormat = (NPString * (*)(NPObject *, SEL))NPPredicate_predicateFormat,
+    .predicateFormat = NULL,
     .rangeOfString_ = NULL,
     .release = (void (*)(NPObject *, SEL))NPObject_release,
     .removeAllObjects = NULL,
@@ -1515,27 +1431,25 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = (NPString * (*)(NPObject *, SEL, NPString *, NPObject * *, size_t))NPPredicate__expandFormat_args_count_,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = (NPObject * (*)(NPObject *, SEL, NPString *))NPPredicate_valueForKey_,
 };
 
 /* VTable instance: NPSet */
 __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
     .__sig = 0x53851d190abf2c3bULL,
     .UTF8String = NULL,
-    ._grow = (void (*)(NPObject *, SEL))NPSet__grow,
+    ._grow = NULL,
     .addEntriesFromDictionary_ = NULL,
-    .addObject_ = (void (*)(NPObject *, SEL, NPObject *))NPSet_addObject_,
-    .addObjectsFromArray_ = (void (*)(NPObject *, SEL, NPArray *))NPSet_addObjectsFromArray_,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
     .allKeys = NULL,
-    .allObjects = (NPArray * (*)(NPObject *, SEL))NPSet_allObjects,
+    .allObjects = NULL,
     .allValues = NULL,
-    .anyObject = (NPObject * (*)(NPObject *, SEL))NPSet_anyObject,
+    .anyObject = NULL,
     .appendString_ = NULL,
     .appendUTF8String_ = NULL,
     .boolValue = NULL,
@@ -1543,18 +1457,18 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
     .characterAtIndex_ = NULL,
     .code = NULL,
     .compare_ = NULL,
-    .containsObject_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPSet_containsObject_,
-    .copy = (NPObject * (*)(NPObject *, SEL))NPSet_copy,
-    .count = (size_t (*)(NPObject *, SEL))NPSet_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPSet_dealloc,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPSet_description,
+    .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
     .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
     .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = (NPArray * (*)(NPObject *, SEL, NPPredicate *))NPSet_filteredArrayUsingPredicate_,
+    .filteredArrayUsingPredicate_ = NULL,
     .firstObject = NULL,
     .hasPrefix_ = NULL,
     .hasSuffix_ = NULL,
@@ -1578,7 +1492,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
     .intValue = NULL,
     .isEqualToNumber_ = NULL,
     .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPSet_isEqual_,
+    .isEqual_ = NULL,
     .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
     .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
     .lastObject = NULL,
@@ -1608,19 +1522,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPString */
 __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
     .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = (const char * (*)(NPObject *, SEL))NPString_UTF8String,
+    .UTF8String = NULL,
     ._grow = NULL,
     .addEntriesFromDictionary_ = NULL,
     .addObject_ = NULL,
@@ -1633,15 +1545,15 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
     .appendUTF8String_ = NULL,
     .boolValue = NULL,
     .charValue = NULL,
-    .characterAtIndex_ = (char (*)(NPObject *, SEL, size_t))NPString_characterAtIndex_,
+    .characterAtIndex_ = NULL,
     .code = NULL,
-    .compare_ = (int (*)(NPObject *, SEL, NPString *))NPString_compare_,
+    .compare_ = NULL,
     .containsObject_ = NULL,
-    .copy = (NPObject * (*)(NPObject *, SEL))NPString_copy,
+    .copy = NULL,
     .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPString_dealloc,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPString_description,
+    .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
@@ -1649,9 +1561,9 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
     .filterUsingPredicate_ = NULL,
     .filteredArrayUsingPredicate_ = NULL,
     .firstObject = NULL,
-    .hasPrefix_ = (int (*)(NPObject *, SEL, NPString *))NPString_hasPrefix_,
-    .hasSuffix_ = (int (*)(NPObject *, SEL, NPString *))NPString_hasSuffix_,
-    .hash = (uint32_t (*)(NPObject *, SEL))NPString_hash,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
     .indexOfObjectMatchingPredicate_ = NULL,
     .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
@@ -1664,24 +1576,24 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
     .initWithLongLong_ = NULL,
     .initWithObjects_count_ = NULL,
     .initWithSet_ = NULL,
-    .initWithString_ = (NPString * (*)(NPObject *, SEL, NPString *))NPString_initWithString_,
-    .initWithUTF8String_ = (NPString * (*)(NPObject *, SEL, const char *))NPString_initWithUTF8String_,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
     .insertObject_atIndex_ = NULL,
     .insertString_atIndex_ = NULL,
     .intValue = NULL,
     .isEqualToNumber_ = NULL,
-    .isEqualToString_ = (int (*)(NPObject *, SEL, NPString *))NPString_isEqualToString_,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPString_isEqual_,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
     .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
     .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
     .lastObject = NULL,
-    .length = (size_t (*)(NPObject *, SEL))NPString_length,
+    .length = NULL,
     .longLongValue = NULL,
-    .lowercaseString = (NPString * (*)(NPObject *, SEL))NPString_lowercaseString,
+    .lowercaseString = NULL,
     .objectAtIndex_ = NULL,
     .objectForKey_ = NULL,
     .predicateFormat = NULL,
-    .rangeOfString_ = (NPRange (*)(NPObject *, SEL, NPString *))NPString_rangeOfString_,
+    .rangeOfString_ = NULL,
     .release = (void (*)(NPObject *, SEL))NPObject_release,
     .removeAllObjects = NULL,
     .removeLastObject = NULL,
@@ -1694,20 +1606,18 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
     .setObject_atIndex_ = NULL,
     .setObject_forKey_ = NULL,
     .setString_ = NULL,
-    .stringByAppendingString_ = (NPString * (*)(NPObject *, SEL, NPString *))NPString_stringByAppendingString_,
-    .stringByAppendingUTF8String_ = (NPString * (*)(NPObject *, SEL, const char *))NPString_stringByAppendingUTF8String_,
-    .substringFromIndex_ = (NPString * (*)(NPObject *, SEL, size_t))NPString_substringFromIndex_,
-    .substringToIndex_ = (NPString * (*)(NPObject *, SEL, size_t))NPString_substringToIndex_,
-    .substringWithRange_ = (NPString * (*)(NPObject *, SEL, NPRange))NPString_substringWithRange_,
-    .uppercaseString = (NPString * (*)(NPObject *, SEL))NPString_uppercaseString,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPArray */
@@ -1729,24 +1639,24 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray = {
     .characterAtIndex_ = NULL,
     .code = NULL,
     .compare_ = NULL,
-    .containsObject_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPArray_containsObject_,
-    .copy = (NPObject * (*)(NPObject *, SEL))NPArray_copy,
-    .count = (size_t (*)(NPObject *, SEL))NPArray_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPArray_dealloc,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))NPArray_description,
+    .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
     .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
     .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = (NPArray * (*)(NPObject *, SEL, NPPredicate *))NPArray_filteredArrayUsingPredicate_,
-    .firstObject = (NPObject * (*)(NPObject *, SEL))NPArray_firstObject,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
     .hasPrefix_ = NULL,
     .hasSuffix_ = NULL,
     .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = (size_t (*)(NPObject *, SEL, NPPredicate *))NPArray_indexOfObjectMatchingPredicate_,
-    .indexOfObject_ = (size_t (*)(NPObject *, SEL, NPObject *))NPArray_indexOfObject_,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
     .initWithArray_ = NULL,
     .initWithCapacity_ = NULL,
@@ -1767,11 +1677,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray = {
     .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
     .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
     .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = (NPObject * (*)(NPObject *, SEL))NPArray_lastObject,
+    .lastObject = NULL,
     .length = NULL,
     .longLongValue = NULL,
     .lowercaseString = NULL,
-    .objectAtIndex_ = (NPObject * (*)(NPObject *, SEL, size_t))NPArray_objectAtIndex_,
+    .objectAtIndex_ = NULL,
     .objectForKey_ = NULL,
     .predicateFormat = NULL,
     .rangeOfString_ = NULL,
@@ -1794,13 +1704,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPOrderedSet */
@@ -1825,7 +1733,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .containsObject_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPSet_containsObject_,
     .copy = (NPObject * (*)(NPObject *, SEL))NPSet_copy,
     .count = (size_t (*)(NPObject *, SEL))NPSet_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPSet_dealloc,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
     .description = (NPObject * (*)(NPObject *, SEL))NPSet_description,
     .domain = NULL,
@@ -1834,14 +1742,14 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
     .filterUsingPredicate_ = NULL,
     .filteredArrayUsingPredicate_ = (NPArray * (*)(NPObject *, SEL, NPPredicate *))NPSet_filteredArrayUsingPredicate_,
-    .firstObject = (NPObject * (*)(NPObject *, SEL))NPOrderedSet_firstObject,
+    .firstObject = NULL,
     .hasPrefix_ = NULL,
     .hasSuffix_ = NULL,
     .hash = NULL,
     .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = (size_t (*)(NPObject *, SEL, NPObject *))NPOrderedSet_indexOfObject_,
+    .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = (NPOrderedSet * (*)(NPObject *, SEL, NPArray *))NPOrderedSet_initWithArray_,
+    .initWithArray_ = NULL,
     .initWithCapacity_ = NULL,
     .initWithCode_domain_userInfo_ = NULL,
     .initWithDictionary_ = NULL,
@@ -1849,7 +1757,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .initWithFormat_args_count_ = NULL,
     .initWithLongLong_ = NULL,
     .initWithObjects_count_ = NULL,
-    .initWithSet_ = (NPOrderedSet * (*)(NPObject *, SEL, NPSet *))NPOrderedSet_initWithSet_,
+    .initWithSet_ = NULL,
     .initWithString_ = NULL,
     .initWithUTF8String_ = NULL,
     .insertObject_atIndex_ = NULL,
@@ -1860,11 +1768,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPSet_isEqual_,
     .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
     .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = (NPObject * (*)(NPObject *, SEL))NPOrderedSet_lastObject,
+    .lastObject = NULL,
     .length = NULL,
     .longLongValue = NULL,
     .lowercaseString = NULL,
-    .objectAtIndex_ = (NPObject * (*)(NPObject *, SEL, size_t))NPOrderedSet_objectAtIndex_,
+    .objectAtIndex_ = NULL,
     .objectForKey_ = NULL,
     .predicateFormat = NULL,
     .rangeOfString_ = NULL,
@@ -1887,13 +1795,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPMutableSet */
@@ -1918,7 +1824,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .containsObject_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPSet_containsObject_,
     .copy = (NPObject * (*)(NPObject *, SEL))NPSet_copy,
     .count = (size_t (*)(NPObject *, SEL))NPSet_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPSet_dealloc,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
     .description = (NPObject * (*)(NPObject *, SEL))NPSet_description,
     .domain = NULL,
@@ -1933,16 +1839,16 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .hash = NULL,
     .indexOfObjectMatchingPredicate_ = NULL,
     .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPMutableSet_init,
-    .initWithArray_ = (NPOrderedSet * (*)(NPObject *, SEL, NPArray *))NPMutableSet_initWithArray_,
-    .initWithCapacity_ = (NPMutableSet * (*)(NPObject *, SEL, size_t))NPMutableSet_initWithCapacity_,
+    .init = NULL,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
     .initWithCode_domain_userInfo_ = NULL,
     .initWithDictionary_ = NULL,
     .initWithDouble_ = NULL,
     .initWithFormat_args_count_ = NULL,
     .initWithLongLong_ = NULL,
     .initWithObjects_count_ = NULL,
-    .initWithSet_ = (NPOrderedSet * (*)(NPObject *, SEL, NPSet *))NPMutableSet_initWithSet_,
+    .initWithSet_ = NULL,
     .initWithString_ = NULL,
     .initWithUTF8String_ = NULL,
     .insertObject_atIndex_ = NULL,
@@ -1962,11 +1868,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .predicateFormat = NULL,
     .rangeOfString_ = NULL,
     .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = (void (*)(NPObject *, SEL))NPMutableSet_removeAllObjects,
+    .removeAllObjects = NULL,
     .removeLastObject = NULL,
     .removeObjectAtIndex_ = NULL,
     .removeObjectForKey_ = NULL,
-    .removeObject_ = (void (*)(NPObject *, SEL, NPObject *))NPMutableSet_removeObject_,
+    .removeObject_ = NULL,
     .replaceCharactersInRange_withString_ = NULL,
     .replaceObjectAtIndex_withObject_ = NULL,
     .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
@@ -1980,13 +1886,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPMutableString */
@@ -2001,8 +1905,8 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .allObjects = NULL,
     .allValues = NULL,
     .anyObject = NULL,
-    .appendString_ = (void (*)(NPObject *, SEL, NPString *))NPMutableString_appendString_,
-    .appendUTF8String_ = (void (*)(NPObject *, SEL, const char *))NPMutableString_appendUTF8String_,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
     .boolValue = NULL,
     .charValue = NULL,
     .characterAtIndex_ = (char (*)(NPObject *, SEL, size_t))NPString_characterAtIndex_,
@@ -2011,8 +1915,8 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .containsObject_ = NULL,
     .copy = (NPObject * (*)(NPObject *, SEL))NPString_copy,
     .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPString_dealloc,
-    .deleteCharactersInRange_ = (void (*)(NPObject *, SEL, NPRange))NPMutableString_deleteCharactersInRange_,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
     .description = (NPObject * (*)(NPObject *, SEL))NPString_description,
     .domain = NULL,
     .doubleValue = NULL,
@@ -2036,10 +1940,10 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .initWithLongLong_ = NULL,
     .initWithObjects_count_ = NULL,
     .initWithSet_ = NULL,
-    .initWithString_ = (NPString * (*)(NPObject *, SEL, NPString *))NPMutableString_initWithString_,
-    .initWithUTF8String_ = (NPString * (*)(NPObject *, SEL, const char *))NPMutableString_initWithUTF8String_,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
     .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = (void (*)(NPObject *, SEL, NPString *, size_t))NPMutableString_insertString_atIndex_,
+    .insertString_atIndex_ = NULL,
     .intValue = NULL,
     .isEqualToNumber_ = NULL,
     .isEqualToString_ = (int (*)(NPObject *, SEL, NPString *))NPString_isEqualToString_,
@@ -2060,12 +1964,12 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .removeObjectAtIndex_ = NULL,
     .removeObjectForKey_ = NULL,
     .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = (void (*)(NPObject *, SEL, NPRange, NPString *))NPMutableString_replaceCharactersInRange_withString_,
+    .replaceCharactersInRange_withString_ = NULL,
     .replaceObjectAtIndex_withObject_ = NULL,
     .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
     .setObject_atIndex_ = NULL,
     .setObject_forKey_ = NULL,
-    .setString_ = (void (*)(NPObject *, SEL, NPString *))NPMutableString_setString_,
+    .setString_ = NULL,
     .stringByAppendingString_ = (NPString * (*)(NPObject *, SEL, NPString *))NPString_stringByAppendingString_,
     .stringByAppendingUTF8String_ = (NPString * (*)(NPObject *, SEL, const char *))NPString_stringByAppendingUTF8String_,
     .substringFromIndex_ = (NPString * (*)(NPObject *, SEL, size_t))NPString_substringFromIndex_,
@@ -2073,13 +1977,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .substringWithRange_ = (NPString * (*)(NPObject *, SEL, NPRange))NPString_substringWithRange_,
     .uppercaseString = (NPString * (*)(NPObject *, SEL))NPString_uppercaseString,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPMutableArray */
@@ -2088,8 +1990,8 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .UTF8String = NULL,
     ._grow = NULL,
     .addEntriesFromDictionary_ = NULL,
-    .addObject_ = (void (*)(NPObject *, SEL, NPObject *))NPMutableArray_addObject_,
-    .addObjectsFromArray_ = (void (*)(NPObject *, SEL, NPArray *))NPMutableArray_addObjectsFromArray_,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
     .allKeys = NULL,
     .allObjects = NULL,
     .allValues = NULL,
@@ -2104,14 +2006,14 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .containsObject_ = (_Bool (*)(NPObject *, SEL, NPObject *))NPArray_containsObject_,
     .copy = (NPObject * (*)(NPObject *, SEL))NPArray_copy,
     .count = (size_t (*)(NPObject *, SEL))NPArray_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPArray_dealloc,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
     .description = (NPObject * (*)(NPObject *, SEL))NPArray_description,
     .domain = NULL,
     .doubleValue = NULL,
     .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = (void (*)(NPObject *, SEL, size_t, size_t))NPMutableArray_exchangeObjectAtIndex_withObjectAtIndex_,
-    .filterUsingPredicate_ = (void (*)(NPObject *, SEL, NPPredicate *))NPMutableArray_filterUsingPredicate_,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
     .filteredArrayUsingPredicate_ = (NPArray * (*)(NPObject *, SEL, NPPredicate *))NPArray_filteredArrayUsingPredicate_,
     .firstObject = (NPObject * (*)(NPObject *, SEL))NPArray_firstObject,
     .hasPrefix_ = NULL,
@@ -2119,19 +2021,19 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .hash = NULL,
     .indexOfObjectMatchingPredicate_ = (size_t (*)(NPObject *, SEL, NPPredicate *))NPArray_indexOfObjectMatchingPredicate_,
     .indexOfObject_ = (size_t (*)(NPObject *, SEL, NPObject *))NPArray_indexOfObject_,
-    .init = (NPObject * (*)(NPObject *, SEL))NPMutableArray_init,
-    .initWithArray_ = (NPOrderedSet * (*)(NPObject *, SEL, NPArray *))NPMutableArray_initWithArray_,
-    .initWithCapacity_ = (NPMutableSet * (*)(NPObject *, SEL, size_t))NPMutableArray_initWithCapacity_,
+    .init = NULL,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
     .initWithCode_domain_userInfo_ = NULL,
     .initWithDictionary_ = NULL,
     .initWithDouble_ = NULL,
     .initWithFormat_args_count_ = NULL,
     .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = (NPMutableArray * (*)(NPObject *, SEL, NPObject * *, size_t))NPMutableArray_initWithObjects_count_,
+    .initWithObjects_count_ = NULL,
     .initWithSet_ = NULL,
     .initWithString_ = NULL,
     .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = (void (*)(NPObject *, SEL, NPObject *, size_t))NPMutableArray_insertObject_atIndex_,
+    .insertObject_atIndex_ = NULL,
     .insertString_atIndex_ = NULL,
     .intValue = NULL,
     .isEqualToNumber_ = NULL,
@@ -2148,15 +2050,15 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .predicateFormat = NULL,
     .rangeOfString_ = NULL,
     .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = (void (*)(NPObject *, SEL))NPMutableArray_removeAllObjects,
-    .removeLastObject = (void (*)(NPObject *, SEL))NPMutableArray_removeLastObject,
-    .removeObjectAtIndex_ = (void (*)(NPObject *, SEL, size_t))NPMutableArray_removeObjectAtIndex_,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
     .removeObjectForKey_ = NULL,
-    .removeObject_ = (void (*)(NPObject *, SEL, NPObject *))NPMutableArray_removeObject_,
+    .removeObject_ = NULL,
     .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = (void (*)(NPObject *, SEL, size_t, NPObject *))NPMutableArray_replaceObjectAtIndex_withObject_,
+    .replaceObjectAtIndex_withObject_ = NULL,
     .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = (void (*)(NPObject *, SEL, NPObject *, size_t))NPMutableArray_setObject_atIndex_,
+    .setObject_atIndex_ = NULL,
     .setObject_forKey_ = NULL,
     .setString_ = NULL,
     .stringByAppendingString_ = NULL,
@@ -2166,13 +2068,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* VTable instance: NPMutableDictionary */
@@ -2180,7 +2080,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .__sig = 0x53851d190abf2c3bULL,
     .UTF8String = NULL,
     ._grow = NULL,
-    .addEntriesFromDictionary_ = (void (*)(NPObject *, SEL, NPDictionary *))NPMutableDictionary_addEntriesFromDictionary_,
+    .addEntriesFromDictionary_ = NULL,
     .addObject_ = NULL,
     .addObjectsFromArray_ = NULL,
     .allKeys = (NPArray * (*)(NPObject *, SEL))NPDictionary_allKeys,
@@ -2197,7 +2097,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .containsObject_ = NULL,
     .copy = (NPObject * (*)(NPObject *, SEL))NPDictionary_copy,
     .count = (size_t (*)(NPObject *, SEL))NPDictionary_count,
-    .dealloc = (void (*)(NPObject *, SEL))NPDictionary_dealloc,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     .deleteCharactersInRange_ = NULL,
     .description = (NPObject * (*)(NPObject *, SEL))NPDictionary_description,
     .domain = NULL,
@@ -2212,11 +2112,11 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .hash = NULL,
     .indexOfObjectMatchingPredicate_ = NULL,
     .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPMutableDictionary_init,
+    .init = NULL,
     .initWithArray_ = NULL,
-    .initWithCapacity_ = (NPMutableSet * (*)(NPObject *, SEL, size_t))NPMutableDictionary_initWithCapacity_,
+    .initWithCapacity_ = NULL,
     .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = (NPMutableDictionary * (*)(NPObject *, SEL, NPDictionary *))NPMutableDictionary_initWithDictionary_,
+    .initWithDictionary_ = NULL,
     .initWithDouble_ = NULL,
     .initWithFormat_args_count_ = NULL,
     .initWithLongLong_ = NULL,
@@ -2241,16 +2141,16 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .predicateFormat = NULL,
     .rangeOfString_ = NULL,
     .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = (void (*)(NPObject *, SEL))NPMutableDictionary_removeAllObjects,
+    .removeAllObjects = NULL,
     .removeLastObject = NULL,
     .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = (void (*)(NPObject *, SEL, NPObject *))NPMutableDictionary_removeObjectForKey_,
+    .removeObjectForKey_ = NULL,
     .removeObject_ = NULL,
     .replaceCharactersInRange_withString_ = NULL,
     .replaceObjectAtIndex_withObject_ = NULL,
     .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
     .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = (void (*)(NPObject *, SEL, NPObject *, NPObject *))NPMutableDictionary_setObject_forKey_,
+    .setObject_forKey_ = NULL,
     .setString_ = NULL,
     .stringByAppendingString_ = NULL,
     .stringByAppendingUTF8String_ = NULL,
@@ -2259,19 +2159,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
-    ._expandFormat_args_count_ = NULL,
     .compute_ = NULL,
     .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
-    .valueForKey_ = NULL,
 };
 
 /* Meta vtable instance: NPObject */
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPObject JETI_META_VTABLE_$_NPObject_inst = {
-    .alloc = NPObject_alloc,
-    .new = NPObject_new,
+    .alloc = NULL,
+    .new = NULL,
     .class = JETI_GETCLASS_$_NPObject,
 };
 
@@ -2279,9 +2177,9 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPObject JETI_META_VTABLE_$_NPOb
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPDictionary JETI_META_VTABLE_$_NPDictionary_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .dictionary = NPDictionary_dictionary,
-    .dictionaryWithObject_forKey_ = NPDictionary_dictionaryWithObject_forKey_,
-    .dictionaryWithObjects_forKeys_count_ = NPDictionary_dictionaryWithObjects_forKeys_count_,
+    .dictionary = NULL,
+    .dictionaryWithObject_forKey_ = NULL,
+    .dictionaryWithObjects_forKeys_count_ = NULL,
     .class = JETI_GETCLASS_$_NPDictionary,
 };
 
@@ -2289,10 +2187,10 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPDictionary JETI_META_VTABLE_$_
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPError JETI_META_VTABLE_$_NPError_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .errorWithCode_domain_ = NPError_errorWithCode_domain_,
-    .errorWithCode_domain_userInfo_ = NPError_errorWithCode_domain_userInfo_,
-    .parseErrorWithMessage_ = NPError_parseErrorWithMessage_,
-    .fileIOErrorWithMessage_ = NPError_fileIOErrorWithMessage_,
+    .errorWithCode_domain_ = NULL,
+    .errorWithCode_domain_userInfo_ = NULL,
+    .parseErrorWithMessage_ = NULL,
+    .fileIOErrorWithMessage_ = NULL,
     .class = JETI_GETCLASS_$_NPError,
 };
 
@@ -2300,11 +2198,11 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPError JETI_META_VTABLE_$_NPErr
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPNumber JETI_META_VTABLE_$_NPNumber_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .numberWithInt_ = NPNumber_numberWithInt_,
-    .numberWithLongLong_ = NPNumber_numberWithLongLong_,
-    .numberWithDouble_ = NPNumber_numberWithDouble_,
-    .numberWithBool_ = NPNumber_numberWithBool_,
-    .numberWithChar_ = NPNumber_numberWithChar_,
+    .numberWithInt_ = NULL,
+    .numberWithLongLong_ = NULL,
+    .numberWithDouble_ = NULL,
+    .numberWithBool_ = NULL,
+    .numberWithChar_ = NULL,
     .class = JETI_GETCLASS_$_NPNumber,
 };
 
@@ -2319,8 +2217,8 @@ struct JETI_META_VTABLE_$_Fetcher JETI_META_VTABLE_$_Fetcher_inst = {
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPPredicate JETI_META_VTABLE_$_NPPredicate_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .predicateWithFormat_ = NPPredicate_predicateWithFormat_,
-    .predicateWithFormat_object_ = NPPredicate_predicateWithFormat_object_,
+    .predicateWithFormat_ = NULL,
+    .predicateWithFormat_object_ = NULL,
     .class = JETI_GETCLASS_$_NPPredicate,
 };
 
@@ -2328,10 +2226,10 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPPredicate JETI_META_VTABLE_$_N
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPSet JETI_META_VTABLE_$_NPSet_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .set = NPSet_set,
-    .setWithObject_ = NPSet_setWithObject_,
-    .setWithObjects_count_ = NPSet_setWithObjects_count_,
-    .setWithArray_ = NPSet_setWithArray_,
+    .set = NULL,
+    .setWithObject_ = NULL,
+    .setWithObjects_count_ = NULL,
+    .setWithArray_ = NULL,
     .class = JETI_GETCLASS_$_NPSet,
 };
 
@@ -2339,8 +2237,8 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPSet JETI_META_VTABLE_$_NPSet_i
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPString JETI_META_VTABLE_$_NPString_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .stringWithUTF8String_ = NPString_stringWithUTF8String_,
-    .stringWithString_ = NPString_stringWithString_,
+    .stringWithUTF8String_ = NULL,
+    .stringWithString_ = NULL,
     .class = JETI_GETCLASS_$_NPString,
 };
 
@@ -2348,9 +2246,9 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPString JETI_META_VTABLE_$_NPSt
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPArray JETI_META_VTABLE_$_NPArray_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .arrayWithObjects_count_ = NPArray_arrayWithObjects_count_,
-    .arrayWithObject_ = NPArray_arrayWithObject_,
-    .array = NPArray_array,
+    .arrayWithObjects_count_ = NULL,
+    .arrayWithObject_ = NULL,
+    .array = NULL,
     .class = JETI_GETCLASS_$_NPArray,
 };
 
@@ -2362,10 +2260,10 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPOrderedSet JETI_META_VTABLE_$_
     .setWithObject_ = NPSet_setWithObject_,
     .setWithObjects_count_ = NPSet_setWithObjects_count_,
     .setWithArray_ = NPSet_setWithArray_,
-    .orderedSet = NPOrderedSet_orderedSet,
-    .orderedSetWithObject_ = NPOrderedSet_orderedSetWithObject_,
-    .orderedSetWithArray_ = NPOrderedSet_orderedSetWithArray_,
-    .orderedSetWithOrderedSet_ = NPOrderedSet_orderedSetWithOrderedSet_,
+    .orderedSet = NULL,
+    .orderedSetWithObject_ = NULL,
+    .orderedSetWithArray_ = NULL,
+    .orderedSetWithOrderedSet_ = NULL,
     .class = JETI_GETCLASS_$_NPOrderedSet,
 };
 
@@ -2373,11 +2271,11 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPOrderedSet JETI_META_VTABLE_$_
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableSet JETI_META_VTABLE_$_NPMutableSet_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .set = NPMutableSet_set,
-    .setWithObject_ = NPMutableSet_setWithObject_,
+    .set = NULL,
+    .setWithObject_ = NULL,
     .setWithObjects_count_ = NPSet_setWithObjects_count_,
     .setWithArray_ = NPSet_setWithArray_,
-    .setWithCapacity_ = NPMutableSet_setWithCapacity_,
+    .setWithCapacity_ = NULL,
     .class = JETI_GETCLASS_$_NPMutableSet,
 };
 
@@ -2385,8 +2283,8 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableSet JETI_META_VTABLE_$_
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableString JETI_META_VTABLE_$_NPMutableString_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .stringWithUTF8String_ = NPMutableString_stringWithUTF8String_,
-    .stringWithString_ = NPMutableString_stringWithString_,
+    .stringWithUTF8String_ = NULL,
+    .stringWithString_ = NULL,
     .class = JETI_GETCLASS_$_NPMutableString,
 };
 
@@ -2394,10 +2292,10 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableString JETI_META_VTABLE
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableArray JETI_META_VTABLE_$_NPMutableArray_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .arrayWithObjects_count_ = NPMutableArray_arrayWithObjects_count_,
-    .arrayWithObject_ = NPMutableArray_arrayWithObject_,
-    .array = NPMutableArray_array,
-    .arrayWithCapacity_ = NPMutableArray_arrayWithCapacity_,
+    .arrayWithObjects_count_ = NULL,
+    .arrayWithObject_ = NULL,
+    .array = NULL,
+    .arrayWithCapacity_ = NULL,
     .class = JETI_GETCLASS_$_NPMutableArray,
 };
 
@@ -2405,10 +2303,10 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableArray JETI_META_VTABLE_
 __attribute__((weak)) struct JETI_META_VTABLE_$_NPMutableDictionary JETI_META_VTABLE_$_NPMutableDictionary_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .dictionary = NPMutableDictionary_dictionary,
-    .dictionaryWithObject_forKey_ = NPMutableDictionary_dictionaryWithObject_forKey_,
+    .dictionary = NULL,
+    .dictionaryWithObject_forKey_ = NULL,
     .dictionaryWithObjects_forKeys_count_ = NPDictionary_dictionaryWithObjects_forKeys_count_,
-    .dictionaryWithCapacity_ = NPMutableDictionary_dictionaryWithCapacity_,
+    .dictionaryWithCapacity_ = NULL,
     .class = JETI_GETCLASS_$_NPMutableDictionary,
 };
 
@@ -2504,35 +2402,10 @@ static void NPError__jeti_arc_dealloc(NPObject * self, SEL _cmd) {
     jeti_release(((struct NPError *)self)->_domain);
 }
 
-static id jeti_kvc_wrap_NPDictionary_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPDictionary_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPDictionary_allKeys(id self) {
-    return (id)NPDictionary_allKeys((NPObject *)self, __jeti_sel_allKeys);
-}
-
-static id jeti_kvc_wrap_NPDictionary_allValues(id self) {
-    return (id)NPDictionary_allValues((NPObject *)self, __jeti_sel_allValues);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPDictionary[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPDictionary_count },
-    { .key = "allKeys", .get = jeti_kvc_wrap_NPDictionary_allKeys },
-    { .key = "allValues", .get = jeti_kvc_wrap_NPDictionary_allValues },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPError_code(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_code, NPError_code((NPObject *)self, __jeti_sel_code));
-}
-
-static id jeti_kvc_wrap_NPError_domain(id self) {
-    return (id)NPError_domain((NPObject *)self, __jeti_sel_domain);
-}
-
-static id jeti_kvc_wrap_NPError_userInfo(id self) {
-    return (id)NPError_userInfo((NPObject *)self, __jeti_sel_userInfo);
+/* ARC: release 'NPPredicate's owned ivars (no user dealloc) */
+static void NPPredicate__jeti_arc_dealloc(NPObject * self, SEL _cmd) {
+    NPObject_dealloc(self, _cmd);
+    jeti_release(((struct NPPredicate *)self)->_format);
 }
 
 static id jeti_kvc_wrap_NPError_localizedDescription(id self) {
@@ -2540,39 +2413,7 @@ static id jeti_kvc_wrap_NPError_localizedDescription(id self) {
 }
 
 static const jeti_kvc_entry JETI_KVC_$_NPError[] = {
-    { .key = "code", .get = jeti_kvc_wrap_NPError_code },
-    { .key = "domain", .get = jeti_kvc_wrap_NPError_domain },
-    { .key = "userInfo", .get = jeti_kvc_wrap_NPError_userInfo },
     { .key = "localizedDescription", .get = jeti_kvc_wrap_NPError_localizedDescription },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPNumber_intValue(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_intValue, NPNumber_intValue((NPObject *)self, __jeti_sel_intValue));
-}
-
-static id jeti_kvc_wrap_NPNumber_longLongValue(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_longLongValue, NPNumber_longLongValue((NPObject *)self, __jeti_sel_longLongValue));
-}
-
-static id jeti_kvc_wrap_NPNumber_doubleValue(id self) {
-    return NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, __jeti_sel_doubleValue, NPNumber_doubleValue((NPObject *)self, __jeti_sel_doubleValue));
-}
-
-static id jeti_kvc_wrap_NPNumber_boolValue(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_boolValue, NPNumber_boolValue((NPObject *)self, __jeti_sel_boolValue));
-}
-
-static id jeti_kvc_wrap_NPNumber_charValue(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_charValue, NPNumber_charValue((NPObject *)self, __jeti_sel_charValue));
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPNumber[] = {
-    { .key = "intValue", .get = jeti_kvc_wrap_NPNumber_intValue },
-    { .key = "longLongValue", .get = jeti_kvc_wrap_NPNumber_longLongValue },
-    { .key = "doubleValue", .get = jeti_kvc_wrap_NPNumber_doubleValue },
-    { .key = "boolValue", .get = jeti_kvc_wrap_NPNumber_boolValue },
-    { .key = "charValue", .get = jeti_kvc_wrap_NPNumber_charValue },
     { .key = NULL, .get = NULL },
 };
 
@@ -2587,187 +2428,6 @@ static id jeti_kvc_wrap_Fetcher_loadCachedValue(id self) {
 static const jeti_kvc_entry JETI_KVC_$_Fetcher[] = {
     { .key = "runAll", .get = jeti_kvc_wrap_Fetcher_runAll },
     { .key = "loadCachedValue", .get = jeti_kvc_wrap_Fetcher_loadCachedValue },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPPredicate_predicateFormat(id self) {
-    return (id)NPPredicate_predicateFormat((NPObject *)self, __jeti_sel_predicateFormat);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPPredicate[] = {
-    { .key = "predicateFormat", .get = jeti_kvc_wrap_NPPredicate_predicateFormat },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPSet_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPSet_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPSet_anyObject(id self) {
-    return (id)NPSet_anyObject((NPObject *)self, __jeti_sel_anyObject);
-}
-
-static id jeti_kvc_wrap_NPSet_allObjects(id self) {
-    return (id)NPSet_allObjects((NPObject *)self, __jeti_sel_allObjects);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPSet[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPSet_count },
-    { .key = "anyObject", .get = jeti_kvc_wrap_NPSet_anyObject },
-    { .key = "allObjects", .get = jeti_kvc_wrap_NPSet_allObjects },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPString_length(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_length, NPString_length((NPObject *)self, __jeti_sel_length));
-}
-
-static id jeti_kvc_wrap_NPString_UTF8String(id self) {
-    return (id)NPString_UTF8String((NPObject *)self, __jeti_sel_UTF8String);
-}
-
-static id jeti_kvc_wrap_NPString_uppercaseString(id self) {
-    return (id)NPString_uppercaseString((NPObject *)self, __jeti_sel_uppercaseString);
-}
-
-static id jeti_kvc_wrap_NPString_lowercaseString(id self) {
-    return (id)NPString_lowercaseString((NPObject *)self, __jeti_sel_lowercaseString);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPString[] = {
-    { .key = "length", .get = jeti_kvc_wrap_NPString_length },
-    { .key = "UTF8String", .get = jeti_kvc_wrap_NPString_UTF8String },
-    { .key = "uppercaseString", .get = jeti_kvc_wrap_NPString_uppercaseString },
-    { .key = "lowercaseString", .get = jeti_kvc_wrap_NPString_lowercaseString },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPArray_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPArray_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPArray_firstObject(id self) {
-    return (id)NPArray_firstObject((NPObject *)self, __jeti_sel_firstObject);
-}
-
-static id jeti_kvc_wrap_NPArray_lastObject(id self) {
-    return (id)NPArray_lastObject((NPObject *)self, __jeti_sel_lastObject);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPArray[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPArray_count },
-    { .key = "firstObject", .get = jeti_kvc_wrap_NPArray_firstObject },
-    { .key = "lastObject", .get = jeti_kvc_wrap_NPArray_lastObject },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPOrderedSet_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPSet_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPOrderedSet_anyObject(id self) {
-    return (id)NPSet_anyObject((NPObject *)self, __jeti_sel_anyObject);
-}
-
-static id jeti_kvc_wrap_NPOrderedSet_allObjects(id self) {
-    return (id)NPSet_allObjects((NPObject *)self, __jeti_sel_allObjects);
-}
-
-static id jeti_kvc_wrap_NPOrderedSet_firstObject(id self) {
-    return (id)NPOrderedSet_firstObject((NPObject *)self, __jeti_sel_firstObject);
-}
-
-static id jeti_kvc_wrap_NPOrderedSet_lastObject(id self) {
-    return (id)NPOrderedSet_lastObject((NPObject *)self, __jeti_sel_lastObject);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPOrderedSet[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPOrderedSet_count },
-    { .key = "anyObject", .get = jeti_kvc_wrap_NPOrderedSet_anyObject },
-    { .key = "allObjects", .get = jeti_kvc_wrap_NPOrderedSet_allObjects },
-    { .key = "firstObject", .get = jeti_kvc_wrap_NPOrderedSet_firstObject },
-    { .key = "lastObject", .get = jeti_kvc_wrap_NPOrderedSet_lastObject },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPMutableSet_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPSet_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPMutableSet_anyObject(id self) {
-    return (id)NPSet_anyObject((NPObject *)self, __jeti_sel_anyObject);
-}
-
-static id jeti_kvc_wrap_NPMutableSet_allObjects(id self) {
-    return (id)NPSet_allObjects((NPObject *)self, __jeti_sel_allObjects);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPMutableSet[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPMutableSet_count },
-    { .key = "anyObject", .get = jeti_kvc_wrap_NPMutableSet_anyObject },
-    { .key = "allObjects", .get = jeti_kvc_wrap_NPMutableSet_allObjects },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPMutableString_length(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_length, NPString_length((NPObject *)self, __jeti_sel_length));
-}
-
-static id jeti_kvc_wrap_NPMutableString_UTF8String(id self) {
-    return (id)NPString_UTF8String((NPObject *)self, __jeti_sel_UTF8String);
-}
-
-static id jeti_kvc_wrap_NPMutableString_uppercaseString(id self) {
-    return (id)NPString_uppercaseString((NPObject *)self, __jeti_sel_uppercaseString);
-}
-
-static id jeti_kvc_wrap_NPMutableString_lowercaseString(id self) {
-    return (id)NPString_lowercaseString((NPObject *)self, __jeti_sel_lowercaseString);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPMutableString[] = {
-    { .key = "length", .get = jeti_kvc_wrap_NPMutableString_length },
-    { .key = "UTF8String", .get = jeti_kvc_wrap_NPMutableString_UTF8String },
-    { .key = "uppercaseString", .get = jeti_kvc_wrap_NPMutableString_uppercaseString },
-    { .key = "lowercaseString", .get = jeti_kvc_wrap_NPMutableString_lowercaseString },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPMutableArray_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPArray_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPMutableArray_firstObject(id self) {
-    return (id)NPArray_firstObject((NPObject *)self, __jeti_sel_firstObject);
-}
-
-static id jeti_kvc_wrap_NPMutableArray_lastObject(id self) {
-    return (id)NPArray_lastObject((NPObject *)self, __jeti_sel_lastObject);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPMutableArray[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPMutableArray_count },
-    { .key = "firstObject", .get = jeti_kvc_wrap_NPMutableArray_firstObject },
-    { .key = "lastObject", .get = jeti_kvc_wrap_NPMutableArray_lastObject },
-    { .key = NULL, .get = NULL },
-};
-
-static id jeti_kvc_wrap_NPMutableDictionary_count(id self) {
-    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_count, NPDictionary_count((NPObject *)self, __jeti_sel_count));
-}
-
-static id jeti_kvc_wrap_NPMutableDictionary_allKeys(id self) {
-    return (id)NPDictionary_allKeys((NPObject *)self, __jeti_sel_allKeys);
-}
-
-static id jeti_kvc_wrap_NPMutableDictionary_allValues(id self) {
-    return (id)NPDictionary_allValues((NPObject *)self, __jeti_sel_allValues);
-}
-
-static const jeti_kvc_entry JETI_KVC_$_NPMutableDictionary[] = {
-    { .key = "count", .get = jeti_kvc_wrap_NPMutableDictionary_count },
-    { .key = "allKeys", .get = jeti_kvc_wrap_NPMutableDictionary_allKeys },
-    { .key = "allValues", .get = jeti_kvc_wrap_NPMutableDictionary_allValues },
     { .key = NULL, .get = NULL },
 };
 
@@ -2799,21 +2459,21 @@ NPClass JETI_CLASS_$_NPMutableArray;
 NPClass JETI_CLASS_$_NPMutableDictionary;
 
 __attribute__((constructor)) static void __jeti_vtable_layout_check(void) {
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_jeti_root)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class jeti_root | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPObject)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPObject | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPError)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPError | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPNumber)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPNumber | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Fetcher)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class Fetcher | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPPredicate)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPPredicate | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPOrderedSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPOrderedSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPMutableSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPMutableString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPMutableArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo _expandFormat_args_count_ compute_ loadCachedValue localizedDescription plain_ runAll valueForKey_ | class NPMutableDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_jeti_root)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class jeti_root | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPObject)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPObject | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPError)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPError | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPNumber)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPNumber | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_Fetcher)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class Fetcher | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPPredicate)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPPredicate | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPOrderedSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPOrderedSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
 }
 
 __attribute__((weak)) void jeti_metaInit(void) {
@@ -2845,8 +2505,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPDictionary_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPDictionary_dealloc,
-        .kvc_entries = JETI_KVC_$_NPDictionary,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPError = (NPClass){
         .name = "NPError",
@@ -2868,7 +2527,6 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .protocols = NULL,
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-        .kvc_entries = JETI_KVC_$_NPNumber,
     };
     JETI_CLASS_$_Fetcher = (NPClass){
         .name = "Fetcher",
@@ -2889,8 +2547,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPPredicate_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPPredicate_dealloc,
-        .kvc_entries = JETI_KVC_$_NPPredicate,
+        .dealloc = (void (*)(NPObject *, SEL))NPPredicate__jeti_arc_dealloc,
     };
     JETI_CLASS_$_NPSet = (NPClass){
         .name = "NPSet",
@@ -2900,8 +2557,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPSet_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPSet_dealloc,
-        .kvc_entries = JETI_KVC_$_NPSet,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPString = (NPClass){
         .name = "NPString",
@@ -2911,8 +2567,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPString_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPString_dealloc,
-        .kvc_entries = JETI_KVC_$_NPString,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPArray = (NPClass){
         .name = "NPArray",
@@ -2922,8 +2577,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPArray_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPArray_dealloc,
-        .kvc_entries = JETI_KVC_$_NPArray,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPOrderedSet = (NPClass){
         .name = "NPOrderedSet",
@@ -2933,8 +2587,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPOrderedSet_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPSet_dealloc,
-        .kvc_entries = JETI_KVC_$_NPOrderedSet,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPMutableSet = (NPClass){
         .name = "NPMutableSet",
@@ -2944,8 +2597,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPMutableSet_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPSet_dealloc,
-        .kvc_entries = JETI_KVC_$_NPMutableSet,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPMutableString = (NPClass){
         .name = "NPMutableString",
@@ -2955,8 +2607,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPMutableString_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPString_dealloc,
-        .kvc_entries = JETI_KVC_$_NPMutableString,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPMutableArray = (NPClass){
         .name = "NPMutableArray",
@@ -2966,8 +2617,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPMutableArray_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPArray_dealloc,
-        .kvc_entries = JETI_KVC_$_NPMutableArray,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
     JETI_CLASS_$_NPMutableDictionary = (NPClass){
         .name = "NPMutableDictionary",
@@ -2977,8 +2627,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .class_vtable = &JETI_META_VTABLE_$_NPMutableDictionary_inst,
         .protocols = NULL,
         .protocol_count = 0,
-        .dealloc = (void (*)(NPObject *, SEL))NPDictionary_dealloc,
-        .kvc_entries = JETI_KVC_$_NPMutableDictionary,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
 }
 
@@ -3075,3118 +2724,495 @@ __attribute__((weak)) NPObject *jeti_dictionary_create(size_t count, ...) {
 
 /* --------------- Section 13 · Function bodies ---------------- */
 /* -[jeti_root init] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * jeti_root_init(NPObject * self, SEL _cmd) {
-#line 5 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_init(self);
-}
+NPObject * jeti_root_init(NPObject * self, SEL _cmd);
 
 /* -[jeti_root dealloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void jeti_root_dealloc(NPObject * self, SEL _cmd) {
-#line 8 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return;
-}
+void jeti_root_dealloc(NPObject * self, SEL _cmd);
 
 /* -[jeti_root release] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void jeti_root_release(NPObject * self, SEL _cmd) {
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    jeti_release(self);
-}
+void jeti_root_release(NPObject * self, SEL _cmd);
 
 /* -[jeti_root retain] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * jeti_root_retain(NPObject * self, SEL _cmd) {
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_retain(self);
-}
+NPObject * jeti_root_retain(NPObject * self, SEL _cmd);
 
 /* -[jeti_root isKindOf:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool jeti_root_isKindOf_(NPObject * self, SEL _cmd, NPClass * cls) {
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_isKindOf(self, cls);
-}
+_Bool jeti_root_isKindOf_(NPObject * self, SEL _cmd, NPClass * cls);
 
 /* -[jeti_root isKindOfClass:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool jeti_root_isKindOfClass_(NPObject * self, SEL _cmd, NPClass * cls) {
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_isKindOfClass(self, cls);
-}
+_Bool jeti_root_isKindOfClass_(NPObject * self, SEL _cmd, NPClass * cls);
 
 /* -[jeti_root isEqual:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool jeti_root_isEqual_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return (self == object);
-}
+_Bool jeti_root_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[jeti_root description] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * jeti_root_description(NPObject * self, SEL _cmd) {
-#line 27 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return NULL;
-}
+NPObject * jeti_root_description(NPObject * self, SEL _cmd);
 
 /* +[NPObject alloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPObject_alloc(NPClass * self, SEL _cmd) {
-#line 33 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_alloc(self);
-}
+NPObject * NPObject_alloc(NPClass * self, SEL _cmd);
 
 /* +[NPObject new] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPObject_new(NPClass * self, SEL _cmd) {
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    NPObject * obj = jeti_alloc(self);
-#line 37 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_init(obj);
-}
+NPObject * NPObject_new(NPClass * self, SEL _cmd);
 
 /* -[NPObject alloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPObject_init(NPObject * self, SEL _cmd) {
-#line 40 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_init(self);
-}
+NPObject * NPObject_init(NPObject * self, SEL _cmd);
 
 /* -[NPObject new] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPObject_dealloc(NPObject * self, SEL _cmd) {
-#line 43 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return;
-}
+void NPObject_dealloc(NPObject * self, SEL _cmd);
 
 /* -[NPObject init] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPObject_release(NPObject * self, SEL _cmd) {
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    jeti_release(self);
-}
+void NPObject_release(NPObject * self, SEL _cmd);
 
 /* -[NPObject dealloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPObject_retain(NPObject * self, SEL _cmd) {
-#line 49 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return jeti_retain(self);
-}
-
-/* -[NPObject description] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPObject_description(NPObject * self, SEL _cmd) {
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPObject.jeti"
-    return NULL;
-}
+NPObject * NPObject_retain(NPObject * self, SEL _cmd);
 
 /* +[NPString hasPrefix:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPString_stringWithUTF8String_(NPClass * self, SEL _cmd, const char * cstr) {
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    {
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        return (NPString *)({ NPObject *__jeti_tmp_0 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_0 ? ((NPMutableString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->initWithUTF8String_)(__jeti_tmp_0, __jeti_sel_initWithUTF8String_, cstr) : 0; });
-    }
-}
+NPString * NPString_stringWithUTF8String_(NPClass * self, SEL _cmd, const char * cstr);
 
 /* +[NPString hasSuffix:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPString_stringWithString_(NPClass * self, SEL _cmd, NPString * str) {
-#line 58 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    {
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        return (NPString *)({ NPObject *__jeti_tmp_1 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_1 ? ((NPMutableString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->initWithString_)(__jeti_tmp_1, __jeti_sel_initWithString_, (NPString *)(str)) : 0; });
-    }
-}
+NPString * NPString_stringWithString_(NPClass * self, SEL _cmd, NPString * str);
 
 /* -[NPString rangeOfString:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPString_initWithUTF8String_(NPObject * self, SEL _cmd, const char * cstr) {
-#line 10 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((self && cstr)) {
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        ((struct NPString *)self)->_length = strlen(cstr);
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        ((struct NPString *)self)->_cstr = (char *)malloc((((struct NPString *)self)->_length + 1));
-#line 16 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        if (((struct NPString *)self)->_cstr) {
-#line 15 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            strcpy(((struct NPString *)self)->_cstr, cstr);
-        }
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                ((struct NPString *)self)->_hash = 0;
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                ((struct NPString *)self)->_hashIsValid = 0;
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return (NPString *)self;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_initWithUTF8String_(NPObject * self, SEL _cmd, const char * cstr);
 
 /* -[NPString substringFromIndex:] */
-__attribute__((weak)) NPString * NPString_initWithString_(NPObject * self, SEL _cmd, NPString * str) {
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((self && str)) {
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        char * src = (char *)(({ NPObject *__jeti_tmp_2 = ((NPObject *)(str)); __jeti_tmp_2 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->UTF8String)(__jeti_tmp_2, __jeti_sel_UTF8String) : 0; }));
-#line 33 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        if (src) {
-#line 28 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            ((struct NPString *)self)->_length = strlen(src);
-#line 29 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            ((struct NPString *)self)->_cstr = (char *)malloc((((struct NPString *)self)->_length + 1));
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            if (((struct NPString *)self)->_cstr) {
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                strcpy(((struct NPString *)self)->_cstr, src);
-            }
-        }
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 34 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                ((struct NPString *)self)->_hash = 0;
-#line 35 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                ((struct NPString *)self)->_hashIsValid = 0;
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 37 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return (NPString *)self;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_initWithString_(NPObject * self, SEL _cmd, NPString * str);
 
 /* -[NPString substringToIndex:] */
-__attribute__((weak)) size_t NPString_length(NPObject * self, SEL _cmd) {
-#line 62 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return ((struct NPString *)self)->_length;
-}
+size_t NPString_length(NPObject * self, SEL _cmd);
 
 /* -[NPString substringWithRange:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) const char * NPString_UTF8String(NPObject * self, SEL _cmd) {
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return ((struct NPString *)self)->_cstr ? ((struct NPString *)self)->_cstr : "";
-}
+const char * NPString_UTF8String(NPObject * self, SEL _cmd);
 
 /* -[NPString stringByAppendingString:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) char NPString_characterAtIndex_(NPObject * self, SEL _cmd, size_t index) {
-#line 72 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((((struct NPString *)self)->_cstr && (index < ((struct NPString *)self)->_length))) {
-#line 71 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        return ((struct NPString *)self)->_cstr[index];
-    }
-#line 73 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return '\x00';
-}
+char NPString_characterAtIndex_(NPObject * self, SEL _cmd, size_t index);
 
 /* -[NPString characterAtIndex:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool NPString_isEqual_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 77 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((self == (NPObject *)object)) {
-        return 1;
-    }
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!object) {
-        return 0;
-    }
-#line 81 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    __auto_type __jeti_eh_tmp_0 = &JETI_CLASS_$_NPString;
-    __auto_type __jeti_eh_tmp_1 = ({ NPObject *__jeti_tmp_3 = ((NPObject *)(object)); __jeti_tmp_3 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->isKindOfClass_)(__jeti_tmp_3, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_0)) : (_Bool){0}; });
-    if (__jeti_eh_tmp_1) {
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        return ({ NPObject *__jeti_tmp_4 = ((NPObject *)(self)); __jeti_tmp_4 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->isEqualToString_)(__jeti_tmp_4, __jeti_sel_isEqualToString_, (NPString *)((NPString *)object)) : (int){0}; });
-    }
-#line 82 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (&JETI_VTABLE_$_jeti_root)->isEqual_(self, __jeti_sel_isEqual_, (NPObject *)(object));
-}
+_Bool NPString_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPString stringByAppendingUTF8String:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPString_isEqualToString_(NPObject * self, SEL _cmd, NPString * other) {
-#line 86 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((self == (NPObject *)other)) {
-        return 1;
-    }
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!self || !other)) {
-        return 0;
-    }
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s1 = (char *)(({ NPObject *__jeti_tmp_5 = ((NPObject *)(self)); __jeti_tmp_5 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->UTF8String)(__jeti_tmp_5, __jeti_sel_UTF8String) : 0; }));
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s2 = (char *)(({ NPObject *__jeti_tmp_6 = ((NPObject *)(other)); __jeti_tmp_6 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_6->isa->vtable)->UTF8String)(__jeti_tmp_6, __jeti_sel_UTF8String) : 0; }));
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!s1 || !s2)) {
-        return (s1 == s2);
-    }
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (strcmp(s1, s2) == 0);
-}
+int NPString_isEqualToString_(NPObject * self, SEL _cmd, NPString * other);
 
 /* -[NPString uppercaseString] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPString_compare_(NPObject * self, SEL _cmd, NPString * other) {
-#line 95 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!other) {
-        return 1;
-    }
-#line 96 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s1 = (char *)(({ NPObject *__jeti_tmp_7 = ((NPObject *)(self)); __jeti_tmp_7 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_7->isa->vtable)->UTF8String)(__jeti_tmp_7, __jeti_sel_UTF8String) : 0; }));
-#line 97 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s2 = (char *)(({ NPObject *__jeti_tmp_8 = ((NPObject *)(other)); __jeti_tmp_8 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_8->isa->vtable)->UTF8String)(__jeti_tmp_8, __jeti_sel_UTF8String) : 0; }));
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!s1) {
-        return s2 ? -1 : 0;
-    }
-#line 99 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!s2) {
-        return 1;
-    }
-#line 100 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return strcmp(s1, s2);
-}
+int NPString_compare_(NPObject * self, SEL _cmd, NPString * other);
 
 /* -[NPString lowercaseString] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPString_hasPrefix_(NPObject * self, SEL _cmd, NPString * prefix) {
-#line 104 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!self || !prefix)) {
-        return 0;
-    }
-#line 105 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * pre = (char *)(({ NPObject *__jeti_tmp_9 = ((NPObject *)(prefix)); __jeti_tmp_9 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_9->isa->vtable)->UTF8String)(__jeti_tmp_9, __jeti_sel_UTF8String) : 0; }));
-#line 106 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * str = (char *)(({ NPObject *__jeti_tmp_10 = ((NPObject *)(self)); __jeti_tmp_10 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_10->isa->vtable)->UTF8String)(__jeti_tmp_10, __jeti_sel_UTF8String) : 0; }));
-#line 107 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!pre || !str)) {
-        return 0;
-    }
-#line 108 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t preLen = strlen(pre);
-#line 109 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (strncmp(str, pre, preLen) == 0);
-}
+int NPString_hasPrefix_(NPObject * self, SEL _cmd, NPString * prefix);
 
 /* -[NPString hash] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPString_hasSuffix_(NPObject * self, SEL _cmd, NPString * suffix) {
-#line 113 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!self || !suffix)) {
-        return 0;
-    }
-#line 114 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * suf = (char *)(({ NPObject *__jeti_tmp_11 = ((NPObject *)(suffix)); __jeti_tmp_11 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_11->isa->vtable)->UTF8String)(__jeti_tmp_11, __jeti_sel_UTF8String) : 0; }));
-#line 115 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * str = (char *)(({ NPObject *__jeti_tmp_12 = ((NPObject *)(self)); __jeti_tmp_12 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_12->isa->vtable)->UTF8String)(__jeti_tmp_12, __jeti_sel_UTF8String) : 0; }));
-#line 116 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!suf || !str)) {
-        return 0;
-    }
-#line 117 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t sufLen = strlen(suf);
-#line 118 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t strLen = strlen(str);
-#line 119 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((sufLen > strLen)) {
-        return 0;
-    }
-#line 120 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (strcmp(((str + strLen) - sufLen), suf) == 0);
-}
+int NPString_hasSuffix_(NPObject * self, SEL _cmd, NPString * suffix);
 
 /* -[NPString description] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPRange NPString_rangeOfString_(NPObject * self, SEL _cmd, NPString * substring) {
-#line 124 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    NPRange range = { 0, 0 };
-#line 125 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!substring || !((struct NPString *)self)->_cstr)) {
-        return range;
-    }
-#line 126 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * sub = (char *)(({ NPObject *__jeti_tmp_13 = ((NPObject *)(substring)); __jeti_tmp_13 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_13->isa->vtable)->UTF8String)(__jeti_tmp_13, __jeti_sel_UTF8String) : 0; }));
-#line 127 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!sub) {
-        return range;
-    }
-#line 128 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * found = (char *)(strstr(((struct NPString *)self)->_cstr, sub));
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 135 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            if (found) {
-#line 130 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                range.location = (size_t)((found - ((struct NPString *)self)->_cstr));
-#line 131 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                range.length = strlen(sub);
-            }
-            else {
-#line 133 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                range.location = (size_t)-1;
-#line 134 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                range.length = 0;
-            }
-#line 136 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return range;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return (NPRange){ 0 };
-    }
-}
+NPRange NPString_rangeOfString_(NPObject * self, SEL _cmd, NPString * substring);
 
 /* -[NPString copy] */
-__attribute__((weak)) NPString * NPString_substringFromIndex_(NPObject * self, SEL _cmd, size_t from) {
-#line 140 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!((struct NPString *)self)->_cstr || (from > ((struct NPString *)self)->_length))) {
-        return NULL;
-    }
-#line 141 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (NPString *)NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, (((struct NPString *)self)->_cstr + from));
-}
+NPString * NPString_substringFromIndex_(NPObject * self, SEL _cmd, size_t from);
 
-/* -[NPString dealloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPString_substringToIndex_(NPObject * self, SEL _cmd, size_t to) {
-#line 145 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!((struct NPString *)self)->_cstr) {
-        return NULL;
-    }
-#line 146 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((to > ((struct NPString *)self)->_length)) {
-        to = ((struct NPString *)self)->_length;
-    }
-#line 147 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * buf = (char *)malloc((to + 1));
-#line 148 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    strncpy(buf, ((struct NPString *)self)->_cstr, to);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 149 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            buf[to] = '\x00';
-#line 150 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 151 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            free(buf);
-#line 152 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return result;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+/* -[NPString substringToIndex_] */
+NPString * NPString_substringToIndex_(NPObject * self, SEL _cmd, size_t to);
 
 /* -[NPString substringWithRange_] */
-__attribute__((weak)) NPString * NPString_substringWithRange_(NPObject * self, SEL _cmd, NPRange range) {
-#line 156 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!((struct NPString *)self)->_cstr) {
-        return NULL;
-    }
-#line 159 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (((range.location > ((struct NPString *)self)->_length) || ((range.location + range.length) > ((struct NPString *)self)->_length))) {
-#line 158 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        return NULL;
-    }
-#line 160 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * buf = (char *)malloc((range.length + 1));
-#line 161 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    strncpy(buf, (((struct NPString *)self)->_cstr + range.location), range.length);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 162 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            buf[range.length] = '\x00';
-#line 163 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 164 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            free(buf);
-#line 165 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return result;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_substringWithRange_(NPObject * self, SEL _cmd, NPRange range);
 
 /* -[NPString stringByAppendingString_] */
-__attribute__((weak)) NPString * NPString_stringByAppendingString_(NPObject * self, SEL _cmd, NPString * other) {
-#line 169 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!self) {
-        return (NPString *)NPString_stringWithString_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithString_, other);
-    }
-#line 170 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!other) {
-        return (NPString *)NPString_stringWithString_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithString_, self);
-    }
-#line 171 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s1 = (char *)(({ NPObject *__jeti_tmp_14 = ((NPObject *)(self)); __jeti_tmp_14 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_14->isa->vtable)->UTF8String)(__jeti_tmp_14, __jeti_sel_UTF8String) : 0; }));
-#line 172 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s2 = (char *)(({ NPObject *__jeti_tmp_15 = ((NPObject *)(other)); __jeti_tmp_15 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_15->isa->vtable)->UTF8String)(__jeti_tmp_15, __jeti_sel_UTF8String) : 0; }));
-#line 173 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!s1 || !s2)) {
-        return (NPString *)NPString_stringWithString_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithString_, s1 ? self : other);
-    }
-#line 174 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t len1 = strlen(s1);
-#line 175 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t len2 = strlen(s2);
-#line 176 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * buf = (char *)malloc(((len1 + len2) + 1));
-#line 177 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    strcpy(buf, s1);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 178 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            strcat(buf, s2);
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 179 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                    NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 180 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                    free(buf);
-#line 181 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                    return result;
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_stringByAppendingString_(NPObject * self, SEL _cmd, NPString * other);
 
 /* -[NPString stringByAppendingUTF8String_] */
-__attribute__((weak)) NPString * NPString_stringByAppendingUTF8String_(NPObject * self, SEL _cmd, const char * cstr) {
-#line 185 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if ((!self || !cstr)) {
-        return (NPString *)NPString_stringWithString_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithString_, self);
-    }
-#line 186 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * s1 = (char *)(({ NPObject *__jeti_tmp_16 = ((NPObject *)(self)); __jeti_tmp_16 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_16->isa->vtable)->UTF8String)(__jeti_tmp_16, __jeti_sel_UTF8String) : 0; }));
-#line 187 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!s1) {
-        return (NPString *)NPString_stringWithString_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithString_, self);
-    }
-#line 188 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t len1 = strlen(s1);
-#line 189 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    size_t len2 = strlen(cstr);
-#line 190 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * buf = (char *)malloc(((len1 + len2) + 1));
-#line 191 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    strcpy(buf, s1);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 192 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            strcat(buf, cstr);
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 193 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                    NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 194 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                    free(buf);
-#line 195 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-                    return result;
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_stringByAppendingUTF8String_(NPObject * self, SEL _cmd, const char * cstr);
 
 /* -[NPString uppercaseString] */
-__attribute__((weak)) NPString * NPString_uppercaseString(NPObject * self, SEL _cmd) {
-#line 199 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!((struct NPString *)self)->_cstr) {
-        return NULL;
-    }
-#line 200 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * buf = (char *)malloc((((struct NPString *)self)->_length + 1));
-#line 203 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    for (unsigned long i = 0;  ((__jeti_eh_flag == 0) && (i <= ((struct NPString *)self)->_length)); (i)++) {
-#line 202 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        buf[i] = (char)toupper((unsigned char)((struct NPString *)self)->_cstr[i]);
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 204 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 205 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            free(buf);
-#line 206 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return result;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_uppercaseString(NPObject * self, SEL _cmd);
 
 /* -[NPString lowercaseString] */
-__attribute__((weak)) NPString * NPString_lowercaseString(NPObject * self, SEL _cmd) {
-#line 210 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (!((struct NPString *)self)->_cstr) {
-        return NULL;
-    }
-#line 211 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    char * buf = (char *)malloc((((struct NPString *)self)->_length + 1));
-#line 214 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    for (unsigned long i = 0;  ((__jeti_eh_flag == 0) && (i <= ((struct NPString *)self)->_length)); (i)++) {
-#line 213 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        buf[i] = (char)tolower((unsigned char)((struct NPString *)self)->_cstr[i]);
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 215 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 216 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            free(buf);
-#line 217 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            return result;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPString * NPString_lowercaseString(NPObject * self, SEL _cmd);
 
 /* -[NPString hash] */
-__attribute__((weak)) uint32_t NPString_hash(NPObject * self, SEL _cmd) {
-#line 221 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (((struct NPString *)self)->_hashIsValid) {
-        return ((struct NPString *)self)->_hash;
-    }
-#line 222 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    uint32_t h = 2166136261;
-#line 228 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (((struct NPString *)self)->_cstr) {
-#line 227 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        for (unsigned long i = 0;  (i < ((struct NPString *)self)->_length); (i)++) {
-#line 225 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            (h ^= (uint8_t)((struct NPString *)self)->_cstr[i]);
-#line 226 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-            (h *= 16777619);
-        }
-    }
-#line 229 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    ((struct NPString *)self)->_hash = h;
-#line 230 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    ((struct NPString *)self)->_hashIsValid = 1;
-#line 231 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return h;
-}
+uint32_t NPString_hash(NPObject * self, SEL _cmd);
 
 /* -[NPString isEqual:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPString_description(NPObject * self, SEL _cmd) {
-#line 235 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (NPString *)NPString_stringWithString_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithString_, self);
-}
+NPString * NPString_description(NPObject * self, SEL _cmd);
 
 /* -[NPString copy] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPString_copy(NPObject * self, SEL _cmd) {
-#line 240 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    return (NPString *)({ NPObject *__jeti_tmp_17 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_NPString, __jeti_sel_alloc))); __jeti_tmp_17 ? ((NPMutableString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_17->isa->vtable)->initWithString_)(__jeti_tmp_17, __jeti_sel_initWithString_, (NPString *)(self)) : 0; });
-}
-
-/* -[NPString stringWithString:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPString_dealloc(NPObject * self, SEL _cmd) {
-#line 44 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    if (((struct NPString *)self)->_cstr) {
-#line 42 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        free(((struct NPString *)self)->_cstr);
-#line 43 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-        ((struct NPString *)self)->_cstr = NULL;
-    }
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    ((struct NPString *)self)->_length = 0;
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPString.jeti"
-    (&JETI_VTABLE_$_NPObject)->dealloc(self, __jeti_sel_dealloc);
-}
+NPString * NPString_copy(NPObject * self, SEL _cmd);
 
 /* +[NPMutableString stringWithUTF8String_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableString * NPMutableString_stringWithUTF8String_(NPClass * self, SEL _cmd, const char * cstr) {
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    {
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-        return (NPMutableString *)({ NPObject *__jeti_tmp_18 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_18 ? ((NPMutableString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_18->isa->vtable)->initWithUTF8String_)(__jeti_tmp_18, __jeti_sel_initWithUTF8String_, cstr) : 0; });
-    }
-}
+NPMutableString * NPMutableString_stringWithUTF8String_(NPClass * self, SEL _cmd, const char * cstr);
 
 /* +[NPMutableString stringWithString_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableString * NPMutableString_stringWithString_(NPClass * self, SEL _cmd, NPString * str) {
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    {
-#line 25 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-        return (NPMutableString *)({ NPObject *__jeti_tmp_19 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_19 ? ((NPMutableString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_19->isa->vtable)->initWithString_)(__jeti_tmp_19, __jeti_sel_initWithString_, (NPString *)(str)) : 0; });
-    }
-}
+NPMutableString * NPMutableString_stringWithString_(NPClass * self, SEL _cmd, NPString * str);
 
 /* -[NPMutableString initWithUTF8String_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableString * NPMutableString_initWithUTF8String_(NPObject * self, SEL _cmd, const char * cstr) {
-#line 8 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    self = (&JETI_VTABLE_$_NPString)->initWithUTF8String_(self, __jeti_sel_initWithUTF8String_, cstr);
-#line 9 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    return (NPMutableString *)self;
-}
+NPMutableString * NPMutableString_initWithUTF8String_(NPObject * self, SEL _cmd, const char * cstr);
 
 /* -[NPMutableString initWithString_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableString * NPMutableString_initWithString_(NPObject * self, SEL _cmd, NPString * str) {
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    self = (&JETI_VTABLE_$_NPString)->initWithString_(self, __jeti_sel_initWithString_, (NPString *)(str));
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    return (NPMutableString *)self;
-}
+NPMutableString * NPMutableString_initWithString_(NPObject * self, SEL _cmd, NPString * str);
 
 /* -[NPMutableString appendString_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableString_appendString_(NPObject * self, SEL _cmd, NPString * str) {
-#line 30 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!str) {
-        return;
-    }
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * src = (char *)(({ NPObject *__jeti_tmp_20 = ((NPObject *)(str)); __jeti_tmp_20 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_20->isa->vtable)->UTF8String)(__jeti_tmp_20, __jeti_sel_UTF8String) : 0; }));
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!src) {
-        return;
-    }
-#line 33 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ({ NPObject *__jeti_tmp_21 = ((NPObject *)(self)); __jeti_tmp_21 ? ((void (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_21->isa->vtable)->appendUTF8String_)(__jeti_tmp_21, __jeti_sel_appendUTF8String_, src) : 0; });
-}
+void NPMutableString_appendString_(NPObject * self, SEL _cmd, NPString * str);
 
 /* -[NPMutableString appendUTF8String_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableString_appendUTF8String_(NPObject * self, SEL _cmd, const char * cstr) {
-#line 37 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!cstr) {
-        return;
-    }
-#line 38 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    size_t add = strlen(cstr);
-#line 39 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if ((add == 0)) {
-        return;
-    }
-#line 40 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * nbuf = (char *)realloc(((struct NPMutableString *)self)->_cstr, ((((struct NPMutableString *)self)->_length + add) + 1));
-#line 41 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!nbuf) {
-        return;
-    }
-#line 42 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_cstr = nbuf;
-#line 43 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memcpy((((struct NPMutableString *)self)->_cstr + ((struct NPMutableString *)self)->_length), cstr, (add + 1));
-#line 44 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    (((struct NPMutableString *)self)->_length += add);
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_hashIsValid = 0;
-}
+void NPMutableString_appendUTF8String_(NPObject * self, SEL _cmd, const char * cstr);
 
 /* -[NPMutableString insertString_atIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableString_insertString_atIndex_(NPObject * self, SEL _cmd, NPString * str, size_t idx) {
-#line 49 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!str) {
-        return;
-    }
-#line 50 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * src = (char *)(({ NPObject *__jeti_tmp_22 = ((NPObject *)(str)); __jeti_tmp_22 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_22->isa->vtable)->UTF8String)(__jeti_tmp_22, __jeti_sel_UTF8String) : 0; }));
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!src) {
-        return;
-    }
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if ((idx > ((struct NPMutableString *)self)->_length)) {
-        idx = ((struct NPMutableString *)self)->_length;
-    }
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    size_t add = strlen(src);
-#line 54 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if ((add == 0)) {
-        return;
-    }
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * nbuf = (char *)realloc(((struct NPMutableString *)self)->_cstr, ((((struct NPMutableString *)self)->_length + add) + 1));
-#line 56 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!nbuf) {
-        return;
-    }
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_cstr = nbuf;
-#line 58 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memmove(((((struct NPMutableString *)self)->_cstr + idx) + add), (((struct NPMutableString *)self)->_cstr + idx), ((((struct NPMutableString *)self)->_length - idx) + 1));
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memcpy((((struct NPMutableString *)self)->_cstr + idx), src, add);
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    (((struct NPMutableString *)self)->_length += add);
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_hashIsValid = 0;
-}
+void NPMutableString_insertString_atIndex_(NPObject * self, SEL _cmd, NPString * str, size_t idx);
 
 /* -[NPMutableString deleteCharactersInRange_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableString_deleteCharactersInRange_(NPObject * self, SEL _cmd, NPRange range) {
-#line 65 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!((struct NPMutableString *)self)->_cstr) {
-        return;
-    }
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if ((range.location > ((struct NPMutableString *)self)->_length)) {
-        return;
-    }
-#line 69 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (((range.location + range.length) > ((struct NPMutableString *)self)->_length)) {
-#line 68 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-        range.length = (((struct NPMutableString *)self)->_length - range.location);
-    }
-#line 70 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if ((range.length == 0)) {
-        return;
-    }
-#line 71 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memmove((((struct NPMutableString *)self)->_cstr + range.location), ((((struct NPMutableString *)self)->_cstr + range.location) + range.length), (((((struct NPMutableString *)self)->_length - range.location) - range.length) + 1));
-#line 73 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    (((struct NPMutableString *)self)->_length -= range.length);
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_hashIsValid = 0;
-}
+void NPMutableString_deleteCharactersInRange_(NPObject * self, SEL _cmd, NPRange range);
 
 /* -[NPMutableString replaceCharactersInRange_withString_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableString_replaceCharactersInRange_withString_(NPObject * self, SEL _cmd, NPRange range, NPString * str) {
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!str) {
-        return;
-    }
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * src = (char *)(({ NPObject *__jeti_tmp_23 = ((NPObject *)(str)); __jeti_tmp_23 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_23->isa->vtable)->UTF8String)(__jeti_tmp_23, __jeti_sel_UTF8String) : 0; }));
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!src) {
-        return;
-    }
-#line 81 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if ((range.location > ((struct NPMutableString *)self)->_length)) {
-        return;
-    }
-#line 84 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (((range.location + range.length) > ((struct NPMutableString *)self)->_length)) {
-#line 83 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-        range.length = (((struct NPMutableString *)self)->_length - range.location);
-    }
-#line 85 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    size_t nlen = strlen(src);
-#line 86 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    size_t tail = ((((struct NPMutableString *)self)->_length - range.location) - range.length);
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    size_t newlen = ((range.location + nlen) + tail);
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * nbuf = (char *)realloc(((struct NPMutableString *)self)->_cstr, (newlen + 1));
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!nbuf) {
-        return;
-    }
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_cstr = nbuf;
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memmove(((((struct NPMutableString *)self)->_cstr + range.location) + nlen), ((((struct NPMutableString *)self)->_cstr + range.location) + range.length), (tail + 1));
-#line 92 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memcpy((((struct NPMutableString *)self)->_cstr + range.location), src, nlen);
-#line 93 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_length = newlen;
-#line 94 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_hashIsValid = 0;
-}
+void NPMutableString_replaceCharactersInRange_withString_(NPObject * self, SEL _cmd, NPRange range, NPString * str);
 
 /* -[NPMutableString setString_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableString_setString_(NPObject * self, SEL _cmd, NPString * str) {
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * src = (char *)(str ? ({ NPObject *__jeti_tmp_24 = ((NPObject *)(str)); __jeti_tmp_24 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_24->isa->vtable)->UTF8String)(__jeti_tmp_24, __jeti_sel_UTF8String) : 0; }) : "");
-#line 99 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    size_t nlen = strlen(src);
-#line 100 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    char * nbuf = (char *)realloc(((struct NPMutableString *)self)->_cstr, (nlen + 1));
-#line 101 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    if (!nbuf) {
-        return;
-    }
-#line 102 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_cstr = nbuf;
-#line 103 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    memcpy(((struct NPMutableString *)self)->_cstr, src, (nlen + 1));
-#line 104 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_length = nlen;
-#line 105 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableString.jeti"
-    ((struct NPMutableString *)self)->_hashIsValid = 0;
-}
+void NPMutableString_setString_(NPObject * self, SEL _cmd, NPString * str);
 
 /* +[NPPredicate predicateWithFormat_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPPredicate * NPPredicate_predicateWithFormat_(NPClass * self, SEL _cmd, NPString * format) {
-#line 387 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return (NPPredicate *)({ NPObject *__jeti_tmp_25 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_25 ? ((NPPredicate * (*)(NPObject *, SEL, NPString *, NPObject * *, size_t))((struct jeti_vtable *)__jeti_tmp_25->isa->vtable)->initWithFormat_args_count_)(__jeti_tmp_25, __jeti_sel_initWithFormat_args_count_, (NPString *)(format), (NPObject * *)(NULL), 0) : 0; });
-}
+NPPredicate * NPPredicate_predicateWithFormat_(NPClass * self, SEL _cmd, NPString * format);
 
 /* +[NPPredicate predicateWithFormat_object_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPPredicate * NPPredicate_predicateWithFormat_object_(NPClass * self, SEL _cmd, NPString * format, NPObject * arg) {
-#line 391 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPObject * args[2] = { arg, NULL };
-#line 392 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return (NPPredicate *)({ NPObject *__jeti_tmp_26 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_26 ? ((NPPredicate * (*)(NPObject *, SEL, NPString *, NPObject * *, size_t))((struct jeti_vtable *)__jeti_tmp_26->isa->vtable)->initWithFormat_args_count_)(__jeti_tmp_26, __jeti_sel_initWithFormat_args_count_, (NPString *)(format), (NPObject * *)(args), 1) : 0; });
-}
+NPPredicate * NPPredicate_predicateWithFormat_object_(NPClass * self, SEL _cmd, NPString * format, NPObject * arg);
 
 /* -[NPPredicate initWithFormat_args_count_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPPredicate * NPPredicate_initWithFormat_args_count_(NPObject * self, SEL _cmd, NPString * format, NPObject * * args, size_t n) {
-#line 396 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 397 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!self) {
-        return NULL;
-    }
-#line 398 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    ((struct NPPredicate *)self)->_nodes = NULL;
-#line 399 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    ((struct NPPredicate *)self)->_node_count = 0;
-#line 400 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    ((struct NPPredicate *)self)->_node_cap = 0;
-#line 401 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    ((struct NPPredicate *)self)->_format = NULL;
-#line 402 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!format) {
-        return (NPPredicate *)self;
-    }
-#line 408 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPString * expanded = (NPString *)(({ NPObject *__jeti_tmp_27 = ((NPObject *)(self)); __jeti_tmp_27 ? ((NPString * (*)(NPObject *, SEL, NPString *, NPObject * *, size_t))((struct jeti_vtable *)__jeti_tmp_27->isa->vtable)->_expandFormat_args_count_)(__jeti_tmp_27, __jeti_sel__expandFormat_args_count_, (NPString *)(format), (NPObject * *)(args), n) : 0; }));
-#line 410 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    ((struct NPPredicate *)self)->_format = (NPString *)(({ NPObject *__jeti_tmp_28 = ((NPObject *)(expanded)); __jeti_tmp_28 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_28->isa->vtable)->copy)(__jeti_tmp_28, __jeti_sel_copy) : 0; }));
-#line 412 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * nodes = NULL;
-#line 413 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t count = 0;
-    size_t root = 0;
-#line 418 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    __auto_type __jeti_eh_tmp_42 = ({ NPObject *__jeti_tmp_29 = ((NPObject *)(expanded)); __jeti_tmp_29 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_29->isa->vtable)->UTF8String)(__jeti_tmp_29, __jeti_sel_UTF8String) : 0; });
-    if (!pred_parse(__jeti_eh_tmp_42, &nodes, &count, &root)) {
-#line 415 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        __auto_type __jeti_eh_tmp_43 = ({ NPObject *__jeti_tmp_30 = ((NPObject *)(expanded)); __jeti_tmp_30 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_30->isa->vtable)->UTF8String)(__jeti_tmp_30, __jeti_sel_UTF8String) : 0; });
-        fprintf(stderr, "*** NPPredicate: malformed format string: %s\n", __jeti_eh_tmp_43);
-#line 417 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        abort();
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 419 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            ((struct NPPredicate *)self)->_nodes = nodes;
-#line 420 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            ((struct NPPredicate *)self)->_node_count = count;
-#line 421 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            ((struct NPPredicate *)self)->_node_cap = count;
-#line 422 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            ((struct NPPredicate *)self)->_root = (size_t)root;
-#line 423 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return (NPPredicate *)self;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+NPPredicate * NPPredicate_initWithFormat_args_count_(NPObject * self, SEL _cmd, NPString * format, NPObject * * args, size_t n);
 
 /* -[NPPredicate evaluateWithObject_] */
-__attribute__((weak)) _Bool NPPredicate_evaluateWithObject_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 480 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((((struct NPPredicate *)self)->_node_count == 0)) {
-        return 0;
-    }
-#line 481 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return pred_eval_idx((jeti_pred_node *)((struct NPPredicate *)self)->_nodes, (int)((struct NPPredicate *)self)->_root, object) ? 1 : 0;
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+_Bool NPPredicate_evaluateWithObject_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPPredicate predicateFormat] */
-__attribute__((weak)) NPString * NPPredicate_predicateFormat(NPObject * self, SEL _cmd) {
-#line 465 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return ((struct NPPredicate *)self)->_format;
-}
+NPString * NPPredicate_predicateFormat(NPObject * self, SEL _cmd);
 
 /* +[NPArray indexOfObjectMatchingPredicate:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_arrayWithObjects_count_(NPClass * self, SEL _cmd, NPObject * * objs, size_t n) {
-#line 23 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    NPObject *__jeti_tmp_31 = (NPObject_alloc(self, __jeti_sel_alloc));
-    NPArray * arr = (NPArray *)(__jeti_tmp_31 ? ((struct jeti_vtable *)__jeti_tmp_31->isa->vtable)->init(__jeti_tmp_31, __jeti_sel_init) : 0);
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if (!arr) {
-#line 1 "<jeti-generated>"
-        jeti_release(arr);
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        return NULL;
-    }
-#line 34 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if ((n > 0)) {
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        arr->_items = (NPObject * *)malloc((n * sizeof(NPObject *)));
-#line 33 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if (arr->_items) {
-#line 30 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            for (size_t i = 0;  (i < n); (i)++) {
-#line 29 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-                arr->_items[i] = objs[i] ? jeti_retain(objs[i]) : NULL;
-            }
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            arr->_count = n;
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            arr->_capacity = n;
-        }
-    }
-#line 35 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return jeti_autorelease(arr);
-}
+NPObject * NPArray_arrayWithObjects_count_(NPClass * self, SEL _cmd, NPObject * * objs, size_t n);
 
 /* +[NPArray copy] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_arrayWithObject_(NPClass * self, SEL _cmd, NPObject * obj) {
-#line 39 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return NPArray_arrayWithObjects_count_(self, __jeti_sel_arrayWithObjects_count_, &obj, 1);
-}
+NPObject * NPArray_arrayWithObject_(NPClass * self, SEL _cmd, NPObject * obj);
 
 /* +[NPArray description] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_array(NPClass * self, SEL _cmd) {
-#line 43 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return NPArray_arrayWithObjects_count_(self, __jeti_sel_arrayWithObjects_count_, NULL, 0);
-}
+NPObject * NPArray_array(NPClass * self, SEL _cmd);
 
-/* -[NPArray dealloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t NPArray_count(NPObject * self, SEL _cmd) {
-#line 47 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return ((struct NPArray *)self)->_count;
-}
+/* -[NPArray count] */
+size_t NPArray_count(NPObject * self, SEL _cmd);
 
 /* -[NPArray objectAtIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_objectAtIndex_(NPObject * self, SEL _cmd, size_t index) {
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if ((index >= ((struct NPArray *)self)->_count)) {
-        return NULL;
-    }
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return ((struct NPArray *)self)->_items[index];
-}
+NPObject * NPArray_objectAtIndex_(NPObject * self, SEL _cmd, size_t index);
 
 /* -[NPArray firstObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_firstObject(NPObject * self, SEL _cmd) {
-#line 56 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return (((struct NPArray *)self)->_count > 0) ? ((struct NPArray *)self)->_items[0] : NULL;
-}
+NPObject * NPArray_firstObject(NPObject * self, SEL _cmd);
 
 /* -[NPArray lastObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_lastObject(NPObject * self, SEL _cmd) {
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return (((struct NPArray *)self)->_count > 0) ? ((struct NPArray *)self)->_items[(((struct NPArray *)self)->_count - 1)] : NULL;
-}
+NPObject * NPArray_lastObject(NPObject * self, SEL _cmd);
 
 /* -[NPArray containsObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool NPArray_containsObject_(NPObject * self, SEL _cmd, NPObject * obj) {
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPArray *)self)->_count); (i)++) {
-#line 65 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if ((((struct NPArray *)self)->_items[i] == obj)) {
-            return 1;
-        }
-    }
-#line 67 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return 0;
-}
+_Bool NPArray_containsObject_(NPObject * self, SEL _cmd, NPObject * obj);
 
 /* -[NPArray indexOfObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t NPArray_indexOfObject_(NPObject * self, SEL _cmd, NPObject * obj) {
-#line 73 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPArray *)self)->_count); (i)++) {
-#line 72 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if ((((struct NPArray *)self)->_items[i] == obj)) {
-            return i;
-        }
-    }
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return (size_t)-1;
-}
+size_t NPArray_indexOfObject_(NPObject * self, SEL _cmd, NPObject * obj);
 
 /* -[NPArray filteredArrayUsingPredicate_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPArray * NPArray_filteredArrayUsingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred) {
-#line 84 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if (!pred) {
-#line 83 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, ((struct NPArray *)self)->_items, ((struct NPArray *)self)->_count);
-    }
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if ((((struct NPArray *)self)->_count == 0)) {
-#line 86 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, NULL, 0);
-    }
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    NPObject * * hits = (NPObject * *)malloc((((struct NPArray *)self)->_count * sizeof(NPObject *)));
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if (!hits) {
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, NULL, 0);
-    }
-#line 92 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    size_t hit_count = 0;
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPArray *)self)->_count); (i)++) {
-#line 97 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if ((((struct NPArray *)self)->_items[i] && ({ NPObject *__jeti_tmp_32 = ((NPObject *)(pred)); __jeti_tmp_32 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_32->isa->vtable)->evaluateWithObject_)(__jeti_tmp_32, __jeti_sel_evaluateWithObject_, (NPObject *)(((struct NPArray *)self)->_items[i])) : (_Bool){0}; }))) {
-#line 95 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            hits[hit_count] = ((struct NPArray *)self)->_items[i];
-#line 96 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            (hit_count)++;
-        }
-    }
-#line 99 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    NPArray * result = (NPArray *)(NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, hits, hit_count));
-#line 100 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    free(hits);
-#line 101 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return result;
-}
+NPArray * NPArray_filteredArrayUsingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred);
 
 /* -[NPArray indexOfObjectMatchingPredicate_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t NPArray_indexOfObjectMatchingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred) {
-#line 106 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    if (!pred) {
-        return (size_t)-1;
-    }
-#line 111 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPArray *)self)->_count); (i)++) {
-#line 110 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if ((((struct NPArray *)self)->_items[i] && ({ NPObject *__jeti_tmp_33 = ((NPObject *)(pred)); __jeti_tmp_33 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_33->isa->vtable)->evaluateWithObject_)(__jeti_tmp_33, __jeti_sel_evaluateWithObject_, (NPObject *)(((struct NPArray *)self)->_items[i])) : (_Bool){0}; }))) {
-#line 109 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            return i;
-        }
-    }
-#line 112 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return (size_t)-1;
-}
+size_t NPArray_indexOfObjectMatchingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred);
 
 /* -[NPArray copy] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPArray_copy(NPObject * self, SEL _cmd) {
-#line 118 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    __auto_type __jeti_eh_tmp_2 = NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, ((struct NPArray *)self)->_items, ((struct NPArray *)self)->_count);
-    return jeti_retain(__jeti_eh_tmp_2);
-}
+NPObject * NPArray_copy(NPObject * self, SEL _cmd);
 
 /* -[NPArray containsObject:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPArray_description(NPObject * self, SEL _cmd) {
-#line 122 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "["));
-#line 132 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPArray *)self)->_count); (i)++) {
-#line 126 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if ((i > 0)) {
-#line 125 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            __auto_type __jeti_eh_tmp_3 = ({ NPObject *__jeti_tmp_34 = ((NPObject *)(result)); __jeti_tmp_34 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_34->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_34, __jeti_sel_stringByAppendingUTF8String_, ", ") : 0; });
-            result = __jeti_eh_tmp_3;
-        }
-#line 131 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if (((struct NPArray *)self)->_items[i]) {
-#line 128 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            __auto_type __jeti_eh_tmp_4 = ({ NPObject *__jeti_tmp_35 = ((NPObject *)(((struct NPArray *)self)->_items[i])); __jeti_tmp_35 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_35->isa->vtable)->description)(__jeti_tmp_35, __jeti_sel_description) : 0; });
-            __auto_type __jeti_eh_tmp_5 = ({ NPObject *__jeti_tmp_36 = ((NPObject *)(result)); __jeti_tmp_36 ? ((NPString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_36->isa->vtable)->stringByAppendingString_)(__jeti_tmp_36, __jeti_sel_stringByAppendingString_, (NPString *)(__jeti_eh_tmp_4)) : 0; });
-            result = __jeti_eh_tmp_5;
-        }
-        else {
-#line 130 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            __auto_type __jeti_eh_tmp_6 = ({ NPObject *__jeti_tmp_37 = ((NPObject *)(result)); __jeti_tmp_37 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_37->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_37, __jeti_sel_stringByAppendingUTF8String_, "(null)") : 0; });
-            result = __jeti_eh_tmp_6;
-        }
-    }
-#line 133 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    __auto_type __jeti_eh_tmp_7 = ({ NPObject *__jeti_tmp_38 = ((NPObject *)(result)); __jeti_tmp_38 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_38->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_38, __jeti_sel_stringByAppendingUTF8String_, "]") : 0; });
-    result = __jeti_eh_tmp_7;
-#line 134 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    return result;
-}
-
-/* -[NPArray arrayWithObject:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPArray_dealloc(NPObject * self, SEL _cmd) {
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPArray *)self)->_count); (i)++) {
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-        if (((struct NPArray *)self)->_items[i]) {
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-            jeti_release(((struct NPArray *)self)->_items[i]);
-        }
-    }
-#line 15 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    free(((struct NPArray *)self)->_items);
-#line 16 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    ((struct NPArray *)self)->_items = NULL;
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    ((struct NPArray *)self)->_count = 0;
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    ((struct NPArray *)self)->_capacity = 0;
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPArray.jeti"
-    (&JETI_VTABLE_$_NPObject)->dealloc(self, __jeti_sel_dealloc);
-}
+NPString * NPArray_description(NPObject * self, SEL _cmd);
 
 /* +[NPMutableArray arrayWithCapacity_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_arrayWithCapacity_(NPClass * self, SEL _cmd, size_t capacity) {
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    {
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        return (NPMutableArray *)({ NPObject *__jeti_tmp_39 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_39 ? ((NPMutableArray * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_39->isa->vtable)->initWithCapacity_)(__jeti_tmp_39, __jeti_sel_initWithCapacity_, capacity) : 0; });
-    }
-}
+NPMutableArray * NPMutableArray_arrayWithCapacity_(NPClass * self, SEL _cmd, size_t capacity);
 
 /* +[NPMutableArray removeLastObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_array(NPClass * self, SEL _cmd) {
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    {
-#line 58 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        return (NPMutableArray *)({ NPObject *__jeti_tmp_40 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_40 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_40->isa->vtable)->init)(__jeti_tmp_40, __jeti_sel_init) : 0; });
-    }
-}
+NPMutableArray * NPMutableArray_array(NPClass * self, SEL _cmd);
 
 /* +[NPMutableArray removeObjectAtIndex:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_arrayWithObject_(NPClass * self, SEL _cmd, NPObject * obj) {
-#line 69 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    {
-#line 64 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        NPMutableArray * arr = (NPMutableArray *)(NPMutableArray_arrayWithCapacity_(self, __jeti_sel_arrayWithCapacity_, 1));
-#line 67 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if ((arr && obj)) {
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            ({ NPObject *__jeti_tmp_41 = ((NPObject *)(arr)); __jeti_tmp_41 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_41->isa->vtable)->addObject_)(__jeti_tmp_41, __jeti_sel_addObject_, obj) : 0; });
-        }
-#line 68 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        return arr;
-    }
-}
+NPMutableArray * NPMutableArray_arrayWithObject_(NPClass * self, SEL _cmd, NPObject * obj);
 
 /* +[NPMutableArray insertObject:atIndex:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_arrayWithObjects_count_(NPClass * self, SEL _cmd, NPObject * * objs, size_t n) {
-#line 83 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    {
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        NPMutableArray * arr = (NPMutableArray *)(NPMutableArray_arrayWithCapacity_(self, __jeti_sel_arrayWithCapacity_, n));
-#line 81 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if (arr) {
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            for (size_t i = 0;  (i < n); (i)++) {
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-                if (objs[i]) {
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-                    ({ NPObject *__jeti_tmp_42 = ((NPObject *)(arr)); __jeti_tmp_42 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_42->isa->vtable)->addObject_)(__jeti_tmp_42, __jeti_sel_addObject_, objs[i]) : 0; });
-                }
-            }
-        }
-#line 82 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        return arr;
-    }
-}
+NPMutableArray * NPMutableArray_arrayWithObjects_count_(NPClass * self, SEL _cmd, NPObject * * objs, size_t n);
 
 /* -[NPMutableArray arrayWithCapacity:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_init(NPObject * self, SEL _cmd) {
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    return (NPMutableArray *)({ NPObject *__jeti_tmp_43 = ((NPObject *)(self)); __jeti_tmp_43 ? ((NPMutableArray * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_43->isa->vtable)->initWithCapacity_)(__jeti_tmp_43, __jeti_sel_initWithCapacity_, 0) : 0; });
-}
+NPMutableArray * NPMutableArray_init(NPObject * self, SEL _cmd);
 
 /* -[NPMutableArray initWithCapacity_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_initWithCapacity_(NPObject * self, SEL _cmd, size_t capacity) {
-#line 9 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 21 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (self) {
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_items = NULL;
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_count = 0;
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_capacity = 0;
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if ((capacity > 0)) {
-#line 15 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            NPObject * * items = (NPObject * *)malloc((capacity * sizeof(NPObject *)));
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            if (items) {
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-                ((struct NPMutableArray *)self)->_items = items;
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-                ((struct NPMutableArray *)self)->_capacity = capacity;
-            }
-        }
-    }
-#line 22 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    return (NPMutableArray *)self;
-}
+NPMutableArray * NPMutableArray_initWithCapacity_(NPObject * self, SEL _cmd, size_t capacity);
 
 /* -[NPMutableArray initWithArray_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_initWithArray_(NPObject * self, SEL _cmd, NPArray * other) {
-#line 30 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    self = ({ NPObject *__jeti_tmp_44 = ((NPObject *)(self)); __jeti_tmp_44 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_44->isa->vtable)->init)(__jeti_tmp_44, __jeti_sel_init) : 0; });
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((self && other)) {
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        size_t n = ({ NPObject *__jeti_tmp_45 = ((NPObject *)(other)); __jeti_tmp_45 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_45->isa->vtable)->count)(__jeti_tmp_45, __jeti_sel_count) : (size_t){0}; });
-#line 35 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        for (size_t i = 0;  (i < n); (i)++) {
-#line 34 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            __auto_type __jeti_eh_tmp_8 = ({ NPObject *__jeti_tmp_46 = ((NPObject *)(other)); __jeti_tmp_46 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_46->isa->vtable)->objectAtIndex_)(__jeti_tmp_46, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-            ({ NPObject *__jeti_tmp_47 = ((NPObject *)(self)); __jeti_tmp_47 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_47->isa->vtable)->addObject_)(__jeti_tmp_47, __jeti_sel_addObject_, __jeti_eh_tmp_8) : 0; });
-        }
-    }
-#line 37 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    return (NPMutableArray *)self;
-}
+NPMutableArray * NPMutableArray_initWithArray_(NPObject * self, SEL _cmd, NPArray * other);
 
 /* -[NPMutableArray initWithObjects_count_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableArray * NPMutableArray_initWithObjects_count_(NPObject * self, SEL _cmd, NPObject * * objs, size_t n) {
-#line 41 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    self = ({ NPObject *__jeti_tmp_48 = ((NPObject *)(self)); __jeti_tmp_48 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_48->isa->vtable)->init)(__jeti_tmp_48, __jeti_sel_init) : 0; });
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (((self && (n > 0)) && objs)) {
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        for (size_t i = 0;  (i < n); (i)++) {
-#line 44 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            ({ NPObject *__jeti_tmp_49 = ((NPObject *)(self)); __jeti_tmp_49 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_49->isa->vtable)->addObject_)(__jeti_tmp_49, __jeti_sel_addObject_, objs[i]) : 0; });
-        }
-    }
-#line 47 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    return (NPMutableArray *)self;
-}
+NPMutableArray * NPMutableArray_initWithObjects_count_(NPObject * self, SEL _cmd, NPObject * * objs, size_t n);
 
 /* -[NPMutableArray addObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_addObject_(NPObject * self, SEL _cmd, NPObject * obj) {
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (!obj) {
-        return;
-    }
-#line 94 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((((struct NPMutableArray *)self)->_count >= ((struct NPMutableArray *)self)->_capacity)) {
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        size_t newcap = (((struct NPMutableArray *)self)->_capacity == 0) ? 4 : (((struct NPMutableArray *)self)->_capacity * 2);
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        NPObject * * items = (NPObject * *)realloc(((struct NPMutableArray *)self)->_items, (newcap * sizeof(NPObject *)));
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if (!items) {
-            return;
-        }
-#line 92 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_items = items;
-#line 93 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_capacity = newcap;
-    }
-#line 95 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_items[((struct NPMutableArray *)self)->_count] = jeti_retain(obj);
-#line 96 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    (((struct NPMutableArray *)self)->_count)++;
-}
+void NPMutableArray_addObject_(NPObject * self, SEL _cmd, NPObject * obj);
 
 /* -[NPMutableArray addObjectsFromArray_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_addObjectsFromArray_(NPObject * self, SEL _cmd, NPArray * other) {
-#line 100 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (!other) {
-        return;
-    }
-#line 101 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    size_t n = ({ NPObject *__jeti_tmp_50 = ((NPObject *)(other)); __jeti_tmp_50 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_50->isa->vtable)->count)(__jeti_tmp_50, __jeti_sel_count) : (size_t){0}; });
-#line 104 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    for (size_t i = 0;  (i < n); (i)++) {
-#line 103 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        __auto_type __jeti_eh_tmp_9 = ({ NPObject *__jeti_tmp_51 = ((NPObject *)(other)); __jeti_tmp_51 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_51->isa->vtable)->objectAtIndex_)(__jeti_tmp_51, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-        ({ NPObject *__jeti_tmp_52 = ((NPObject *)(self)); __jeti_tmp_52 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_52->isa->vtable)->addObject_)(__jeti_tmp_52, __jeti_sel_addObject_, __jeti_eh_tmp_9) : 0; });
-    }
-}
+void NPMutableArray_addObjectsFromArray_(NPObject * self, SEL _cmd, NPArray * other);
 
 /* -[NPMutableArray insertObject_atIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_insertObject_atIndex_(NPObject * self, SEL _cmd, NPObject * obj, size_t index) {
-#line 108 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (!obj) {
-        return;
-    }
-#line 109 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((index > ((struct NPMutableArray *)self)->_count)) {
-        index = ((struct NPMutableArray *)self)->_count;
-    }
-#line 116 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((((struct NPMutableArray *)self)->_count >= ((struct NPMutableArray *)self)->_capacity)) {
-#line 111 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        size_t newcap = (((struct NPMutableArray *)self)->_capacity == 0) ? 4 : (((struct NPMutableArray *)self)->_capacity * 2);
-#line 112 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        NPObject * * items = (NPObject * *)realloc(((struct NPMutableArray *)self)->_items, (newcap * sizeof(NPObject *)));
-#line 113 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if (!items) {
-            return;
-        }
-#line 114 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_items = items;
-#line 115 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        ((struct NPMutableArray *)self)->_capacity = newcap;
-    }
-#line 117 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    memmove(((((struct NPMutableArray *)self)->_items + index) + 1), (((struct NPMutableArray *)self)->_items + index), (((((struct NPMutableArray *)self)->_count - index)) * sizeof(NPObject *)));
-#line 118 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_items[index] = jeti_retain(obj);
-#line 119 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    (((struct NPMutableArray *)self)->_count)++;
-}
+void NPMutableArray_insertObject_atIndex_(NPObject * self, SEL _cmd, NPObject * obj, size_t index);
 
 /* -[NPMutableArray removeObjectAtIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_removeObjectAtIndex_(NPObject * self, SEL _cmd, size_t index) {
-#line 123 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((index >= ((struct NPMutableArray *)self)->_count)) {
-        return;
-    }
-#line 124 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    NPObject * removed = ((struct NPMutableArray *)self)->_items[index];
-#line 125 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    memmove((((struct NPMutableArray *)self)->_items + index), ((((struct NPMutableArray *)self)->_items + index) + 1), ((((((struct NPMutableArray *)self)->_count - index) - 1)) * sizeof(NPObject *)));
-#line 126 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    (((struct NPMutableArray *)self)->_count)--;
-#line 129 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (removed) {
-#line 128 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        jeti_release(removed);
-    }
-}
+void NPMutableArray_removeObjectAtIndex_(NPObject * self, SEL _cmd, size_t index);
 
 /* -[NPMutableArray removeLastObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_removeLastObject(NPObject * self, SEL _cmd) {
-#line 133 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((((struct NPMutableArray *)self)->_count == 0)) {
-        return;
-    }
-#line 134 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ({ NPObject *__jeti_tmp_53 = ((NPObject *)(self)); __jeti_tmp_53 ? ((void (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_53->isa->vtable)->removeObjectAtIndex_)(__jeti_tmp_53, __jeti_sel_removeObjectAtIndex_, (((struct NPMutableArray *)self)->_count - 1)) : 0; });
-}
+void NPMutableArray_removeLastObject(NPObject * self, SEL _cmd);
 
 /* -[NPMutableArray removeObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_removeObject_(NPObject * self, SEL _cmd, NPObject * obj) {
-#line 138 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (!obj) {
-        return;
-    }
-#line 144 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableArray *)self)->_count); (i)++) {
-#line 143 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if ((((struct NPMutableArray *)self)->_items[i] == obj)) {
-#line 141 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            ({ NPObject *__jeti_tmp_54 = ((NPObject *)(self)); __jeti_tmp_54 ? ((void (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_54->isa->vtable)->removeObjectAtIndex_)(__jeti_tmp_54, __jeti_sel_removeObjectAtIndex_, i) : 0; });
-#line 142 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            return;
-        }
-    }
-}
+void NPMutableArray_removeObject_(NPObject * self, SEL _cmd, NPObject * obj);
 
 /* -[NPMutableArray removeAllObjects] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_removeAllObjects(NPObject * self, SEL _cmd) {
-#line 152 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableArray *)self)->_count); (i)++) {
-#line 151 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if (((struct NPMutableArray *)self)->_items[i]) {
-#line 150 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            jeti_release(((struct NPMutableArray *)self)->_items[i]);
-        }
-    }
-#line 153 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_count = 0;
-}
+void NPMutableArray_removeAllObjects(NPObject * self, SEL _cmd);
 
 /* -[NPMutableArray replaceObjectAtIndex_withObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_replaceObjectAtIndex_withObject_(NPObject * self, SEL _cmd, size_t index, NPObject * obj) {
-#line 157 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((!obj || (index >= ((struct NPMutableArray *)self)->_count))) {
-        return;
-    }
-#line 158 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    NPObject * old = ((struct NPMutableArray *)self)->_items[index];
-#line 159 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_items[index] = jeti_retain(obj);
-#line 162 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (old) {
-#line 161 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        jeti_release(old);
-    }
-}
+void NPMutableArray_replaceObjectAtIndex_withObject_(NPObject * self, SEL _cmd, size_t index, NPObject * obj);
 
 /* -[NPMutableArray exchangeObjectAtIndex_withObjectAtIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_exchangeObjectAtIndex_withObjectAtIndex_(NPObject * self, SEL _cmd, size_t a, size_t b) {
-#line 166 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (((a >= ((struct NPMutableArray *)self)->_count) || (b >= ((struct NPMutableArray *)self)->_count))) {
-        return;
-    }
-#line 167 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    NPObject * tmp = ((struct NPMutableArray *)self)->_items[a];
-#line 168 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_items[a] = ((struct NPMutableArray *)self)->_items[b];
-#line 169 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_items[b] = tmp;
-}
+void NPMutableArray_exchangeObjectAtIndex_withObjectAtIndex_(NPObject * self, SEL _cmd, size_t a, size_t b);
 
 /* -[NPMutableArray setObject_atIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_setObject_atIndex_(NPObject * self, SEL _cmd, NPObject * obj, size_t index) {
-#line 173 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if ((!obj || (index >= ((struct NPMutableArray *)self)->_count))) {
-        return;
-    }
-#line 174 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ({ NPObject *__jeti_tmp_55 = ((NPObject *)(self)); __jeti_tmp_55 ? ((void (*)(NPObject *, SEL, size_t, NPObject *))((struct jeti_vtable *)__jeti_tmp_55->isa->vtable)->replaceObjectAtIndex_withObject_)(__jeti_tmp_55, __jeti_sel_replaceObjectAtIndex_withObject_, index, obj) : 0; });
-}
+void NPMutableArray_setObject_atIndex_(NPObject * self, SEL _cmd, NPObject * obj, size_t index);
 
 /* -[NPMutableArray filterUsingPredicate_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableArray_filterUsingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred) {
-#line 183 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    if (!pred) {
-        return;
-    }
-#line 184 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    size_t write = 0;
-#line 193 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableArray *)self)->_count); (i)++) {
-#line 186 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        NPObject * obj = ((struct NPMutableArray *)self)->_items[i];
-#line 192 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-        if ((obj && ({ NPObject *__jeti_tmp_56 = ((NPObject *)(pred)); __jeti_tmp_56 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_56->isa->vtable)->evaluateWithObject_)(__jeti_tmp_56, __jeti_sel_evaluateWithObject_, (NPObject *)(obj)) : (_Bool){0}; }))) {
-#line 188 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            ((struct NPMutableArray *)self)->_items[write] = obj;
-#line 189 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            (write)++;
-        }
-        else {
-#line 192 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-            if (obj) {
-#line 191 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-                jeti_release(obj);
-            }
-        }
-    }
-#line 194 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableArray.jeti"
-    ((struct NPMutableArray *)self)->_count = write;
-}
+void NPMutableArray_filterUsingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred);
 
-/* +[NPDictionary dealloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPDictionary * NPDictionary_dictionary(NPClass * self, SEL _cmd) {
-#line 27 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return (NPDictionary *)NPDictionary_dictionaryWithObjects_forKeys_count_(self, __jeti_sel_dictionaryWithObjects_forKeys_count_, NULL, NULL, 0);
-}
+/* +[NPDictionary dictionary] */
+NPDictionary * NPDictionary_dictionary(NPClass * self, SEL _cmd);
 
 /* +[NPDictionary dictionaryWithObject_forKey_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPDictionary * NPDictionary_dictionaryWithObject_forKey_(NPClass * self, SEL _cmd, NPObject * value, NPObject * key) {
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return (NPDictionary *)NPDictionary_dictionaryWithObjects_forKeys_count_(self, __jeti_sel_dictionaryWithObjects_forKeys_count_, &value, &key, 1);
-}
+NPDictionary * NPDictionary_dictionaryWithObject_forKey_(NPClass * self, SEL _cmd, NPObject * value, NPObject * key);
 
 /* +[NPDictionary dictionaryWithObjects_forKeys_count_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPDictionary * NPDictionary_dictionaryWithObjects_forKeys_count_(NPClass * self, SEL _cmd, NPObject * * values, NPObject * * keys, size_t n) {
-#line 64 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    {
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        NPObject *__jeti_tmp_57 = (NPObject_alloc(self, __jeti_sel_alloc));
-        NPDictionary * dict = (NPDictionary *)(__jeti_tmp_57 ? ((struct jeti_vtable *)__jeti_tmp_57->isa->vtable)->init(__jeti_tmp_57, __jeti_sel_init) : 0);
-#line 37 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if (!dict)         return NULL;
-#line 62 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if ((((n > 0) && values) && keys)) {
-#line 39 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            NPObject * * ks = (NPObject * *)calloc(n, sizeof(NPObject *));
-#line 40 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            NPObject * * vs = (NPObject * *)calloc(n, sizeof(NPObject *));
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            if ((ks && vs)) {
-#line 42 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                size_t stored = 0;
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                for (size_t i = 0;  (i < n); (i)++) {
-#line 49 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                    if (!keys[i]) {
-#line 48 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                        continue;
-                    }
-#line 50 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                    ks[stored] = jeti_retain(keys[i]);
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                    vs[stored] = values[i] ? jeti_retain(values[i]) : NULL;
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                    (stored)++;
-                }
-#line 54 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                dict->_keys = ks;
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                dict->_values = vs;
-#line 56 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                dict->_count = stored;
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                dict->_capacity = n;
-            }
-            else {
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                free(ks);
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-                free(vs);
-            }
-        }
-#line 63 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        return (NPDictionary *)dict;
-    }
-}
+NPDictionary * NPDictionary_dictionaryWithObjects_forKeys_count_(NPClass * self, SEL _cmd, NPObject * * values, NPObject * * keys, size_t n);
 
 /* -[NPDictionary count] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t NPDictionary_count(NPObject * self, SEL _cmd) {
-#line 68 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return ((struct NPDictionary *)self)->_count;
-}
+size_t NPDictionary_count(NPObject * self, SEL _cmd);
 
 /* -[NPDictionary objectForKey_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPDictionary_objectForKey_(NPObject * self, SEL _cmd, NPObject * key) {
-#line 75 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    if (!key) {
-        return NULL;
-    }
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPDictionary *)self)->_count); (i)++) {
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if ((((struct NPDictionary *)self)->_keys[i] && ({ NPObject *__jeti_tmp_58 = ((NPObject *)(((struct NPDictionary *)self)->_keys[i])); __jeti_tmp_58 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_58->isa->vtable)->isEqual_)(__jeti_tmp_58, __jeti_sel_isEqual_, (NPObject *)(key)) : (_Bool){0}; }))) {
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            return ((struct NPDictionary *)self)->_values[i];
-        }
-    }
-#line 81 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return NULL;
-}
+NPObject * NPDictionary_objectForKey_(NPObject * self, SEL _cmd, NPObject * key);
 
 /* -[NPDictionary allKeys] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPArray * NPDictionary_allKeys(NPObject * self, SEL _cmd) {
-#line 103 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, ((struct NPDictionary *)self)->_keys, ((struct NPDictionary *)self)->_count);
-}
+NPArray * NPDictionary_allKeys(NPObject * self, SEL _cmd);
 
 /* -[NPDictionary allValues] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPArray * NPDictionary_allValues(NPObject * self, SEL _cmd) {
-#line 107 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, ((struct NPDictionary *)self)->_values, ((struct NPDictionary *)self)->_count);
-}
+NPArray * NPDictionary_allValues(NPObject * self, SEL _cmd);
 
 /* -[NPDictionary allValues] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool NPDictionary_isEqual_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 85 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    if ((self == (NPObject *)object)) {
-        return 1;
-    }
-#line 86 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    if (!object) {
-        return 0;
-    }
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    __auto_type __jeti_eh_tmp_10 = &JETI_CLASS_$_NPDictionary;
-    __auto_type __jeti_eh_tmp_11 = ({ NPObject *__jeti_tmp_59 = ((NPObject *)(object)); __jeti_tmp_59 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_59->isa->vtable)->isKindOfClass_)(__jeti_tmp_59, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_10)) : (_Bool){0}; });
-    if (!__jeti_eh_tmp_11) {
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        return (&JETI_VTABLE_$_jeti_root)->isEqual_(self, __jeti_sel_isEqual_, (NPObject *)(object));
-    }
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    NPDictionary * other = (NPDictionary *)object;
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    __auto_type __jeti_eh_tmp_12 = ({ NPObject *__jeti_tmp_60 = ((NPObject *)(other)); __jeti_tmp_60 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_60->isa->vtable)->count)(__jeti_tmp_60, __jeti_sel_count) : (size_t){0}; });
-    if ((__jeti_eh_tmp_12 != ((struct NPDictionary *)self)->_count)) {
-        return 0;
-    }
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPDictionary *)self)->_count); (i)++) {
-#line 93 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        NPObject * mine = ((struct NPDictionary *)self)->_values[i];
-#line 94 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        NPObject * theirs = ({ NPObject *__jeti_tmp_61 = ((NPObject *)(other)); __jeti_tmp_61 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_61->isa->vtable)->objectForKey_)(__jeti_tmp_61, __jeti_sel_objectForKey_, ((struct NPDictionary *)self)->_keys[i]) : (NPObject *){0}; });
-#line 95 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if ((mine == theirs)) {
-            continue;
-        }
-#line 96 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if ((!mine || !theirs)) {
-            return 0;
-        }
-#line 97 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        __auto_type __jeti_eh_tmp_13 = ({ NPObject *__jeti_tmp_62 = ((NPObject *)(mine)); __jeti_tmp_62 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_62->isa->vtable)->isEqual_)(__jeti_tmp_62, __jeti_sel_isEqual_, (NPObject *)(theirs)) : (_Bool){0}; });
-        if (!__jeti_eh_tmp_13) {
-            return 0;
-        }
-    }
-#line 99 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return 1;
-}
+_Bool NPDictionary_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPDictionary copy] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPDictionary_copy(NPObject * self, SEL _cmd) {
-#line 113 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    __auto_type __jeti_eh_tmp_14 = NPDictionary_dictionaryWithObjects_forKeys_count_(&JETI_CLASS_$_NPDictionary, __jeti_sel_dictionaryWithObjects_forKeys_count_, ((struct NPDictionary *)self)->_values, ((struct NPDictionary *)self)->_keys, ((struct NPDictionary *)self)->_count);
-    return jeti_retain(__jeti_eh_tmp_14);
-}
+NPObject * NPDictionary_copy(NPObject * self, SEL _cmd);
 
 /* -[NPDictionary isEqual:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPDictionary_description(NPObject * self, SEL _cmd) {
-#line 117 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "{"));
-#line 133 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPDictionary *)self)->_count); (i)++) {
-#line 121 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if ((i > 0)) {
-#line 120 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            __auto_type __jeti_eh_tmp_15 = ({ NPObject *__jeti_tmp_63 = ((NPObject *)(result)); __jeti_tmp_63 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_63->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_63, __jeti_sel_stringByAppendingUTF8String_, ", ") : 0; });
-            result = __jeti_eh_tmp_15;
-        }
-#line 126 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if (((struct NPDictionary *)self)->_keys[i]) {
-#line 123 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            __auto_type __jeti_eh_tmp_16 = ({ NPObject *__jeti_tmp_64 = ((NPObject *)(((struct NPDictionary *)self)->_keys[i])); __jeti_tmp_64 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_64->isa->vtable)->description)(__jeti_tmp_64, __jeti_sel_description) : 0; });
-            __auto_type __jeti_eh_tmp_17 = ({ NPObject *__jeti_tmp_65 = ((NPObject *)(result)); __jeti_tmp_65 ? ((NPString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_65->isa->vtable)->stringByAppendingString_)(__jeti_tmp_65, __jeti_sel_stringByAppendingString_, (NPString *)(__jeti_eh_tmp_16)) : 0; });
-            result = __jeti_eh_tmp_17;
-        }
-        else {
-#line 125 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            __auto_type __jeti_eh_tmp_18 = ({ NPObject *__jeti_tmp_66 = ((NPObject *)(result)); __jeti_tmp_66 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_66->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_66, __jeti_sel_stringByAppendingUTF8String_, "(null)") : 0; });
-            result = __jeti_eh_tmp_18;
-        }
-#line 127 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        __auto_type __jeti_eh_tmp_19 = ({ NPObject *__jeti_tmp_67 = ((NPObject *)(result)); __jeti_tmp_67 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_67->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_67, __jeti_sel_stringByAppendingUTF8String_, " = ") : 0; });
-        result = __jeti_eh_tmp_19;
-#line 132 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if (((struct NPDictionary *)self)->_values[i]) {
-#line 129 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            __auto_type __jeti_eh_tmp_20 = ({ NPObject *__jeti_tmp_68 = ((NPObject *)(((struct NPDictionary *)self)->_values[i])); __jeti_tmp_68 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_68->isa->vtable)->description)(__jeti_tmp_68, __jeti_sel_description) : 0; });
-            __auto_type __jeti_eh_tmp_21 = ({ NPObject *__jeti_tmp_69 = ((NPObject *)(result)); __jeti_tmp_69 ? ((NPString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_69->isa->vtable)->stringByAppendingString_)(__jeti_tmp_69, __jeti_sel_stringByAppendingString_, (NPString *)(__jeti_eh_tmp_20)) : 0; });
-            result = __jeti_eh_tmp_21;
-        }
-        else {
-#line 131 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            __auto_type __jeti_eh_tmp_22 = ({ NPObject *__jeti_tmp_70 = ((NPObject *)(result)); __jeti_tmp_70 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_70->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_70, __jeti_sel_stringByAppendingUTF8String_, "(null)") : 0; });
-            result = __jeti_eh_tmp_22;
-        }
-    }
-#line 134 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    __auto_type __jeti_eh_tmp_23 = ({ NPObject *__jeti_tmp_71 = ((NPObject *)(result)); __jeti_tmp_71 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_71->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_71, __jeti_sel_stringByAppendingUTF8String_, "}") : 0; });
-    result = __jeti_eh_tmp_23;
-#line 135 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    return result;
-}
-
-/* -[NPDictionary dictionaryWithObject:forKey:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPDictionary_dealloc(NPObject * self, SEL _cmd) {
-#line 16 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPDictionary *)self)->_count); (i)++) {
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if (((struct NPDictionary *)self)->_keys[i]) {
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            jeti_release(((struct NPDictionary *)self)->_keys[i]);
-        }
-#line 15 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-        if (((struct NPDictionary *)self)->_values[i]) {
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-            jeti_release(((struct NPDictionary *)self)->_values[i]);
-        }
-    }
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    free(((struct NPDictionary *)self)->_keys);
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    free(((struct NPDictionary *)self)->_values);
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    ((struct NPDictionary *)self)->_keys = NULL;
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    ((struct NPDictionary *)self)->_values = NULL;
-#line 21 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    ((struct NPDictionary *)self)->_count = 0;
-#line 22 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    ((struct NPDictionary *)self)->_capacity = 0;
-#line 23 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPDictionary.jeti"
-    (&JETI_VTABLE_$_NPObject)->dealloc(self, __jeti_sel_dealloc);
-}
+NPString * NPDictionary_description(NPObject * self, SEL _cmd);
 
 /* +[NPMutableDictionary dictionary] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableDictionary * NPMutableDictionary_dictionary(NPClass * self, SEL _cmd) {
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    {
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        return (NPMutableDictionary *)({ NPObject *__jeti_tmp_72 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_72 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_72->isa->vtable)->init)(__jeti_tmp_72, __jeti_sel_init) : 0; });
-    }
-}
+NPMutableDictionary * NPMutableDictionary_dictionary(NPClass * self, SEL _cmd);
 
 /* +[NPMutableDictionary dictionaryWithCapacity_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableDictionary * NPMutableDictionary_dictionaryWithCapacity_(NPClass * self, SEL _cmd, size_t capacity) {
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    {
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        return (NPMutableDictionary *)({ NPObject *__jeti_tmp_73 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_73 ? ((NPMutableArray * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_73->isa->vtable)->initWithCapacity_)(__jeti_tmp_73, __jeti_sel_initWithCapacity_, capacity) : 0; });
-    }
-}
+NPMutableDictionary * NPMutableDictionary_dictionaryWithCapacity_(NPClass * self, SEL _cmd, size_t capacity);
 
 /* +[NPMutableDictionary dictionaryWithObject_forKey_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableDictionary * NPMutableDictionary_dictionaryWithObject_forKey_(NPClass * self, SEL _cmd, NPObject * value, NPObject * key) {
-#line 62 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    {
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        NPMutableDictionary * dict = (NPMutableDictionary *)(NPMutableDictionary_dictionaryWithCapacity_(self, __jeti_sel_dictionaryWithCapacity_, 1));
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if (((dict && key) && value)) {
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            ({ NPObject *__jeti_tmp_74 = ((NPObject *)(dict)); __jeti_tmp_74 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_74->isa->vtable)->setObject_forKey_)(__jeti_tmp_74, __jeti_sel_setObject_forKey_, value, key) : 0; });
-        }
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        return dict;
-    }
-}
+NPMutableDictionary * NPMutableDictionary_dictionaryWithObject_forKey_(NPClass * self, SEL _cmd, NPObject * value, NPObject * key);
 
 /* -[NPMutableDictionary dictionary] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableDictionary * NPMutableDictionary_init(NPObject * self, SEL _cmd) {
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    return (NPMutableDictionary *)({ NPObject *__jeti_tmp_75 = ((NPObject *)(self)); __jeti_tmp_75 ? ((NPMutableArray * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_75->isa->vtable)->initWithCapacity_)(__jeti_tmp_75, __jeti_sel_initWithCapacity_, 0) : 0; });
-}
+NPMutableDictionary * NPMutableDictionary_init(NPObject * self, SEL _cmd);
 
 /* -[NPMutableDictionary initWithCapacity_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableDictionary * NPMutableDictionary_initWithCapacity_(NPObject * self, SEL _cmd, size_t capacity) {
-#line 9 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 27 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    if (self) {
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_keys = NULL;
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_values = NULL;
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_count = 0;
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_capacity = 0;
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if ((capacity > 0)) {
-#line 16 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            NPObject * * ks = (NPObject * *)calloc(capacity, sizeof(NPObject *));
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            NPObject * * vs = (NPObject * *)calloc(capacity, sizeof(NPObject *));
-#line 25 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            if ((ks && vs)) {
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                ((struct NPMutableDictionary *)self)->_keys = ks;
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                ((struct NPMutableDictionary *)self)->_values = vs;
-#line 21 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                ((struct NPMutableDictionary *)self)->_capacity = capacity;
-            }
-            else {
-#line 23 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                free(ks);
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                free(vs);
-            }
-        }
-    }
-#line 28 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    return (NPMutableDictionary *)self;
-}
+NPMutableDictionary * NPMutableDictionary_initWithCapacity_(NPObject * self, SEL _cmd, size_t capacity);
 
 /* -[NPMutableDictionary initWithDictionary_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableDictionary * NPMutableDictionary_initWithDictionary_(NPObject * self, SEL _cmd, NPDictionary * other) {
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    self = ({ NPObject *__jeti_tmp_76 = ((NPObject *)(self)); __jeti_tmp_76 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_76->isa->vtable)->init)(__jeti_tmp_76, __jeti_sel_init) : 0; });
-#line 39 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    if ((self && other)) {
-#line 38 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ({ NPObject *__jeti_tmp_77 = ((NPObject *)(self)); __jeti_tmp_77 ? ((void (*)(NPObject *, SEL, NPDictionary *))((struct jeti_vtable *)__jeti_tmp_77->isa->vtable)->addEntriesFromDictionary_)(__jeti_tmp_77, __jeti_sel_addEntriesFromDictionary_, (NPDictionary *)(other)) : 0; });
-    }
-#line 40 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    return (NPMutableDictionary *)self;
-}
+NPMutableDictionary * NPMutableDictionary_initWithDictionary_(NPObject * self, SEL _cmd, NPDictionary * other);
 
 /* -[NPMutableDictionary setObject_forKey_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableDictionary_setObject_forKey_(NPObject * self, SEL _cmd, NPObject * value, NPObject * key) {
-#line 68 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    if ((!key || !value)) {
-        return;
-    }
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableDictionary *)self)->_count); (i)++) {
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if ((((struct NPMutableDictionary *)self)->_keys[i] && ({ NPObject *__jeti_tmp_78 = ((NPObject *)(((struct NPMutableDictionary *)self)->_keys[i])); __jeti_tmp_78 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_78->isa->vtable)->isEqual_)(__jeti_tmp_78, __jeti_sel_isEqual_, (NPObject *)(key)) : (_Bool){0}; }))) {
-#line 77 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            if ((((struct NPMutableDictionary *)self)->_values[i] != value)) {
-#line 72 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                NPObject * old = ((struct NPMutableDictionary *)self)->_values[i];
-#line 73 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                ((struct NPMutableDictionary *)self)->_values[i] = jeti_retain(value);
-#line 76 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                if (old) {
-#line 75 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                    jeti_release(old);
-                }
-            }
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            return;
-        }
-    }
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    if ((((struct NPMutableDictionary *)self)->_count >= ((struct NPMutableDictionary *)self)->_capacity)) {
-#line 82 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        size_t newcap = (((struct NPMutableDictionary *)self)->_capacity == 0) ? 4 : (((struct NPMutableDictionary *)self)->_capacity * 2);
-#line 83 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        NPObject * * ks = (NPObject * *)realloc(((struct NPMutableDictionary *)self)->_keys, (newcap * sizeof(NPObject *)));
-#line 84 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if (!ks) {
-            return;
-        }
-#line 85 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_keys = ks;
-#line 86 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        NPObject * * vs = (NPObject * *)realloc(((struct NPMutableDictionary *)self)->_values, (newcap * sizeof(NPObject *)));
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if (!vs) {
-            return;
-        }
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_values = vs;
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        ((struct NPMutableDictionary *)self)->_capacity = newcap;
-    }
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    ((struct NPMutableDictionary *)self)->_keys[((struct NPMutableDictionary *)self)->_count] = jeti_retain(key);
-#line 92 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    ((struct NPMutableDictionary *)self)->_values[((struct NPMutableDictionary *)self)->_count] = jeti_retain(value);
-#line 93 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    (((struct NPMutableDictionary *)self)->_count)++;
-}
+void NPMutableDictionary_setObject_forKey_(NPObject * self, SEL _cmd, NPObject * value, NPObject * key);
 
 /* -[NPMutableDictionary addEntriesFromDictionary_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableDictionary_addEntriesFromDictionary_(NPObject * self, SEL _cmd, NPDictionary * other) {
-#line 97 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    if (!other) {
-        return;
-    }
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    NPArray * ks = (NPArray *)(({ NPObject *__jeti_tmp_79 = ((NPObject *)(other)); __jeti_tmp_79 ? ((NPArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_79->isa->vtable)->allKeys)(__jeti_tmp_79, __jeti_sel_allKeys) : 0; }));
-#line 99 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    size_t n = ({ NPObject *__jeti_tmp_80 = ((NPObject *)(ks)); __jeti_tmp_80 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_80->isa->vtable)->count)(__jeti_tmp_80, __jeti_sel_count) : (size_t){0}; });
-#line 103 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    for (size_t i = 0;  (i < n); (i)++) {
-#line 101 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        NPObject * k = ({ NPObject *__jeti_tmp_81 = ((NPObject *)(ks)); __jeti_tmp_81 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_81->isa->vtable)->objectAtIndex_)(__jeti_tmp_81, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-#line 102 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        __auto_type __jeti_eh_tmp_24 = ({ NPObject *__jeti_tmp_82 = ((NPObject *)(other)); __jeti_tmp_82 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_82->isa->vtable)->objectForKey_)(__jeti_tmp_82, __jeti_sel_objectForKey_, k) : (NPObject *){0}; });
-        ({ NPObject *__jeti_tmp_83 = ((NPObject *)(self)); __jeti_tmp_83 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_83->isa->vtable)->setObject_forKey_)(__jeti_tmp_83, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_24, k) : 0; });
-    }
-}
+void NPMutableDictionary_addEntriesFromDictionary_(NPObject * self, SEL _cmd, NPDictionary * other);
 
 /* -[NPMutableDictionary removeObjectForKey_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableDictionary_removeObjectForKey_(NPObject * self, SEL _cmd, NPObject * key) {
-#line 107 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    if (!key) {
-        return;
-    }
-#line 123 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableDictionary *)self)->_count); (i)++) {
-#line 122 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if ((((struct NPMutableDictionary *)self)->_keys[i] && ({ NPObject *__jeti_tmp_84 = ((NPObject *)(((struct NPMutableDictionary *)self)->_keys[i])); __jeti_tmp_84 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_84->isa->vtable)->isEqual_)(__jeti_tmp_84, __jeti_sel_isEqual_, (NPObject *)(key)) : (_Bool){0}; }))) {
-#line 110 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            NPObject * k = ((struct NPMutableDictionary *)self)->_keys[i];
-#line 111 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            NPObject * v = ((struct NPMutableDictionary *)self)->_values[i];
-#line 112 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            memmove((((struct NPMutableDictionary *)self)->_keys + i), ((((struct NPMutableDictionary *)self)->_keys + i) + 1), ((((((struct NPMutableDictionary *)self)->_count - i) - 1)) * sizeof(NPObject *)));
-#line 113 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            memmove((((struct NPMutableDictionary *)self)->_values + i), ((((struct NPMutableDictionary *)self)->_values + i) + 1), ((((((struct NPMutableDictionary *)self)->_count - i) - 1)) * sizeof(NPObject *)));
-#line 114 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            (((struct NPMutableDictionary *)self)->_count)--;
-#line 117 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            if (k) {
-#line 116 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                jeti_release(k);
-            }
-#line 120 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            if (v) {
-#line 119 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-                jeti_release(v);
-            }
-#line 121 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            return;
-        }
-    }
-}
+void NPMutableDictionary_removeObjectForKey_(NPObject * self, SEL _cmd, NPObject * key);
 
 /* -[NPMutableDictionary removeAllObjects] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableDictionary_removeAllObjects(NPObject * self, SEL _cmd) {
-#line 134 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableDictionary *)self)->_count); (i)++) {
-#line 130 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if (((struct NPMutableDictionary *)self)->_keys[i]) {
-#line 129 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            jeti_release(((struct NPMutableDictionary *)self)->_keys[i]);
-        }
-#line 133 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-        if (((struct NPMutableDictionary *)self)->_values[i]) {
-#line 132 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-            jeti_release(((struct NPMutableDictionary *)self)->_values[i]);
-        }
-    }
-#line 135 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableDictionary.jeti"
-    ((struct NPMutableDictionary *)self)->_count = 0;
-}
+void NPMutableDictionary_removeAllObjects(NPObject * self, SEL _cmd);
 
 /* +[NPSet addObjectsFromArray:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPSet * NPSet_set(NPClass * self, SEL _cmd) {
-#line 22 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return (NPSet *)NPSet_setWithObjects_count_(self, __jeti_sel_setWithObjects_count_, NULL, 0);
-}
+NPSet * NPSet_set(NPClass * self, SEL _cmd);
 
 /* +[NPSet _grow] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPSet * NPSet_setWithObject_(NPClass * self, SEL _cmd, NPObject * object) {
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return (NPSet *)NPSet_setWithObjects_count_(self, __jeti_sel_setWithObjects_count_, &object, 1);
-}
+NPSet * NPSet_setWithObject_(NPClass * self, SEL _cmd, NPObject * object);
 
 /* +[NPSet isEqual:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPSet * NPSet_setWithObjects_count_(NPClass * self, SEL _cmd, NPObject * * objects, size_t n) {
-#line 64 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    {
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        NPObject *__jeti_tmp_85 = (NPObject_alloc(self, __jeti_sel_alloc));
-        NPSet * set = (NPSet *)(__jeti_tmp_85 ? ((struct jeti_vtable *)__jeti_tmp_85->isa->vtable)->init(__jeti_tmp_85, __jeti_sel_init) : 0);
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if (!set)         return NULL;
-#line 62 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if (((n > 0) && objects)) {
-#line 34 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            NPObject * * items = (NPObject * *)calloc(n, sizeof(NPObject *));
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            if (items) {
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                size_t stored = 0;
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                for (size_t i = 0;  (i < n); (i)++) {
-#line 43 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                    if (!objects[i]) {
-#line 42 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                        continue;
-                    }
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                    _Bool present = 0;
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                    for (size_t j = 0;  (j < stored); (j)++) {
-#line 50 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                        __auto_type __jeti_eh_tmp_25 = ({ NPObject *__jeti_tmp_86 = ((NPObject *)(items[j])); __jeti_tmp_86 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_86->isa->vtable)->isEqual_)(__jeti_tmp_86, __jeti_sel_isEqual_, (NPObject *)(objects[i])) : (_Bool){0}; });
-                        if (__jeti_eh_tmp_25) {
-#line 48 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                            present = 1;
-#line 49 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                            break;
-                        }
-                    }
-#line 54 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                    if (present) {
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                        continue;
-                    }
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                    items[stored] = jeti_retain(objects[i]);
-#line 56 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                    (stored)++;
-                }
-#line 58 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                set->_items = items;
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                set->_count = stored;
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-                set->_capacity = n;
-            }
-        }
-#line 63 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (NPSet *)set;
-    }
-}
+NPSet * NPSet_setWithObjects_count_(NPClass * self, SEL _cmd, NPObject * * objects, size_t n);
 
 /* +[NPSet copy] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPSet * NPSet_setWithArray_(NPClass * self, SEL _cmd, NPArray * array) {
-#line 68 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    size_t n = ({ NPObject *__jeti_tmp_87 = ((NPObject *)(array)); __jeti_tmp_87 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_87->isa->vtable)->count)(__jeti_tmp_87, __jeti_sel_count) : (size_t){0}; });
-#line 71 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if ((n == 0)) {
-#line 70 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (NPSet *)NPSet_setWithObjects_count_(self, __jeti_sel_setWithObjects_count_, NULL, 0);
-    }
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPObject * * objects = (NPObject * *)calloc(n, sizeof(NPObject *));
-#line 77 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!objects) {
-#line 76 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (NPSet *)NPSet_setWithObjects_count_(self, __jeti_sel_setWithObjects_count_, NULL, 0);
-    }
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < n); (i)++) {
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        __auto_type __jeti_eh_tmp_26 = ({ NPObject *__jeti_tmp_88 = ((NPObject *)(array)); __jeti_tmp_88 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_88->isa->vtable)->objectAtIndex_)(__jeti_tmp_88, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-        objects[i] = __jeti_eh_tmp_26;
-    }
-#line 81 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPSet * result = (NPSet *)(NPSet_setWithObjects_count_(self, __jeti_sel_setWithObjects_count_, objects, n));
-#line 82 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    free(objects);
-#line 83 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return result;
-}
+NPSet * NPSet_setWithArray_(NPClass * self, SEL _cmd, NPArray * array);
 
 /* -[NPSet description] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t NPSet_count(NPObject * self, SEL _cmd) {
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return ((struct NPSet *)self)->_count;
-}
+size_t NPSet_count(NPObject * self, SEL _cmd);
 
-/* -[NPSet dealloc] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool NPSet_containsObject_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 95 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!object) {
-        return 0;
-    }
-#line 100 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPSet *)self)->_count); (i)++) {
-#line 99 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if ((((struct NPSet *)self)->_items[i] && ({ NPObject *__jeti_tmp_89 = ((NPObject *)(((struct NPSet *)self)->_items[i])); __jeti_tmp_89 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_89->isa->vtable)->isEqual_)(__jeti_tmp_89, __jeti_sel_isEqual_, (NPObject *)(object)) : (_Bool){0}; }))) {
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            return 1;
-        }
-    }
-#line 101 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return 0;
-}
+/* -[NPSet containsObject_] */
+_Bool NPSet_containsObject_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPSet anyObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPSet_anyObject(NPObject * self, SEL _cmd) {
-#line 105 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if ((((struct NPSet *)self)->_count == 0)) {
-        return NULL;
-    }
-#line 106 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return ((struct NPSet *)self)->_items[0];
-}
+NPObject * NPSet_anyObject(NPObject * self, SEL _cmd);
 
 /* -[NPSet allObjects] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPArray * NPSet_allObjects(NPObject * self, SEL _cmd) {
-#line 143 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, ((struct NPSet *)self)->_items, ((struct NPSet *)self)->_count);
-}
+NPArray * NPSet_allObjects(NPObject * self, SEL _cmd);
 
 /* -[NPSet filteredArrayUsingPredicate_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPArray * NPSet_filteredArrayUsingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred) {
-#line 151 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!pred) {
-#line 150 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, ((struct NPSet *)self)->_items, ((struct NPSet *)self)->_count);
-    }
-#line 154 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if ((((struct NPSet *)self)->_count == 0)) {
-#line 153 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, NULL, 0);
-    }
-#line 155 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPObject * * hits = (NPObject * *)malloc((((struct NPSet *)self)->_count * sizeof(NPObject *)));
-#line 158 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!hits) {
-#line 157 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (NPArray *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, NULL, 0);
-    }
-#line 159 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    size_t hit_count = 0;
-#line 165 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPSet *)self)->_count); (i)++) {
-#line 164 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if ((((struct NPSet *)self)->_items[i] && ({ NPObject *__jeti_tmp_90 = ((NPObject *)(pred)); __jeti_tmp_90 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_90->isa->vtable)->evaluateWithObject_)(__jeti_tmp_90, __jeti_sel_evaluateWithObject_, (NPObject *)(((struct NPSet *)self)->_items[i])) : (_Bool){0}; }))) {
-#line 162 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            hits[hit_count] = ((struct NPSet *)self)->_items[i];
-#line 163 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            (hit_count)++;
-        }
-    }
-#line 166 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPArray * result = (NPArray *)(NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, hits, hit_count));
-#line 167 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    free(hits);
-#line 168 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return result;
-}
+NPArray * NPSet_filteredArrayUsingPredicate_(NPObject * self, SEL _cmd, NPPredicate * pred);
 
 /* -[NPSet addObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPSet_addObject_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 126 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!object) {
-        return;
-    }
-#line 127 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    __auto_type __jeti_eh_tmp_27 = ({ NPObject *__jeti_tmp_91 = ((NPObject *)(self)); __jeti_tmp_91 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_91->isa->vtable)->containsObject_)(__jeti_tmp_91, __jeti_sel_containsObject_, object) : (_Bool){0}; });
-    if (__jeti_eh_tmp_27) {
-        return;
-    }
-#line 128 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ({ NPObject *__jeti_tmp_92 = ((NPObject *)(self)); __jeti_tmp_92 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_92->isa->vtable)->_grow)(__jeti_tmp_92, __jeti_sel__grow) : 0; });
-#line 129 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if ((((struct NPSet *)self)->_count >= ((struct NPSet *)self)->_capacity)) {
-        return;
-    }
-#line 130 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ((struct NPSet *)self)->_items[((struct NPSet *)self)->_count] = jeti_retain(object);
-#line 131 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    (((struct NPSet *)self)->_count)++;
-}
+void NPSet_addObject_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPSet addObjectsFromArray_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPSet_addObjectsFromArray_(NPObject * self, SEL _cmd, NPArray * other) {
-#line 135 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!other) {
-        return;
-    }
-#line 136 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    size_t n = ({ NPObject *__jeti_tmp_93 = ((NPObject *)(other)); __jeti_tmp_93 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_93->isa->vtable)->count)(__jeti_tmp_93, __jeti_sel_count) : (size_t){0}; });
-#line 139 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < n); (i)++) {
-#line 138 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        __auto_type __jeti_eh_tmp_28 = ({ NPObject *__jeti_tmp_94 = ((NPObject *)(other)); __jeti_tmp_94 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_94->isa->vtable)->objectAtIndex_)(__jeti_tmp_94, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-        ({ NPObject *__jeti_tmp_95 = ((NPObject *)(self)); __jeti_tmp_95 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_95->isa->vtable)->addObject_)(__jeti_tmp_95, __jeti_sel_addObject_, __jeti_eh_tmp_28) : 0; });
-    }
-}
+void NPSet_addObjectsFromArray_(NPObject * self, SEL _cmd, NPArray * other);
 
 /* -[NPSet _grow] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPSet__grow(NPObject * self, SEL _cmd) {
-#line 113 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if ((((struct NPSet *)self)->_count < ((struct NPSet *)self)->_capacity)) {
-        return;
-    }
-#line 114 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    size_t ncap = (((struct NPSet *)self)->_capacity == 0) ? 8 : (((struct NPSet *)self)->_capacity * 2);
-#line 115 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPObject * * grown = (NPObject * *)realloc(((struct NPSet *)self)->_items, (ncap * sizeof(NPObject *)));
-#line 116 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!grown) {
-        return;
-    }
-#line 117 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    memset((grown + ((struct NPSet *)self)->_capacity), 0, (((ncap - ((struct NPSet *)self)->_capacity)) * sizeof(NPObject *)));
-#line 118 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ((struct NPSet *)self)->_items = grown;
-#line 119 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ((struct NPSet *)self)->_capacity = ncap;
-}
+void NPSet__grow(NPObject * self, SEL _cmd);
 
 /* -[NPSet anyObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool NPSet_isEqual_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 172 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if ((self == (NPObject *)object)) {
-        return 1;
-    }
-#line 173 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    if (!object) {
-        return 0;
-    }
-#line 176 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    __auto_type __jeti_eh_tmp_29 = &JETI_CLASS_$_NPSet;
-    __auto_type __jeti_eh_tmp_30 = ({ NPObject *__jeti_tmp_96 = ((NPObject *)(object)); __jeti_tmp_96 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_96->isa->vtable)->isKindOfClass_)(__jeti_tmp_96, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_29)) : (_Bool){0}; });
-    if (!__jeti_eh_tmp_30) {
-#line 175 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        return (&JETI_VTABLE_$_jeti_root)->isEqual_(self, __jeti_sel_isEqual_, (NPObject *)(object));
-    }
-#line 177 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPSet * other = (NPSet *)object;
-#line 178 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    __auto_type __jeti_eh_tmp_31 = ({ NPObject *__jeti_tmp_97 = ((NPObject *)(other)); __jeti_tmp_97 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_97->isa->vtable)->count)(__jeti_tmp_97, __jeti_sel_count) : (size_t){0}; });
-    if ((__jeti_eh_tmp_31 != ((struct NPSet *)self)->_count)) {
-        return 0;
-    }
-#line 184 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPSet *)self)->_count); (i)++) {
-#line 183 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        __auto_type __jeti_eh_tmp_32 = ({ NPObject *__jeti_tmp_98 = ((NPObject *)(((struct NPSet *)self)->_items[i])); __jeti_tmp_98 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_98->isa->vtable)->isEqual_)(__jeti_tmp_98, __jeti_sel_isEqual_, (NPObject *)(NULL)) : (_Bool){0}; });
-        if ((!__jeti_eh_tmp_32 && !({ NPObject *__jeti_tmp_99 = ((NPObject *)(other)); __jeti_tmp_99 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_99->isa->vtable)->containsObject_)(__jeti_tmp_99, __jeti_sel_containsObject_, ((struct NPSet *)self)->_items[i]) : (_Bool){0}; }))) {
-#line 182 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            return 0;
-        }
-    }
-#line 185 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return 1;
-}
+_Bool NPSet_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPSet copy] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPSet_copy(NPObject * self, SEL _cmd) {
-#line 191 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    __auto_type __jeti_eh_tmp_33 = NPSet_setWithObjects_count_(&JETI_CLASS_$_NPSet, __jeti_sel_setWithObjects_count_, ((struct NPSet *)self)->_items, ((struct NPSet *)self)->_count);
-    return jeti_retain(__jeti_eh_tmp_33);
-}
+NPObject * NPSet_copy(NPObject * self, SEL _cmd);
 
 /* -[NPSet allObjects] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPSet_description(NPObject * self, SEL _cmd) {
-#line 195 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "{("));
-#line 205 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPSet *)self)->_count); (i)++) {
-#line 199 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if ((i > 0)) {
-#line 198 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            __auto_type __jeti_eh_tmp_34 = ({ NPObject *__jeti_tmp_100 = ((NPObject *)(result)); __jeti_tmp_100 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_100->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_100, __jeti_sel_stringByAppendingUTF8String_, ", ") : 0; });
-            result = __jeti_eh_tmp_34;
-        }
-#line 204 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if (((struct NPSet *)self)->_items[i]) {
-#line 201 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            __auto_type __jeti_eh_tmp_35 = ({ NPObject *__jeti_tmp_101 = ((NPObject *)(((struct NPSet *)self)->_items[i])); __jeti_tmp_101 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_101->isa->vtable)->description)(__jeti_tmp_101, __jeti_sel_description) : 0; });
-            __auto_type __jeti_eh_tmp_36 = ({ NPObject *__jeti_tmp_102 = ((NPObject *)(result)); __jeti_tmp_102 ? ((NPString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_102->isa->vtable)->stringByAppendingString_)(__jeti_tmp_102, __jeti_sel_stringByAppendingString_, (NPString *)(__jeti_eh_tmp_35)) : 0; });
-            result = __jeti_eh_tmp_36;
-        }
-        else {
-#line 203 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            __auto_type __jeti_eh_tmp_37 = ({ NPObject *__jeti_tmp_103 = ((NPObject *)(result)); __jeti_tmp_103 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_103->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_103, __jeti_sel_stringByAppendingUTF8String_, "(null)") : 0; });
-            result = __jeti_eh_tmp_37;
-        }
-    }
-#line 206 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    __auto_type __jeti_eh_tmp_38 = ({ NPObject *__jeti_tmp_104 = ((NPObject *)(result)); __jeti_tmp_104 ? ((NPString * (*)(NPObject *, SEL, const char *))((struct jeti_vtable *)__jeti_tmp_104->isa->vtable)->stringByAppendingUTF8String_)(__jeti_tmp_104, __jeti_sel_stringByAppendingUTF8String_, ")}") : 0; });
-    result = __jeti_eh_tmp_38;
-#line 207 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    return result;
-}
-
-/* -[NPSet setWithObject:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPSet_dealloc(NPObject * self, SEL _cmd) {
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPSet *)self)->_count); (i)++) {
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-        if (((struct NPSet *)self)->_items[i]) {
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-            jeti_release(((struct NPSet *)self)->_items[i]);
-        }
-    }
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    free(((struct NPSet *)self)->_items);
-#line 15 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ((struct NPSet *)self)->_items = NULL;
-#line 16 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ((struct NPSet *)self)->_count = 0;
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    ((struct NPSet *)self)->_capacity = 0;
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPSet.jeti"
-    (&JETI_VTABLE_$_NPObject)->dealloc(self, __jeti_sel_dealloc);
-}
+NPString * NPSet_description(NPObject * self, SEL _cmd);
 
 /* +[NPMutableSet set] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_set(NPClass * self, SEL _cmd) {
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return (NPMutableSet *)({ NPObject *__jeti_tmp_105 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_105 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_105->isa->vtable)->init)(__jeti_tmp_105, __jeti_sel_init) : 0; });
-}
+NPMutableSet * NPMutableSet_set(NPClass * self, SEL _cmd);
 
 /* +[NPMutableSet setWithCapacity_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_setWithCapacity_(NPClass * self, SEL _cmd, size_t capacity) {
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return (NPMutableSet *)({ NPObject *__jeti_tmp_106 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_106 ? ((NPMutableArray * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_106->isa->vtable)->initWithCapacity_)(__jeti_tmp_106, __jeti_sel_initWithCapacity_, capacity) : 0; });
-}
+NPMutableSet * NPMutableSet_setWithCapacity_(NPClass * self, SEL _cmd, size_t capacity);
 
 /* +[NPMutableSet setWithObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_setWithObject_(NPClass * self, SEL _cmd, NPObject * object) {
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    NPObject *__jeti_tmp_107 = (NPObject_alloc(self, __jeti_sel_alloc));
-    NPMutableSet * s = (NPMutableSet *)(__jeti_tmp_107 ? ((struct jeti_vtable *)__jeti_tmp_107->isa->vtable)->init(__jeti_tmp_107, __jeti_sel_init) : 0);
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    ({ NPObject *__jeti_tmp_108 = ((NPObject *)(s)); __jeti_tmp_108 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_108->isa->vtable)->addObject_)(__jeti_tmp_108, __jeti_sel_addObject_, (NPObject *)(object)) : 0; });
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return s;
-}
+NPMutableSet * NPMutableSet_setWithObject_(NPClass * self, SEL _cmd, NPObject * object);
 
 /* -[NPMutableSet set] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_init(NPObject * self, SEL _cmd) {
-#line 8 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    if (self) {
-#line 10 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        ((struct NPMutableSet *)self)->_items = NULL;
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        ((struct NPMutableSet *)self)->_count = 0;
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        ((struct NPMutableSet *)self)->_capacity = 0;
-    }
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return (NPMutableSet *)self;
-}
+NPMutableSet * NPMutableSet_init(NPObject * self, SEL _cmd);
 
 /* -[NPMutableSet initWithCapacity_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_initWithCapacity_(NPObject * self, SEL _cmd, size_t capacity) {
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    self = ({ NPObject *__jeti_tmp_109 = ((NPObject *)(self)); __jeti_tmp_109 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_109->isa->vtable)->init)(__jeti_tmp_109, __jeti_sel_init) : 0; });
-#line 22 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    if ((self && (capacity > 0))) {
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        ((struct NPMutableSet *)self)->_items = (NPObject * *)calloc(capacity, sizeof(NPObject *));
-#line 21 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        ((struct NPMutableSet *)self)->_capacity = ((struct NPMutableSet *)self)->_items ? capacity : 0;
-    }
-#line 23 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return (NPMutableSet *)self;
-}
+NPMutableSet * NPMutableSet_initWithCapacity_(NPObject * self, SEL _cmd, size_t capacity);
 
 /* -[NPMutableSet initWithSet_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_initWithSet_(NPObject * self, SEL _cmd, NPSet * other) {
-#line 27 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    self = ({ NPObject *__jeti_tmp_110 = ((NPObject *)(self)); __jeti_tmp_110 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_110->isa->vtable)->init)(__jeti_tmp_110, __jeti_sel_init) : 0; });
-#line 38 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    if ((self && other)) {
-#line 29 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        size_t n = ({ NPObject *__jeti_tmp_111 = ((NPObject *)(other)); __jeti_tmp_111 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_111->isa->vtable)->count)(__jeti_tmp_111, __jeti_sel_count) : (size_t){0}; });
-#line 37 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        if ((n > 0)) {
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            ((struct NPMutableSet *)self)->_items = (NPObject * *)calloc(n, sizeof(NPObject *));
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            if (((struct NPMutableSet *)self)->_items) {
-#line 33 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-                ((struct NPMutableSet *)self)->_capacity = n;
-#line 35 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-                __auto_type __jeti_eh_tmp_39 = ({ NPObject *__jeti_tmp_112 = ((NPObject *)(other)); __jeti_tmp_112 ? ((NPArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_112->isa->vtable)->allObjects)(__jeti_tmp_112, __jeti_sel_allObjects) : 0; });
-                ({ NPObject *__jeti_tmp_113 = ((NPObject *)(self)); __jeti_tmp_113 ? ((void (*)(NPObject *, SEL, NPArray *))((struct jeti_vtable *)__jeti_tmp_113->isa->vtable)->addObjectsFromArray_)(__jeti_tmp_113, __jeti_sel_addObjectsFromArray_, (NPArray *)(__jeti_eh_tmp_39)) : 0; });
-            }
-        }
-    }
-#line 39 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return (NPMutableSet *)self;
-}
+NPMutableSet * NPMutableSet_initWithSet_(NPObject * self, SEL _cmd, NPSet * other);
 
 /* -[NPMutableSet initWithArray_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPMutableSet * NPMutableSet_initWithArray_(NPObject * self, SEL _cmd, NPArray * other) {
-#line 43 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    self = ({ NPObject *__jeti_tmp_114 = ((NPObject *)(self)); __jeti_tmp_114 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_114->isa->vtable)->init)(__jeti_tmp_114, __jeti_sel_init) : 0; });
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    if ((self && other)) {
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        ({ NPObject *__jeti_tmp_115 = ((NPObject *)(self)); __jeti_tmp_115 ? ((void (*)(NPObject *, SEL, NPArray *))((struct jeti_vtable *)__jeti_tmp_115->isa->vtable)->addObjectsFromArray_)(__jeti_tmp_115, __jeti_sel_addObjectsFromArray_, (NPArray *)(other)) : 0; });
-    }
-#line 47 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    return (NPMutableSet *)self;
-}
+NPMutableSet * NPMutableSet_initWithArray_(NPObject * self, SEL _cmd, NPArray * other);
 
 /* -[NPMutableSet removeObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableSet_removeObject_(NPObject * self, SEL _cmd, NPObject * obj) {
-#line 71 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    if (!obj) {
-        return;
-    }
-#line 82 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableSet *)self)->_count); (i)++) {
-#line 81 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        if ((((struct NPMutableSet *)self)->_items[i] && ({ NPObject *__jeti_tmp_116 = ((NPObject *)(((struct NPMutableSet *)self)->_items[i])); __jeti_tmp_116 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_116->isa->vtable)->isEqual_)(__jeti_tmp_116, __jeti_sel_isEqual_, (NPObject *)(obj)) : (_Bool){0}; }))) {
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            jeti_release(((struct NPMutableSet *)self)->_items[i]);
-#line 77 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            for (size_t j = i;  ((j + 1) < ((struct NPMutableSet *)self)->_count); (j)++) {
-#line 76 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-                ((struct NPMutableSet *)self)->_items[j] = ((struct NPMutableSet *)self)->_items[(j + 1)];
-            }
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            (((struct NPMutableSet *)self)->_count)--;
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            ((struct NPMutableSet *)self)->_items[((struct NPMutableSet *)self)->_count] = NULL;
-#line 80 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            return;
-        }
-    }
-}
+void NPMutableSet_removeObject_(NPObject * self, SEL _cmd, NPObject * obj);
 
 /* -[NPMutableSet removeAllObjects] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPMutableSet_removeAllObjects(NPObject * self, SEL _cmd) {
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPMutableSet *)self)->_count); (i)++) {
-#line 90 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-        if (((struct NPMutableSet *)self)->_items[i]) {
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            jeti_release(((struct NPMutableSet *)self)->_items[i]);
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-            ((struct NPMutableSet *)self)->_items[i] = NULL;
-        }
-    }
-#line 92 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPMutableSet.jeti"
-    ((struct NPMutableSet *)self)->_count = 0;
-}
+void NPMutableSet_removeAllObjects(NPObject * self, SEL _cmd);
 
 /* +[NPOrderedSet orderedSet] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPOrderedSet * NPOrderedSet_orderedSet(NPClass * self, SEL _cmd) {
-#line 26 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return (NPOrderedSet *)({ NPObject *__jeti_tmp_117 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_117 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_117->isa->vtable)->init)(__jeti_tmp_117, __jeti_sel_init) : 0; });
-}
+NPOrderedSet * NPOrderedSet_orderedSet(NPClass * self, SEL _cmd);
 
 /* +[NPOrderedSet orderedSetWithObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPOrderedSet * NPOrderedSet_orderedSetWithObject_(NPClass * self, SEL _cmd, NPObject * object) {
-#line 30 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    NPObject *__jeti_tmp_118 = (NPObject_alloc(self, __jeti_sel_alloc));
-    NPOrderedSet * s = (NPOrderedSet *)(__jeti_tmp_118 ? ((struct jeti_vtable *)__jeti_tmp_118->isa->vtable)->init(__jeti_tmp_118, __jeti_sel_init) : 0);
-#line 31 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    ({ NPObject *__jeti_tmp_119 = ((NPObject *)(s)); __jeti_tmp_119 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_119->isa->vtable)->addObject_)(__jeti_tmp_119, __jeti_sel_addObject_, (NPObject *)(object)) : 0; });
-#line 32 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return s;
-}
+NPOrderedSet * NPOrderedSet_orderedSetWithObject_(NPClass * self, SEL _cmd, NPObject * object);
 
 /* +[NPOrderedSet orderedSetWithArray_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPOrderedSet * NPOrderedSet_orderedSetWithArray_(NPClass * self, SEL _cmd, NPArray * array) {
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return (NPOrderedSet *)({ NPObject *__jeti_tmp_120 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_120 ? ((NPMutableArray * (*)(NPObject *, SEL, NPArray *))((struct jeti_vtable *)__jeti_tmp_120->isa->vtable)->initWithArray_)(__jeti_tmp_120, __jeti_sel_initWithArray_, (NPArray *)(array)) : 0; });
-}
+NPOrderedSet * NPOrderedSet_orderedSetWithArray_(NPClass * self, SEL _cmd, NPArray * array);
 
 /* +[NPOrderedSet orderedSetWithOrderedSet_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPOrderedSet * NPOrderedSet_orderedSetWithOrderedSet_(NPClass * self, SEL _cmd, NPOrderedSet * other) {
-#line 40 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if (!other) {
-        return (NPOrderedSet *)NPOrderedSet_orderedSet(self, __jeti_sel_orderedSet);
-    }
-#line 41 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    __auto_type __jeti_eh_tmp_41 = ({ NPObject *__jeti_tmp_121 = ((NPObject *)(other)); __jeti_tmp_121 ? ((NPArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_121->isa->vtable)->allObjects)(__jeti_tmp_121, __jeti_sel_allObjects) : 0; });
-    return (NPOrderedSet *)NPOrderedSet_orderedSetWithArray_(self, __jeti_sel_orderedSetWithArray_, __jeti_eh_tmp_41);
-}
+NPOrderedSet * NPOrderedSet_orderedSetWithOrderedSet_(NPClass * self, SEL _cmd, NPOrderedSet * other);
 
 /* -[NPOrderedSet initWithArray_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPOrderedSet * NPOrderedSet_initWithArray_(NPObject * self, SEL _cmd, NPArray * other) {
-#line 8 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if ((self && other)) {
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-        ({ NPObject *__jeti_tmp_122 = ((NPObject *)(self)); __jeti_tmp_122 ? ((void (*)(NPObject *, SEL, NPArray *))((struct jeti_vtable *)__jeti_tmp_122->isa->vtable)->addObjectsFromArray_)(__jeti_tmp_122, __jeti_sel_addObjectsFromArray_, (NPArray *)(other)) : 0; });
-    }
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return (NPOrderedSet *)self;
-}
+NPOrderedSet * NPOrderedSet_initWithArray_(NPObject * self, SEL _cmd, NPArray * other);
 
 /* -[NPOrderedSet initWithSet_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPOrderedSet * NPOrderedSet_initWithSet_(NPObject * self, SEL _cmd, NPSet * other) {
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 21 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if ((self && other)) {
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-        __auto_type __jeti_eh_tmp_40 = ({ NPObject *__jeti_tmp_123 = ((NPObject *)(other)); __jeti_tmp_123 ? ((NPArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_123->isa->vtable)->allObjects)(__jeti_tmp_123, __jeti_sel_allObjects) : 0; });
-        ({ NPObject *__jeti_tmp_124 = ((NPObject *)(self)); __jeti_tmp_124 ? ((void (*)(NPObject *, SEL, NPArray *))((struct jeti_vtable *)__jeti_tmp_124->isa->vtable)->addObjectsFromArray_)(__jeti_tmp_124, __jeti_sel_addObjectsFromArray_, (NPArray *)(__jeti_eh_tmp_40)) : 0; });
-    }
-#line 22 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return (NPOrderedSet *)self;
-}
+NPOrderedSet * NPOrderedSet_initWithSet_(NPObject * self, SEL _cmd, NPSet * other);
 
 /* -[NPOrderedSet objectAtIndex_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPOrderedSet_objectAtIndex_(NPObject * self, SEL _cmd, size_t index) {
-#line 45 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if ((index >= ((struct NPOrderedSet *)self)->_count)) {
-        return NULL;
-    }
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return ((struct NPOrderedSet *)self)->_items[index];
-}
+NPObject * NPOrderedSet_objectAtIndex_(NPObject * self, SEL _cmd, size_t index);
 
 /* -[NPOrderedSet firstObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPOrderedSet_firstObject(NPObject * self, SEL _cmd) {
-#line 50 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if ((((struct NPOrderedSet *)self)->_count == 0)) {
-        return NULL;
-    }
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return ((struct NPOrderedSet *)self)->_items[0];
-}
+NPObject * NPOrderedSet_firstObject(NPObject * self, SEL _cmd);
 
 /* -[NPOrderedSet lastObject] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPOrderedSet_lastObject(NPObject * self, SEL _cmd) {
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if ((((struct NPOrderedSet *)self)->_count == 0)) {
-        return NULL;
-    }
-#line 56 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return ((struct NPOrderedSet *)self)->_items[(((struct NPOrderedSet *)self)->_count - 1)];
-}
+NPObject * NPOrderedSet_lastObject(NPObject * self, SEL _cmd);
 
 /* -[NPOrderedSet indexOfObject_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t NPOrderedSet_indexOfObject_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    if (!object) {
-        return (size_t)-1;
-    }
-#line 65 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    for (size_t i = 0;  (i < ((struct NPOrderedSet *)self)->_count); (i)++) {
-#line 64 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-        if ((((struct NPOrderedSet *)self)->_items[i] && ({ NPObject *__jeti_tmp_125 = ((NPObject *)(((struct NPOrderedSet *)self)->_items[i])); __jeti_tmp_125 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_125->isa->vtable)->isEqual_)(__jeti_tmp_125, __jeti_sel_isEqual_, (NPObject *)(object)) : (_Bool){0}; }))) {
-#line 63 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-            return i;
-        }
-    }
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPOrderedSet.jeti"
-    return (size_t)-1;
-}
+size_t NPOrderedSet_indexOfObject_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* +[NPNumber boolValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_numberWithInt_(NPClass * self, SEL _cmd, int value) {
-#line 30 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    {
-#line 29 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        return (NPNumber *)({ NPObject *__jeti_tmp_126 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_126 ? ((NPNumber * (*)(NPObject *, SEL, long long))((struct jeti_vtable *)__jeti_tmp_126->isa->vtable)->initWithLongLong_)(__jeti_tmp_126, __jeti_sel_initWithLongLong_, (long long)value) : 0; });
-    }
-}
+NPNumber * NPNumber_numberWithInt_(NPClass * self, SEL _cmd, int value);
 
 /* +[NPNumber charValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_numberWithLongLong_(NPClass * self, SEL _cmd, long long value) {
-#line 36 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    {
-#line 35 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        return (NPNumber *)({ NPObject *__jeti_tmp_127 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_127 ? ((NPNumber * (*)(NPObject *, SEL, long long))((struct jeti_vtable *)__jeti_tmp_127->isa->vtable)->initWithLongLong_)(__jeti_tmp_127, __jeti_sel_initWithLongLong_, value) : 0; });
-    }
-}
+NPNumber * NPNumber_numberWithLongLong_(NPClass * self, SEL _cmd, long long value);
 
 /* +[NPNumber description] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_numberWithDouble_(NPClass * self, SEL _cmd, double value) {
-#line 42 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    {
-#line 41 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        return (NPNumber *)({ NPObject *__jeti_tmp_128 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_128 ? ((NPNumber * (*)(NPObject *, SEL, double))((struct jeti_vtable *)__jeti_tmp_128->isa->vtable)->initWithDouble_)(__jeti_tmp_128, __jeti_sel_initWithDouble_, value) : 0; });
-    }
-}
+NPNumber * NPNumber_numberWithDouble_(NPClass * self, SEL _cmd, double value);
 
 /* +[NPNumber isEqual:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_numberWithBool_(NPClass * self, SEL _cmd, int value) {
-#line 48 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    {
-#line 47 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        return (NPNumber *)({ NPObject *__jeti_tmp_129 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_129 ? ((NPNumber * (*)(NPObject *, SEL, long long))((struct jeti_vtable *)__jeti_tmp_129->isa->vtable)->initWithLongLong_)(__jeti_tmp_129, __jeti_sel_initWithLongLong_, (long long)(value ? 1 : 0)) : 0; });
-    }
-}
+NPNumber * NPNumber_numberWithBool_(NPClass * self, SEL _cmd, int value);
 
 /* +[NPNumber isEqualToNumber:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_numberWithChar_(NPClass * self, SEL _cmd, char value) {
-#line 54 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    {
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        return (NPNumber *)({ NPObject *__jeti_tmp_130 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_130 ? ((NPNumber * (*)(NPObject *, SEL, long long))((struct jeti_vtable *)__jeti_tmp_130->isa->vtable)->initWithLongLong_)(__jeti_tmp_130, __jeti_sel_initWithLongLong_, (long long)value) : 0; });
-    }
-}
+NPNumber * NPNumber_numberWithChar_(NPClass * self, SEL _cmd, char value);
 
 /* -[NPNumber initWithLongLong_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_initWithLongLong_(NPObject * self, SEL _cmd, long long value) {
-#line 8 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 13 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    if (self) {
-#line 10 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        ((struct NPNumber *)self)->_isDouble = 0;
-#line 11 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        ((struct NPNumber *)self)->_intValue = value;
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        ((struct NPNumber *)self)->_doubleValue = (double)value;
-    }
-#line 14 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return (NPNumber *)self;
-}
+NPNumber * NPNumber_initWithLongLong_(NPObject * self, SEL _cmd, long long value);
 
 /* -[NPNumber initWithDouble_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPNumber * NPNumber_initWithDouble_(NPObject * self, SEL _cmd, double value) {
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 23 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    if (self) {
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        ((struct NPNumber *)self)->_isDouble = 1;
-#line 21 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        ((struct NPNumber *)self)->_doubleValue = value;
-#line 22 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        ((struct NPNumber *)self)->_intValue = (long long)value;
-    }
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return (NPNumber *)self;
-}
+NPNumber * NPNumber_initWithDouble_(NPObject * self, SEL _cmd, double value);
 
 /* -[NPNumber intValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPNumber_intValue(NPObject * self, SEL _cmd) {
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return (int)((struct NPNumber *)self)->_intValue;
-}
+int NPNumber_intValue(NPObject * self, SEL _cmd);
 
 /* -[NPNumber longLongValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) long long NPNumber_longLongValue(NPObject * self, SEL _cmd) {
-#line 58 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return ((struct NPNumber *)self)->_intValue;
-}
+long long NPNumber_longLongValue(NPObject * self, SEL _cmd);
 
 /* -[NPNumber doubleValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) double NPNumber_doubleValue(NPObject * self, SEL _cmd) {
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return ((struct NPNumber *)self)->_isDouble ? ((struct NPNumber *)self)->_doubleValue : (double)((struct NPNumber *)self)->_intValue;
-}
+double NPNumber_doubleValue(NPObject * self, SEL _cmd);
 
 /* -[NPNumber boolValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPNumber_boolValue(NPObject * self, SEL _cmd) {
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return ((struct NPNumber *)self)->_isDouble ? ((((struct NPNumber *)self)->_doubleValue != 0.0f)) : ((((struct NPNumber *)self)->_intValue != 0));
-}
+int NPNumber_boolValue(NPObject * self, SEL _cmd);
 
 /* -[NPNumber charValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) char NPNumber_charValue(NPObject * self, SEL _cmd) {
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return (char)((struct NPNumber *)self)->_intValue;
-}
+char NPNumber_charValue(NPObject * self, SEL _cmd);
 
 /* -[NPNumber intValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPNumber_description(NPObject * self, SEL _cmd) {
-#line 64 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    char buf[64];
-#line 69 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    if (((struct NPNumber *)self)->_isDouble) {
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        snprintf(buf, sizeof(buf), "%g", ((struct NPNumber *)self)->_doubleValue);
-    }
-    else {
-#line 68 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        snprintf(buf, sizeof(buf), "%lld", ((struct NPNumber *)self)->_intValue);
-    }
-#line 70 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return (NPString *)NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf);
-}
+NPString * NPNumber_description(NPObject * self, SEL _cmd);
 
 /* -[NPNumber initWithDouble:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) _Bool NPNumber_isEqual_(NPObject * self, SEL _cmd, NPObject * object) {
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    if ((self == (NPObject *)object)) {
-        return 1;
-    }
-#line 75 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    if (!object) {
-        return 0;
-    }
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    __auto_type __jeti_eh_tmp_58 = &JETI_CLASS_$_NPNumber;
-    __auto_type __jeti_eh_tmp_59 = ({ NPObject *__jeti_tmp_131 = ((NPObject *)(object)); __jeti_tmp_131 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_131->isa->vtable)->isKindOfClass_)(__jeti_tmp_131, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_58)) : (_Bool){0}; });
-    if (__jeti_eh_tmp_59) {
-#line 77 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-        return ({ NPObject *__jeti_tmp_132 = ((NPObject *)(self)); __jeti_tmp_132 ? ((int (*)(NPObject *, SEL, NPNumber *))((struct jeti_vtable *)__jeti_tmp_132->isa->vtable)->isEqualToNumber_)(__jeti_tmp_132, __jeti_sel_isEqualToNumber_, (NPNumber *)((NPNumber *)object)) : (int){0}; });
-    }
-#line 79 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    return (&JETI_VTABLE_$_jeti_root)->isEqual_(self, __jeti_sel_isEqual_, (NPObject *)(object));
-}
+_Bool NPNumber_isEqual_(NPObject * self, SEL _cmd, NPObject * object);
 
 /* -[NPNumber isEqualToNumber_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPNumber_isEqualToNumber_(NPObject * self, SEL _cmd, NPNumber * other) {
-#line 83 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    if (!other) {
-        return 0;
-    }
-#line 84 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPNumber.jeti"
-    __auto_type __jeti_eh_tmp_60 = ({ NPObject *__jeti_tmp_133 = ((NPObject *)(self)); __jeti_tmp_133 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_133->isa->vtable)->doubleValue)(__jeti_tmp_133, __jeti_sel_doubleValue) : (double){0}; });
-    __auto_type __jeti_eh_tmp_61 = ({ NPObject *__jeti_tmp_134 = ((NPObject *)(other)); __jeti_tmp_134 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_134->isa->vtable)->doubleValue)(__jeti_tmp_134, __jeti_sel_doubleValue) : (double){0}; });
-    return (__jeti_eh_tmp_60 == __jeti_eh_tmp_61);
-}
-
-/* -[NPPredicate predicateWithFormat:object:] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void NPPredicate_dealloc(NPObject * self, SEL _cmd) {
-#line 371 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * nodes = (jeti_pred_node *)((struct NPPredicate *)self)->_nodes;
-#line 381 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (nodes) {
-#line 376 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        for (size_t i = 0;  (i < ((struct NPPredicate *)self)->_node_count); (i)++) {
-#line 374 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            free(nodes[i].text);
-#line 375 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (nodes[i].val) {
-                jeti_release(nodes[i].val);
-            }
-        }
-#line 377 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        free(nodes);
-#line 378 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        ((struct NPPredicate *)self)->_nodes = NULL;
-#line 379 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        ((struct NPPredicate *)self)->_node_count = 0;
-#line 380 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        ((struct NPPredicate *)self)->_node_cap = 0;
-    }
-#line 382 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (((struct NPPredicate *)self)->_format) {
-        jeti_release(((struct NPPredicate *)self)->_format);
-        ((struct NPPredicate *)self)->_format = NULL;
-    }
-#line 383 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    (&JETI_VTABLE_$_NPObject)->dealloc(self, __jeti_sel_dealloc);
-}
-
-/* -[NPPredicate _expandFormat_args_count_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPPredicate__expandFormat_args_count_(NPObject * self, SEL _cmd, NPString * format, NPObject * * args, size_t n) {
-#line 428 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * src = (char *)(({ NPObject *__jeti_tmp_135 = ((NPObject *)(format)); __jeti_tmp_135 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_135->isa->vtable)->UTF8String)(__jeti_tmp_135, __jeti_sel_UTF8String) : 0; }));
-#line 429 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!src) {
-        src = "";
-    }
-#line 430 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t cap = ((strlen(src) * 2) + 64);
-#line 431 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * buf = (char *)calloc(cap, 1);
-#line 432 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!buf) {
-        return (NPString *)NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "");
-    }
-#line 433 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t w = 0;
-    size_t used = 0;
-#line 457 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (size_t i = 0;  src[i]; (i)++) {
-#line 456 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (((src[i] == '%') && (src[(i + 1)] == '@'))) {
-#line 436 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            NPString * desc = NULL;
-#line 437 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            char * rep = "nil";
-#line 441 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (((used < n) && args[used])) {
-#line 439 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                __auto_type __jeti_eh_tmp_44 = ({ NPObject *__jeti_tmp_136 = ((NPObject *)(args[used])); __jeti_tmp_136 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_136->isa->vtable)->description)(__jeti_tmp_136, __jeti_sel_description) : 0; });
-                desc = __jeti_eh_tmp_44;
-#line 440 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                __auto_type __jeti_eh_tmp_45 = ({ NPObject *__jeti_tmp_137 = ((NPObject *)(desc)); __jeti_tmp_137 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_137->isa->vtable)->UTF8String)(__jeti_tmp_137, __jeti_sel_UTF8String) : 0; });
-                rep = __jeti_eh_tmp_45;
-            }
-#line 442 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            (used)++;
-#line 443 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            size_t need = (strlen(rep) + 3);
-#line 444 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            while ((((w + need) + 1) > cap)) {
-                (cap *= 2);
-                buf = (char *)realloc(buf, cap);
-            }
-#line 445 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            buf[(w)++] = '\'';
-#line 449 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            for (size_t k = 0;  rep[k]; (k)++) {
-#line 447 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((rep[k] == '\'')) {
-                    buf[(w)++] = '\'';
-                }
-#line 448 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                buf[(w)++] = rep[k];
-            }
-#line 450 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            buf[(w)++] = '\'';
-#line 452 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            (i)++;
-        }
-        else {
-#line 454 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (((w + 2) > cap)) {
-                (cap *= 2);
-                buf = (char *)realloc(buf, cap);
-            }
-#line 455 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            buf[(w)++] = src[i];
-        }
-    }
-#line 458 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    buf[w] = '\x00';
-#line 459 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPString * result = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf));
-#line 460 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    free(buf);
-#line 461 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return result;
-}
-
-/* -[NPPredicate valueForKey_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * NPPredicate_valueForKey_(NPObject * self, SEL _cmd, NPString * key) {
-#line 470 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    __auto_type __jeti_eh_tmp_46 = ({ NPObject *__jeti_tmp_138 = ((NPObject *)(key)); __jeti_tmp_138 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_138->isa->vtable)->UTF8String)(__jeti_tmp_138, __jeti_sel_UTF8String) : 0; });
-    NPObject * v = jeti_kvc_value(self, __jeti_eh_tmp_46);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 475 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (!v) {
-#line 472 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                __auto_type __jeti_eh_tmp_47 = ({ NPObject *__jeti_tmp_139 = ((NPObject *)(key)); __jeti_tmp_139 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_139->isa->vtable)->UTF8String)(__jeti_tmp_139, __jeti_sel_UTF8String) : 0; });
-                fprintf(stderr, "*** NPPredicate: key '%s' is not key-value coding compliant for the receiver\n", __jeti_eh_tmp_47);
-#line 474 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                abort();
-            }
-#line 476 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return v;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
+int NPNumber_isEqualToNumber_(NPObject * self, SEL _cmd, NPNumber * other);
 
 /* +[NPError errorWithCode_domain_] */
-__attribute__((weak)) NPError * NPError_errorWithCode_domain_(NPClass * self, SEL _cmd, int code, NPString * domain) {
-#line 24 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPError *)NPError_errorWithCode_domain_userInfo_(self, __jeti_sel_errorWithCode_domain_userInfo_, code, domain, NULL);
-}
+NPError * NPError_errorWithCode_domain_(NPClass * self, SEL _cmd, int code, NPString * domain);
 
 /* +[NPError errorWithCode_domain_userInfo_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPError * NPError_errorWithCode_domain_userInfo_(NPClass * self, SEL _cmd, int code, NPString * domain, NPDictionary * userInfo) {
-#line 29 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPError *)({ NPObject *__jeti_tmp_140 = ((NPObject *)(NPObject_alloc(self, __jeti_sel_alloc))); __jeti_tmp_140 ? ((NPError * (*)(NPObject *, SEL, int, NPString *, NPDictionary *))((struct jeti_vtable *)__jeti_tmp_140->isa->vtable)->initWithCode_domain_userInfo_)(__jeti_tmp_140, __jeti_sel_initWithCode_domain_userInfo_, code, (NPString *)(domain), (NPDictionary *)(userInfo)) : 0; });
-}
+NPError * NPError_errorWithCode_domain_userInfo_(NPClass * self, SEL _cmd, int code, NPString * domain, NPDictionary * userInfo);
 
 /* -[NPError initWithCode_domain_userInfo_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPError * NPError_initWithCode_domain_userInfo_(NPObject * self, SEL _cmd, int code, NPString * domain, NPDictionary * userInfo) {
-#line 10 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
-#line 19 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    if (self) {
-#line 12 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-        ((struct NPError *)self)->_code = code;
-#line 17 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-        ((struct NPError *)self)->_domain = domain;
-#line 18 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-        ((struct NPError *)self)->_userInfo = userInfo;
-    }
-#line 20 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPError *)self;
-}
+NPError * NPError_initWithCode_domain_userInfo_(NPObject * self, SEL _cmd, int code, NPString * domain, NPDictionary * userInfo);
 
 /* +[NPError parseErrorWithMessage_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPError * NPError_parseErrorWithMessage_(NPClass * self, SEL _cmd, NPString * message) {
-#line 33 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    NPDictionary * info = (NPDictionary *)(jeti_dictionary_create(1, jeti_stringFromCstr("NSLocalizedDescription"), message));
-#line 34 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPError *)NPError_errorWithCode_domain_userInfo_(self, __jeti_sel_errorWithCode_domain_userInfo_, 1, jeti_stringFromCstr("NPErrorParse"), info);
-}
+NPError * NPError_parseErrorWithMessage_(NPClass * self, SEL _cmd, NPString * message);
 
 /* +[NPError fileIOErrorWithMessage_] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPError * NPError_fileIOErrorWithMessage_(NPClass * self, SEL _cmd, NPString * message) {
-#line 38 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    NPDictionary * info = (NPDictionary *)(jeti_dictionary_create(1, jeti_stringFromCstr("NSLocalizedDescription"), message));
-#line 39 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPError *)NPError_errorWithCode_domain_userInfo_(self, __jeti_sel_errorWithCode_domain_userInfo_, 2, jeti_stringFromCstr("NPErrorFileIO"), info);
-}
+NPError * NPError_fileIOErrorWithMessage_(NPClass * self, SEL _cmd, NPString * message);
 
 /* -[NPError code] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int NPError_code(NPObject * self, SEL _cmd) {
-#line 42 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return ((struct NPError *)self)->_code;
-}
+int NPError_code(NPObject * self, SEL _cmd);
 
 /* -[NPError domain] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPError_domain(NPObject * self, SEL _cmd) {
-#line 44 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return ((struct NPError *)self)->_domain ? ((struct NPError *)self)->_domain : jeti_stringFromCstr("");
-}
+NPString * NPError_domain(NPObject * self, SEL _cmd);
 
 /* -[NPError userInfo] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPDictionary * NPError_userInfo(NPObject * self, SEL _cmd) {
-#line 46 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return ((struct NPError *)self)->_userInfo;
-}
+NPDictionary * NPError_userInfo(NPObject * self, SEL _cmd);
 
 /* -[NPError localizedDescription] */
 #line 1 "<jeti-generated>"
 __attribute__((weak)) NPString * NPError_localizedDescription(NPObject * self, SEL _cmd) {
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    if (((struct NPError *)self)->_userInfo) {
-#line 50 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-        NPString * msg = (NPString *)(({ NPObject *__jeti_tmp_141 = ((NPObject *)(((struct NPError *)self)->_userInfo)); __jeti_tmp_141 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_141->isa->vtable)->objectForKey_)(__jeti_tmp_141, __jeti_sel_objectForKey_, jeti_stringFromCstr("NSLocalizedDescription")) : (NPObject *){0}; }));
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-        if (msg) {
-            return msg;
-        }
-    }
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    char buf[128];
-#line 54 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    __auto_type __jeti_eh_tmp_62 = ({ NPObject *__jeti_tmp_142 = ((NPObject *)(self)); __jeti_tmp_142 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_142->isa->vtable)->domain)(__jeti_tmp_142, __jeti_sel_domain) : 0; });
-    __auto_type __jeti_eh_tmp_63 = ({ NPObject *__jeti_tmp_143 = ((NPObject *)(__jeti_eh_tmp_62)); __jeti_tmp_143 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_143->isa->vtable)->UTF8String)(__jeti_tmp_143, __jeti_sel_UTF8String) : 0; });
-    snprintf(buf, sizeof(buf), "%s error %d", __jeti_eh_tmp_63, ((struct NPError *)self)->_code);
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPString *)NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf);
-}
-
-/* -[NPError userInfo] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * NPError_description(NPObject * self, SEL _cmd) {
-#line 59 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    char buf[160];
-#line 60 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    __auto_type __jeti_eh_tmp_64 = ({ NPObject *__jeti_tmp_144 = ((NPObject *)(self)); __jeti_tmp_144 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_144->isa->vtable)->domain)(__jeti_tmp_144, __jeti_sel_domain) : 0; });
-    __auto_type __jeti_eh_tmp_65 = ({ NPObject *__jeti_tmp_145 = ((NPObject *)(__jeti_eh_tmp_64)); __jeti_tmp_145 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_145->isa->vtable)->UTF8String)(__jeti_tmp_145, __jeti_sel_UTF8String) : 0; });
-    __auto_type __jeti_eh_tmp_66 = ({ NPObject *__jeti_tmp_146 = ((NPObject *)(self)); __jeti_tmp_146 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_146->isa->vtable)->localizedDescription)(__jeti_tmp_146, __jeti_sel_localizedDescription) : 0; });
-    __auto_type __jeti_eh_tmp_67 = ({ NPObject *__jeti_tmp_147 = ((NPObject *)(__jeti_eh_tmp_66)); __jeti_tmp_147 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_147->isa->vtable)->UTF8String)(__jeti_tmp_147, __jeti_sel_UTF8String) : 0; });
-    snprintf(buf, sizeof(buf), "Error %d in %s: %s", ((struct NPError *)self)->_code, __jeti_eh_tmp_65, __jeti_eh_tmp_67);
-#line 62 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPError.jeti"
-    return (NPString *)NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, buf);
+    return ((struct NPError *)self)->_localizedDescription;
 }
 
 /* -[Fetcher compute_] */
-#line 1 "<jeti-generated>"
 __attribute__((weak)) NPTask * Fetcher_compute_(NPObject * self, SEL _cmd, int n) {
 #line 24 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_compute_, self, sizeof(struct compute__frame)));
@@ -6206,7 +3232,7 @@ __attribute__((weak)) NPTask * Fetcher_runAll(NPObject * self, SEL _cmd) {
 #line 1 "<jeti-generated>"
 __attribute__((weak)) NPTask * Fetcher_loadCachedValue(NPObject * self, SEL _cmd) {
 #line 33 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    return (NPTask *)({ NPObject *__jeti_tmp_148 = ((NPObject *)(self)); __jeti_tmp_148 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_148->isa->vtable)->compute_)(__jeti_tmp_148, __jeti_sel_compute_, 42) : 0; });
+    return (NPTask *)({ NPObject *__jeti_tmp_0 = ((NPObject *)(self)); __jeti_tmp_0 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->compute_)(__jeti_tmp_0, __jeti_sel_compute_, 42) : 0; });
 }
 
 /* -[Fetcher plain_] */
@@ -6253,13 +3279,13 @@ __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
             {
                 struct runAll_frame * __jeti_f = (struct runAll_frame *)__jeti_task->frame;
 #line 26 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_149 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_149 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_149->isa->vtable)->compute_)(__jeti_tmp_149, __jeti_sel_compute_, 21) : 0; })));
+                int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_1 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_1 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->compute_)(__jeti_tmp_1, __jeti_sel_compute_, 21) : 0; })));
 #line 27 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                NPTask * t = (NPTask *)(({ NPObject *__jeti_tmp_150 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_150 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_150->isa->vtable)->loadCachedValue)(__jeti_tmp_150, __jeti_sel_loadCachedValue) : 0; }));
+                NPTask * t = (NPTask *)(({ NPObject *__jeti_tmp_2 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_2 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->loadCachedValue)(__jeti_tmp_2, __jeti_sel_loadCachedValue) : 0; }));
 #line 28 "tests/golden/37_async_modifier/async_modifier_test.jeti"
                 int y = (__jeti_task->state = 3, (long)jeti_task_await(t));
 #line 29 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                int z = ({ NPObject *__jeti_tmp_151 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_151 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_151->isa->vtable)->plain_)(__jeti_tmp_151, __jeti_sel_plain_, 5) : (int){0}; });
+                int z = ({ NPObject *__jeti_tmp_3 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_3 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->plain_)(__jeti_tmp_3, __jeti_sel_plain_, 5) : (int){0}; });
 #line 30 "tests/golden/37_async_modifier/async_modifier_test.jeti"
                 printf("runAll x=%d y=%d z=%d\n", x, y, z);
 #line 31 "tests/golden/37_async_modifier/async_modifier_test.jeti"
@@ -6276,1751 +3302,19 @@ __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
     return 1;
 }
 
-int pred_eval_idx(jeti_pred_node * nodes, int idx, NPObject * object);
-
 #line 1 "<jeti-generated>"
-__attribute__((weak)) NPObject * pred_leaf(jeti_pred_node * nodes, int idx, NPObject * object) {
-#line 494 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((idx < 0)) {
-        return NULL;
-    }
-#line 495 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &nodes[idx];
-#line 496 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((n->tag == 8)) {
-        return n->val;
-    }
-#line 511 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((n->tag == 7)) {
-#line 498 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        NPObject * cur = object;
-#line 499 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * s = n->text;
-#line 509 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        while (((__jeti_eh_flag == 0) && (cur && *s))) {
-#line 501 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            char * dot = (char *)(strchr(s, '.'));
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 502 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    size_t len = dot ? (size_t)((dot - s)) : strlen(s);
-#line 503 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    char seg[128];
-#line 504 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((len >= sizeof(seg))) {
-                        return NULL;
-                    }
-#line 505 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    memcpy(seg, s, len);
-#line 506 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    seg[len] = '\x00';
-#line 507 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    cur = jeti_kvc_value(cur, seg);
-#line 1 "<jeti-generated>"
-                    if ((__jeti_eh_flag == 0)) {
-                        {
-#line 508 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            s = dot ? (dot + 1) : (s + len);
-                        }
-                    }
-                }
-            }
-        }
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 510 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                return cur;
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 512 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return NULL;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_is_npnumber(NPObject * v) {
-#line 516 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!v) {
-        return 0;
-    }
-#line 517 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    __auto_type __jeti_eh_tmp_48 = &JETI_CLASS_$_NPNumber;
-    __auto_type __jeti_eh_tmp_49 = ({ NPObject *__jeti_tmp_152 = ((NPObject *)(v)); __jeti_tmp_152 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_152->isa->vtable)->isKindOfClass_)(__jeti_tmp_152, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_48)) : (_Bool){0}; });
-    return __jeti_eh_tmp_49 ? 1 : 0;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_is_npstring(NPObject * v) {
-#line 521 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!v) {
-        return 0;
-    }
-#line 522 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    __auto_type __jeti_eh_tmp_50 = &JETI_CLASS_$_NPString;
-    __auto_type __jeti_eh_tmp_51 = ({ NPObject *__jeti_tmp_153 = ((NPObject *)(v)); __jeti_tmp_153 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_153->isa->vtable)->isKindOfClass_)(__jeti_tmp_153, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_50)) : (_Bool){0}; });
-    return __jeti_eh_tmp_51 ? 1 : 0;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_is_nparray(NPObject * v) {
-#line 526 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!v) {
-        return 0;
-    }
-#line 527 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    __auto_type __jeti_eh_tmp_52 = &JETI_CLASS_$_NPArray;
-    __auto_type __jeti_eh_tmp_53 = ({ NPObject *__jeti_tmp_154 = ((NPObject *)(v)); __jeti_tmp_154 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_154->isa->vtable)->isKindOfClass_)(__jeti_tmp_154, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_52)) : (_Bool){0}; });
-    return __jeti_eh_tmp_53 ? 1 : 0;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) double pred_num(NPObject * v) {
-#line 531 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return ({ NPObject *__jeti_tmp_155 = ((NPObject *)((NPNumber *)v)); __jeti_tmp_155 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_155->isa->vtable)->doubleValue)(__jeti_tmp_155, __jeti_sel_doubleValue) : (double){0}; });
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_compare(NPObject * a, NPObject * b, int op) {
-#line 543 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((!a || !b)) {
-#line 539 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        int eq = ((a == b));
-#line 540 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((op == 0)) {
-            return eq;
-        }
-#line 541 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((op == 1)) {
-            return !eq;
-        }
-#line 542 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return 0;
-    }
-#line 544 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int numeric = ((((pred_is_npnumber(a) && pred_is_npnumber(b))) || ((pred_is_npnumber(a) && pred_is_npstring(b)))) || ((pred_is_npstring(a) && pred_is_npnumber(b))));
-#line 559 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (numeric) {
-#line 548 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        double x = pred_is_npnumber(a) ? pred_num(a) : strtod(({ NPObject *__jeti_tmp_156 = ((NPObject *)((NPString *)a)); __jeti_tmp_156 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_156->isa->vtable)->UTF8String)(__jeti_tmp_156, __jeti_sel_UTF8String) : 0; }), NULL);
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 549 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                double y = pred_is_npnumber(b) ? pred_num(b) : strtod(({ NPObject *__jeti_tmp_157 = ((NPObject *)((NPString *)b)); __jeti_tmp_157 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_157->isa->vtable)->UTF8String)(__jeti_tmp_157, __jeti_sel_UTF8String) : 0; }), NULL);
-#line 1 "<jeti-generated>"
-                if ((__jeti_eh_flag == 0)) {
-                    {
-#line 557 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        switch (op) {
-#line 551 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            case 0:
-                                return (x == y);
-#line 552 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            case 1:
-                                return (x != y);
-#line 553 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            case 2:
-                                return (x < y);
-#line 554 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            case 3:
-                                return (x <= y);
-#line 555 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            case 4:
-                                return (x > y);
-#line 556 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            case 5:
-                                return (x >= y);
-                        }
-#line 558 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        return 0;
-                    }
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 562 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            __auto_type __jeti_eh_tmp_54 = ({ NPObject *__jeti_tmp_158 = ((NPObject *)((NPObject *)a)); __jeti_tmp_158 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_158->isa->vtable)->isEqual_)(__jeti_tmp_158, __jeti_sel_isEqual_, (NPObject *)(b)) : (_Bool){0}; });
-            int eq = __jeti_eh_tmp_54 ? 1 : 0;
-#line 563 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if ((op == 0)) {
-                return eq;
-            }
-#line 564 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if ((op == 1)) {
-                return !eq;
-            }
-#line 565 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return 0;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) char pred_lc(char c) {
-#line 570 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return (((c >= 'A') && (c <= 'Z'))) ? (char)(((c - 'A') + 'a')) : c;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_streq_ci(const char * a, const char * b) {
-#line 576 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    while ((*a && *b)) {
-#line 574 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((pred_lc(*a) != pred_lc(*b))) {
-            return 0;
-        }
-#line 575 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        (a)++;
-        (b)++;
-    }
-#line 577 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return (*a == *b);
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_has_prefix(const char * s, const char * pre, int ci) {
-#line 580 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t n = strlen(pre);
-#line 581 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((strlen(s) < n)) {
-        return 0;
-    }
-#line 582 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!ci) {
-        return (strncmp(s, pre, n) == 0);
-    }
-#line 585 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (size_t i = 0;  (i < n); (i)++) {
-#line 584 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((pred_lc(s[i]) != pred_lc(pre[i]))) {
-            return 0;
-        }
-    }
-#line 586 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return 1;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_contains(const char * s, const char * pat, int ci) {
-#line 589 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!*pat) {
-        return 1;
-    }
-#line 598 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (; *s; (s)++) {
-#line 597 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (ci) {
-#line 592 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            size_t k = 0;
-#line 593 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            while (((pat[k] && s[k]) && (pred_lc(s[k]) == pred_lc(pat[k])))) {
-                (k)++;
-            }
-#line 594 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (!pat[k]) {
-                return 1;
-            }
-        }
-        else {
-#line 597 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if ((strncmp(s, pat, strlen(pat)) == 0)) {
-#line 596 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                return 1;
-            }
-        }
-    }
-#line 599 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return 0;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_like(const char * s, const char * pat, int ci) {
-#line 619 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    while (*pat) {
-#line 612 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*pat == '*')) {
-#line 606 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            while ((*pat == '*')) {
-                (pat)++;
-            }
-#line 607 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (!*pat) {
-                return 1;
-            }
-#line 610 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            for (; *s; (s)++) {
-#line 609 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if (pred_like(s, pat, ci)) {
-                    return 1;
-                }
-            }
-#line 611 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return 0;
-        }
-#line 613 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (!*s) {
-            return 0;
-        }
-#line 617 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*pat != '?')) {
-#line 616 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (ci) {
-#line 615 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((pred_lc(*s) != pred_lc(*pat))) {
-                    return 0;
-                }
-            }
-            else {
-#line 616 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((*s != *pat)) {
-                    return 0;
-                }
-            }
-        }
-#line 618 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        (s)++;
-        (pat)++;
-    }
-#line 620 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return (*s == '\x00');
-}
-
-int pred_re_seq(const char * re, const char * s, const char * end);
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) char * pred_re_top_alt(const char * re) {
-#line 631 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int depth = 0;
-#line 632 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * p = re;
-#line 647 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    while (((__jeti_eh_flag == 0) && *p)) {
-#line 639 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*p == '[')) {
-#line 635 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            char * close = (char *)(strchr(p, ']'));
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 636 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if (!close) {
-                        return NULL;
-                    }
-#line 637 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    p = (close + 1);
-#line 638 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    continue;
-                }
-            }
-        }
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 645 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((*p == '(')) {
-#line 640 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    (depth)++;
-                }
-                else {
-#line 645 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((*p == ')')) {
-#line 642 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        if (depth) {
-                            (depth)--;
-                        }
-                    }
-                    else {
-#line 645 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        if (((*p == '|') && (depth == 0))) {
-#line 644 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            return p;
-                        }
-                    }
-                }
-#line 646 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                (p)++;
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 648 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return NULL;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) char * pred_re_group_end(const char * re) {
-#line 653 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int depth = 0;
-#line 654 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * p = re;
-#line 668 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    while (((__jeti_eh_flag == 0) && *p)) {
-#line 661 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*p == '[')) {
-#line 657 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            char * close = (char *)(strchr(p, ']'));
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 658 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if (!close) {
-                        return NULL;
-                    }
-#line 659 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    p = (close + 1);
-#line 660 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    continue;
-                }
-            }
-        }
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 666 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((*p == '(')) {
-#line 662 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    (depth)++;
-                }
-                else {
-#line 666 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((*p == ')')) {
-#line 664 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        (depth)--;
-#line 665 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        if ((depth == 0)) {
-                            return (p + 1);
-                        }
-                    }
-                }
-#line 667 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                (p)++;
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 669 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return NULL;
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_re_one(const char * re, char c) {
-#line 674 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*re == '.')) {
-        return (c != '\x00');
-    }
-#line 695 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*re == '[')) {
-#line 676 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * close = (char *)(strchr(re, ']'));
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 677 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if (!close) {
-                    return 0;
-                }
-#line 678 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                int neg = 0;
-#line 679 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                char * p = (re + 1);
-#line 683 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((*p == '^')) {
-#line 681 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    neg = 1;
-#line 682 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    (p)++;
-                }
-#line 684 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                int found = 0;
-#line 693 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                while ((p < close)) {
-#line 692 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((((p + 2) < close) && (p[1] == '-'))) {
-#line 687 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        if (((c >= p[0]) && (c <= p[2]))) {
-                            found = 1;
-                        }
-#line 688 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        (p += 3);
-                    }
-                    else {
-#line 690 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        if ((c == *p)) {
-                            found = 1;
-                        }
-#line 691 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        (p)++;
-                    }
-                }
-#line 694 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                return (found != neg);
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 696 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return (c == *re);
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_grep(const char * body, const char * rest, const char * s, const char * end) {
-#line 701 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (pred_re_seq(rest, s, end)) {
-        return 1;
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 704 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            for (int k = 1;  ((__jeti_eh_flag == 0) && (k <= (int)((end - s)))); (k)++) {
-#line 703 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((pred_re_seq(body, s, (s + k)) && pred_grep(body, rest, (s + k), end))) {
-                    return 1;
-                }
-            }
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 705 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    return 0;
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_re_seq(const char * re, const char * s, const char * end) {
-#line 710 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * bar = (char *)(pred_re_top_alt(re));
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 719 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (bar) {
-#line 712 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                size_t blen = (size_t)((bar - re));
-#line 713 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                char branch[128];
-#line 714 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if ((blen >= sizeof(branch))) {
-                    return 0;
-                }
-#line 715 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                memcpy(branch, re, blen);
-#line 716 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                branch[blen] = '\x00';
-#line 717 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                if (pred_re_seq(branch, s, end)) {
-                    return 1;
-                }
-#line 1 "<jeti-generated>"
-                if ((__jeti_eh_flag == 0)) {
-                    {
-#line 718 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        return pred_re_seq((bar + 1), s, end);
-                    }
-                }
-            }
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 720 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((*re == '\x00')) {
-                        return (s == end);
-                    }
-#line 721 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if (((*re == '$') && (re[1] == '\x00'))) {
-                        return (s == end);
-                    }
-#line 722 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    char * eend;
-#line 755 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((*re == '(')) {
-#line 724 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        eend = pred_re_group_end(re);
-#line 1 "<jeti-generated>"
-                        if ((__jeti_eh_flag == 0)) {
-                            {
-#line 725 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                if (!eend) {
-                                    return 0;
-                                }
-#line 726 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                char q = *eend;
-#line 727 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                char * rest = eend;
-#line 728 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                if ((((q == '*') || (q == '+')) || (q == '?'))) {
-                                    rest = (eend + 1);
-                                }
-#line 729 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                size_t blen = (size_t)((((eend - 1)) - ((re + 1))));
-#line 730 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                char body[128];
-#line 731 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                if ((blen >= sizeof(body))) {
-                                    return 0;
-                                }
-#line 732 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                memcpy(body, (re + 1), blen);
-#line 733 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                body[blen] = '\x00';
-#line 734 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                if ((q == '*')) {
-                                    return pred_grep(body, rest, s, end);
-                                }
-#line 1 "<jeti-generated>"
-                                if ((__jeti_eh_flag == 0)) {
-                                    {
-#line 737 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        if ((q == '?')) {
-#line 736 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                            if (pred_re_seq(rest, s, end)) {
-                                                return 1;
-                                            }
-                                        }
-#line 1 "<jeti-generated>"
-                                        if ((__jeti_eh_flag == 0)) {
-                                            {
-#line 738 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                int start = 0;
-#line 739 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                if ((q == '+')) {
-                                                    start = 1;
-                                                }
-#line 747 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                for (int k = start;  ((__jeti_eh_flag == 0) && (k <= (int)((end - s)))); (k)++) {
-#line 741 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                    if (!pred_re_seq(body, s, (s + k))) {
-                                                        continue;
-                                                    }
-#line 1 "<jeti-generated>"
-                                                    if ((__jeti_eh_flag == 0)) {
-                                                        {
-#line 746 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                            if ((q == '+')) {
-#line 743 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                                if (pred_grep(body, rest, (s + k), end)) {
-                                                                    return 1;
-                                                                }
-                                                            }
-                                                            else {
-#line 745 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                                if (pred_re_seq(rest, (s + k), end)) {
-                                                                    return 1;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-#line 1 "<jeti-generated>"
-                                                if ((__jeti_eh_flag == 0)) {
-                                                    {
-#line 748 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                        return 0;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else {
-#line 755 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        if ((*re == '[')) {
-#line 750 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            char * close = (char *)(strchr(re, ']'));
-#line 1 "<jeti-generated>"
-                            if ((__jeti_eh_flag == 0)) {
-                                {
-#line 752 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    if (close) {
-#line 751 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        eend = (close + 1);
-                                    }
-                                    else {
-#line 752 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        eend = (re + 1);
-                                    }
-                                }
-                            }
-                        }
-                        else {
-#line 754 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            eend = (re + 1);
-                        }
-                    }
-#line 1 "<jeti-generated>"
-                    if ((__jeti_eh_flag == 0)) {
-                        {
-#line 756 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            char q = *eend;
-#line 757 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            char * rest = eend;
-#line 758 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            int limit = 1;
-#line 759 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            int least = 0;
-#line 771 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            if ((q == '*')) {
-#line 761 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                limit = (int)((end - s));
-#line 762 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                rest = (eend + 1);
-                            }
-                            else {
-#line 771 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                if ((q == '+')) {
-#line 764 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    limit = (int)((end - s));
-#line 765 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    least = 1;
-#line 766 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    rest = (eend + 1);
-                                }
-                                else {
-#line 771 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    if ((q == '?')) {
-#line 768 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        rest = (eend + 1);
-                                    }
-                                    else {
-#line 770 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        least = 1;
-                                    }
-                                }
-                            }
-#line 781 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            for (int k = limit;  ((__jeti_eh_flag == 0) && (k >= least)); (k)--) {
-#line 773 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                int ok = 1;
-#line 779 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                for (int i = 0;  ((__jeti_eh_flag == 0) && (i < k)); (i)++) {
-#line 778 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    if (!pred_re_one(re, s[i])) {
-#line 776 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        ok = 0;
-#line 777 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        break;
-                                    }
-                                }
-#line 1 "<jeti-generated>"
-                                if ((__jeti_eh_flag == 0)) {
-                                    {
-#line 780 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        if ((ok && pred_re_seq(rest, (s + k), end))) {
-                                            return 1;
-                                        }
-                                    }
-                                }
-                            }
-#line 1 "<jeti-generated>"
-                            if ((__jeti_eh_flag == 0)) {
-                                {
-#line 782 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                    return 0;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_re_match(const char * re, const char * s) {
-#line 787 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*re == '^')) {
-        (re)++;
-    }
-#line 788 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return pred_re_seq(re, s, (s + strlen(s)));
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_matches(const char * re, const char * s, int ci) {
-#line 801 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (ci) {
-#line 793 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char a[256];
-#line 794 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char b[256];
-#line 795 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t i = 0;
-#line 796 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        for (; (re[i] && (i < (sizeof(a) - 1))); (i)++) {
-            a[i] = pred_lc(re[i]);
-        }
-#line 797 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        a[i] = '\x00';
-#line 798 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        for (i = 0; (s[i] && (i < (sizeof(b) - 1))); (i)++) {
-            b[i] = pred_lc(s[i]);
-        }
-#line 799 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        b[i] = '\x00';
-#line 800 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_re_match(a, b);
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 802 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return pred_re_match(re, s);
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_strop(jeti_pred_node * nodes, int idx, NPObject * object) {
-#line 807 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &nodes[idx];
-#line 808 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPObject * l = pred_leaf(nodes, n->a, object);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 809 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            NPObject * r = pred_leaf(nodes, n->b, object);
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 810 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((!l || !r)) {
-                        return 0;
-                    }
-#line 811 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((!pred_is_npstring(l) || !pred_is_npstring(r))) {
-                        return 0;
-                    }
-#line 812 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    char * s = (char *)(({ NPObject *__jeti_tmp_159 = ((NPObject *)((NPString *)l)); __jeti_tmp_159 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_159->isa->vtable)->UTF8String)(__jeti_tmp_159, __jeti_sel_UTF8String) : 0; }));
-#line 813 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    char * pat = (char *)(({ NPObject *__jeti_tmp_160 = ((NPObject *)((NPString *)r)); __jeti_tmp_160 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_160->isa->vtable)->UTF8String)(__jeti_tmp_160, __jeti_sel_UTF8String) : 0; }));
-#line 814 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((!s || !pat)) {
-                        return 0;
-                    }
-#line 815 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    int ci = (n->op & 16);
-#line 826 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    switch ((n->op & 15)) {
-#line 817 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        case 0:
-                            return pred_has_prefix(s, pat, ci);
-#line 822 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        case 1:
-                            {
-#line 819 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                size_t sl = strlen(s);
-    size_t pl = strlen(pat);
-#line 820 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                if ((pl > sl))                                 return 0;
-#line 821 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                return ci ? pred_streq_ci(((s + sl) - pl), pat) : (strcmp(((s + sl) - pl), pat) == 0);
-                            }
-#line 823 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        case 2:
-                            return pred_contains(s, pat, ci);
-#line 824 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        case 3:
-                            return pred_like(s, pat, ci);
-#line 825 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        case 4:
-                            return pred_matches(pat, s, ci);
-                    }
-#line 1 "<jeti-generated>"
-                    if ((__jeti_eh_flag == 0)) {
-                        {
-#line 827 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            return 0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_in(jeti_pred_node * nodes, int idx, NPObject * object) {
-#line 833 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &nodes[idx];
-#line 834 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPObject * l = pred_leaf(nodes, n->a, object);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 835 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            NPObject * r = pred_leaf(nodes, n->b, object);
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 836 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if (((!l || !r) || !pred_is_nparray(r))) {
-                        return 0;
-                    }
-#line 837 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    size_t cnt = ({ NPObject *__jeti_tmp_161 = ((NPObject *)((NPArray *)r)); __jeti_tmp_161 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_161->isa->vtable)->count)(__jeti_tmp_161, __jeti_sel_count) : (size_t){0}; });
-#line 840 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    for (size_t i = 0;  ((__jeti_eh_flag == 0) && (i < cnt)); (i)++) {
-#line 839 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        __auto_type __jeti_eh_tmp_55 = ({ NPObject *__jeti_tmp_162 = ((NPObject *)((NPArray *)r)); __jeti_tmp_162 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_162->isa->vtable)->objectAtIndex_)(__jeti_tmp_162, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-                        if (pred_compare(l, __jeti_eh_tmp_55, 0)) {
-                            return 1;
-                        }
-                    }
-#line 1 "<jeti-generated>"
-                    if ((__jeti_eh_flag == 0)) {
-                        {
-#line 841 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                            return 0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_between(jeti_pred_node * nodes, int idx, NPObject * object) {
-#line 846 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &nodes[idx];
-#line 847 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPObject * l = pred_leaf(nodes, n->a, object);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 848 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            NPObject * r = pred_leaf(nodes, n->b, object);
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 849 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if (((!l || !r) || !pred_is_nparray(r))) {
-                        return 0;
-                    }
-#line 850 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    __auto_type __jeti_eh_tmp_56 = ({ NPObject *__jeti_tmp_163 = ((NPObject *)((NPArray *)r)); __jeti_tmp_163 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_163->isa->vtable)->count)(__jeti_tmp_163, __jeti_sel_count) : (size_t){0}; });
-                    if ((__jeti_eh_tmp_56 != 2)) {
-                        return 0;
-                    }
-#line 851 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    NPObject * lo = ({ NPObject *__jeti_tmp_164 = ((NPObject *)((NPArray *)r)); __jeti_tmp_164 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_164->isa->vtable)->objectAtIndex_)(__jeti_tmp_164, __jeti_sel_objectAtIndex_, 0) : (NPObject *){0}; });
-#line 852 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    NPObject * hi = ({ NPObject *__jeti_tmp_165 = ((NPObject *)((NPArray *)r)); __jeti_tmp_165 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_165->isa->vtable)->objectAtIndex_)(__jeti_tmp_165, __jeti_sel_objectAtIndex_, 1) : (NPObject *){0}; });
-#line 853 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    return (pred_compare(l, lo, 4) && pred_compare(l, hi, 3));
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_quant(jeti_pred_node * nodes, int idx, NPObject * object) {
-#line 858 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &nodes[idx];
-#line 859 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPObject * coll = pred_leaf(nodes, n->a, object);
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 0)) {
-        {
-#line 860 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if ((!coll || !pred_is_nparray(coll))) {
-                return (n->op == 2);
-            }
-#line 861 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            size_t cnt = ({ NPObject *__jeti_tmp_166 = ((NPObject *)((NPArray *)coll)); __jeti_tmp_166 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_166->isa->vtable)->count)(__jeti_tmp_166, __jeti_sel_count) : (size_t){0}; });
-#line 862 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            int any = 0;
-    int all = 1;
-#line 866 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            for (size_t i = 0;  ((__jeti_eh_flag == 0) && (i < cnt)); (i)++) {
-#line 865 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                __auto_type __jeti_eh_tmp_57 = ({ NPObject *__jeti_tmp_167 = ((NPObject *)((NPArray *)coll)); __jeti_tmp_167 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_167->isa->vtable)->objectAtIndex_)(__jeti_tmp_167, __jeti_sel_objectAtIndex_, i) : (NPObject *){0}; });
-                if (pred_eval_idx(nodes, n->b, __jeti_eh_tmp_57)) {
-#line 864 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    any = 1;
-                }
-                else {
-#line 865 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    all = 0;
-                }
-            }
-#line 1 "<jeti-generated>"
-            if ((__jeti_eh_flag == 0)) {
-                {
-#line 867 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((n->op == 0)) {
-                        return any;
-                    }
-#line 868 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    if ((n->op == 1)) {
-                        return (all && (cnt > 0));
-                    }
-#line 869 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                    return !any;
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
-__attribute__((weak)) int pred_eval_idx(jeti_pred_node * nodes, int idx, NPObject * object) {
-#line 873 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((idx < 0)) {
-        return 0;
-    }
-#line 874 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &nodes[idx];
-#line 889 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    switch (n->tag) {
-#line 876 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        case 0:
-            return (pred_eval_idx(nodes, n->a, object) && pred_eval_idx(nodes, n->b, object));
-#line 1 "<jeti-generated>"
-        if ((__jeti_eh_flag == 0)) {
-            {
-#line 877 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                case 1:
-                    return (pred_eval_idx(nodes, n->a, object) || pred_eval_idx(nodes, n->b, object));
-#line 1 "<jeti-generated>"
-                if ((__jeti_eh_flag == 0)) {
-                    {
-#line 878 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                        case 2:
-                            return !pred_eval_idx(nodes, n->a, object);
-#line 1 "<jeti-generated>"
-                        if ((__jeti_eh_flag == 0)) {
-                            {
-#line 883 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                case 3:
-                                    {
-#line 880 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        NPObject * l = pred_leaf(nodes, n->a, object);
-#line 1 "<jeti-generated>"
-                                        if ((__jeti_eh_flag == 0)) {
-                                            {
-#line 881 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                NPObject * r = pred_leaf(nodes, n->b, object);
-#line 1 "<jeti-generated>"
-                                                if ((__jeti_eh_flag == 0)) {
-                                                    {
-#line 882 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                        return pred_compare(l, r, n->op);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-#line 1 "<jeti-generated>"
-                                if ((__jeti_eh_flag == 0)) {
-                                    {
-#line 884 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                        case 4:
-                                            return pred_strop(nodes, idx, object);
-#line 1 "<jeti-generated>"
-                                        if ((__jeti_eh_flag == 0)) {
-                                            {
-#line 885 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                case 5:
-                                                    return pred_in(nodes, idx, object);
-#line 1 "<jeti-generated>"
-                                                if ((__jeti_eh_flag == 0)) {
-                                                    {
-#line 886 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                        case 6:
-                                                            return pred_between(nodes, idx, object);
-#line 1 "<jeti-generated>"
-                                                        if ((__jeti_eh_flag == 0)) {
-                                                            {
-#line 887 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                                case 9:
-                                                                    return pred_quant(nodes, idx, object);
-#line 1 "<jeti-generated>"
-                                                                if ((__jeti_eh_flag == 0)) {
-                                                                    {
-#line 888 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-                                                                        default:
-                                                                            return 0;
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-#line 1 "<jeti-generated>"
-    if ((__jeti_eh_flag == 1)) {
-        return 0;
-    }
-}
-
 __attribute__((weak)) int main(void) {
     jeti_metaInit();
 #line 41 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    NPObject *__jeti_tmp_168 = (NPObject_alloc(&JETI_CLASS_$_Fetcher, __jeti_sel_alloc));
-    Fetcher * f = (Fetcher *)(__jeti_tmp_168 ? ((struct jeti_vtable *)__jeti_tmp_168->isa->vtable)->init(__jeti_tmp_168, __jeti_sel_init) : 0);
+    NPObject *__jeti_tmp_4 = (NPObject_alloc(&JETI_CLASS_$_Fetcher, __jeti_sel_alloc));
+    Fetcher * f = (Fetcher *)(__jeti_tmp_4 ? ((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->init(__jeti_tmp_4, __jeti_sel_init) : 0);
 #line 42 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    NPTask * task = (NPTask *)(({ NPObject *__jeti_tmp_169 = ((NPObject *)(f)); __jeti_tmp_169 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_169->isa->vtable)->runAll)(__jeti_tmp_169, __jeti_sel_runAll) : 0; }));
+    NPTask * task = (NPTask *)(({ NPObject *__jeti_tmp_5 = ((NPObject *)(f)); __jeti_tmp_5 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->runAll)(__jeti_tmp_5, __jeti_sel_runAll) : 0; }));
 #line 43 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     jeti_task_await(task);
 #line 1 "<jeti-generated>"
     jeti_release(f);
 #line 45 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     return 0;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_push(PredP * p, int tag, int op, int a, int b) {
-#line 53 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((p->count == p->cap)) {
-#line 50 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        p->cap = p->cap ? (p->cap * 2) : 16;
-#line 51 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        p->nodes = (jeti_pred_node *)realloc(p->nodes, (p->cap * sizeof(jeti_pred_node)));
-#line 52 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (!p->nodes) {
-            p->failed = 1;
-            return 0;
-        }
-    }
-#line 54 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    jeti_pred_node * n = &p->nodes[p->count];
-#line 55 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    memset(n, 0, sizeof(*n));
-#line 56 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    n->tag = tag;
-    n->op = op;
-    n->a = a;
-    n->b = b;
-#line 57 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return (p->count)++;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_push_key(PredP * p, const char * begin, size_t len) {
-#line 61 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t idx = pred_push(p, 7, 0, -1, -1);
-#line 62 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return idx;
-#line 63 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    p->nodes[idx].text = (char *)calloc((len + 1), 1);
-#line 64 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!p->nodes[idx].text) {
-        p->failed = 1;
-        return idx;
-    }
-#line 65 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    memcpy(p->nodes[idx].text, begin, len);
-#line 66 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return idx;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_push_lit_str(PredP * p, const char * begin, size_t len) {
-#line 70 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t idx = pred_push(p, 8, 0, -1, -1);
-#line 71 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return idx;
-#line 72 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    p->nodes[idx].text = (char *)calloc((len + 1), 1);
-#line 73 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!p->nodes[idx].text) {
-        p->failed = 1;
-        return idx;
-    }
-#line 74 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    memcpy(p->nodes[idx].text, begin, len);
-#line 76 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    p->nodes[idx].val = (NPObject *)NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, p->nodes[idx].text);
-#line 77 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->nodes[idx].val)     jeti_retain(p->nodes[idx].val);
-#line 78 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return idx;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPString * pred_str_lit(PredP * p) {
-#line 85 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*p->s != '\''))     return NULL;
-#line 86 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    (p->s)++;
-#line 87 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * tmp = (char *)calloc((strlen(p->s) + 1), 1);
-#line 88 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!tmp) {
-        p->failed = 1;
-        return NULL;
-    }
-#line 89 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t w = 0;
-#line 93 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    while ((*p->s && (*p->s != '\''))) {
-#line 91 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (((p->s[0] == '\'') && (p->s[1] == '\''))) {
-            (p->s)++;
-        }
-#line 92 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        tmp[(w)++] = *(p->s)++;
-    }
-#line 94 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*p->s != '\'')) {
-        free(tmp);
-        pred_fail(p, "unterminated string");
-        return NULL;
-    }
-#line 95 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    (p->s)++;
-#line 96 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPString * out = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, tmp));
-#line 97 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    free(tmp);
-#line 98 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return out;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_push_lit_num(PredP * p, double d) {
-#line 102 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t idx = pred_push(p, 8, 0, -1, -1);
-#line 103 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return idx;
-#line 104 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    p->nodes[idx].val = (NPObject *)NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithDouble_, d);
-#line 105 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->nodes[idx].val)     jeti_retain(p->nodes[idx].val);
-#line 106 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return idx;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void pred_fail(PredP * p, const char * msg) {
-#line 113 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!p->failed) {
-#line 111 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        fprintf(stderr, "*** NPPredicate: %s near '%.16s'\n", msg, p->s);
-#line 112 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        p->failed = 1;
-    }
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) void pred_skipws(PredP * p) {
-#line 117 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    while (((((*p->s == ' ') || (*p->s == '\t')) || (*p->s == '\n')) || (*p->s == '\r')))     (p->s)++;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_word(PredP * p, const char * w) {
-#line 121 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t n = strlen(w);
-#line 122 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((strncmp(p->s, w, n) != 0))     return 0;
-#line 123 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char c = p->s[n];
-#line 124 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (((((((c >= 'a') && (c <= 'z'))) || (((c >= 'A') && (c <= 'Z')))) || (((c >= '0') && (c <= '9')))) || (c == '_')))     return 0;
-#line 125 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    (p->s += n);
-#line 126 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return 1;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_opword(PredP * p, const char * w, int * ci) {
-#line 131 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (!pred_word(p, w))     return 0;
-#line 132 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    pred_skipws(p);
-#line 133 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    *ci = 0;
-#line 139 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((((p->s[0] == '[') && (((p->s[1] == 'c') || (p->s[1] == 'C')))) && (p->s[2] == ']'))) {
-#line 135 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        *ci = 1;
-#line 136 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        (p->s += 3);
-    }
-    else     if ((((p->s[0] == '[') && (((p->s[1] == 'd') || (p->s[1] == 'D')))) && (p->s[2] == ']'))) {
-#line 138 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        (p->s += 3);
-    }
-#line 140 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return 1;
-}
-
-size_t pred_or(PredP * p);
-
-size_t pred_cmp_rest(PredP * p, size_t left);
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_agg_lit(PredP * p) {
-#line 152 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    (p->s)++;
-#line 153 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    NPObject * elems[16];
-#line 154 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t n = 0;
-#line 173 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (; ; ) {
-#line 156 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        pred_skipws(p);
-#line 157 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*p->s == '}')) {
-            (p->s)++;
-            break;
-        }
-#line 158 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (!*p->s) {
-            pred_fail(p, "unterminated aggregate");
-            break;
-        }
-#line 159 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*p->s == ',')) {
-            (p->s)++;
-            continue;
-        }
-#line 165 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*p->s == '\'')) {
-#line 161 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            NPString * sv = (NPString *)(pred_str_lit(p));
-#line 162 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (!sv)             break;
-#line 163 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if ((n < (sizeof(elems) / sizeof(elems[0]))))             elems[(n)++] = (NPObject *)sv;
-#line 164 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            continue;
-        }
-#line 166 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * end = NULL;
-#line 167 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        double d = strtod(p->s, &end);
-#line 168 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((end == p->s)) {
-            pred_fail(p, "expected number in aggregate");
-            break;
-        }
-#line 169 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        p->s = end;
-#line 172 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((n < (sizeof(elems) / sizeof(elems[0])))) {
-#line 171 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            elems[(n)++] = (NPObject *)NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithDouble_, d);
-        }
-    }
-#line 174 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t idx = pred_push(p, 8, 0, -1, -1);
-#line 175 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return idx;
-#line 176 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    p->nodes[idx].val = (NPObject *)NPArray_arrayWithObjects_count_(&JETI_CLASS_$_NPArray, __jeti_sel_arrayWithObjects_count_, elems, n);
-#line 177 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->nodes[idx].val)     jeti_retain(p->nodes[idx].val);
-#line 178 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return idx;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_primary(PredP * p) {
-#line 183 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    pred_skipws(p);
-#line 184 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return 0;
-#line 192 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*p->s == '(')) {
-#line 186 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        (p->s)++;
-#line 187 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t inner = pred_or(p);
-#line 188 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        pred_skipws(p);
-#line 189 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((*p->s != ')')) {
-            pred_fail(p, "expected ')'");
-            return inner;
-        }
-#line 190 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        (p->s)++;
-#line 191 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return inner;
-    }
-#line 198 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*p->s == '\'')) {
-#line 194 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        NPString * sv = (NPString *)(pred_str_lit(p));
-#line 195 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (!sv)         return 0;
-#line 196 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * bytes = (char *)(({ NPObject *__jeti_tmp_170 = ((NPObject *)(sv)); __jeti_tmp_170 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_170->isa->vtable)->UTF8String)(__jeti_tmp_170, __jeti_sel_UTF8String) : 0; }));
-#line 197 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push_lit_str(p, bytes, bytes ? strlen(bytes) : 0);
-    }
-#line 199 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((*p->s == '{'))     return pred_agg_lit(p);
-#line 206 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (((((*p->s >= '0') && (*p->s <= '9'))) || ((((*p->s == '-') && (p->s[1] >= '0')) && (p->s[1] <= '9'))))) {
-#line 202 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * end = NULL;
-#line 203 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        double d = strtod(p->s, &end);
-#line 204 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        p->s = end;
-#line 205 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push_lit_num(p, d);
-    }
-#line 207 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((pred_word(p, "TRUE") || pred_word(p, "YES")))     return pred_push_lit_num(p, 1);
-#line 208 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((pred_word(p, "FALSE") || pred_word(p, "NO")))     return pred_push_lit_num(p, 0);
-#line 213 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((pred_word(p, "nil") || pred_word(p, "NULL"))) {
-#line 210 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t idx = pred_push(p, 8, 0, -1, -1);
-#line 211 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        p->nodes[idx].val = NULL;
-#line 212 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return idx;
-    }
-#line 215 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int quant = -1;
-#line 218 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (pred_word(p, "ANY"))     quant = 0;
-    else     if (pred_word(p, "ALL"))     quant = 1;
-    else     if (pred_word(p, "NONE"))     quant = 2;
-#line 234 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((quant >= 0)) {
-#line 220 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        pred_skipws(p);
-#line 221 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * kb = p->s;
-#line 223 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        while ((((((((*p->s >= 'a') && (*p->s <= 'z'))) || (((*p->s >= 'A') && (*p->s <= 'Z')))) || (((*p->s >= '0') && (*p->s <= '9')))) || (*p->s == '_')) || (*p->s == '.')))         (p->s)++;
-#line 224 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((p->s == kb)) {
-            pred_fail(p, "expected key after ANY/ALL/NONE");
-            return 0;
-        }
-#line 225 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t kidx = pred_push_key(p, kb, (size_t)((p->s - kb)));
-#line 229 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        pred_skipws(p);
-#line 230 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t subject = pred_push_key(p, p->s, 0);
-#line 231 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t cmp = pred_cmp_rest(p, subject);
-#line 232 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (p->failed)         return 0;
-#line 233 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push(p, 9, quant, (int)kidx, (int)cmp);
-    }
-#line 241 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((((((*p->s >= 'a') && (*p->s <= 'z'))) || (((*p->s >= 'A') && (*p->s <= 'Z')))) || (*p->s == '_'))) {
-#line 237 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        char * b = p->s;
-#line 239 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        while ((((((((*p->s >= 'a') && (*p->s <= 'z'))) || (((*p->s >= 'A') && (*p->s <= 'Z')))) || (((*p->s >= '0') && (*p->s <= '9')))) || (*p->s == '_')) || (*p->s == '.')))         (p->s)++;
-#line 240 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push_key(p, b, (size_t)((p->s - b)));
-    }
-#line 242 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    pred_fail(p, "unexpected token");
-#line 243 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return 0;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_cmp(PredP * p) {
-#line 252 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    pred_skipws(p);
-#line 253 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return 0;
-#line 259 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((pred_word(p, "NOT") || (((*p->s == '!') && (p->s[1] != '='))))) {
-#line 257 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t inner = pred_cmp(p);
-#line 258 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push(p, 2, 0, (int)inner, -1);
-    }
-#line 260 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t left = pred_primary(p);
-#line 261 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p->failed)     return left;
-#line 262 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return pred_cmp_rest(p, left);
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_cmp_rest(PredP * p, size_t left) {
-#line 268 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    pred_skipws(p);
-#line 269 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * toks[8];
-#line 270 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int ops[8];
-#line 271 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[0] = "<=";
-    ops[0] = 3;
-#line 272 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[1] = ">=";
-    ops[1] = 4;
-#line 273 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[2] = "!=";
-    ops[2] = 1;
-#line 274 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[3] = "<>";
-    ops[3] = 1;
-#line 275 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[4] = "==";
-    ops[4] = 0;
-#line 276 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[5] = "=";
-    ops[5] = 0;
-#line 277 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[6] = "<";
-    ops[6] = 2;
-#line 278 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    toks[7] = ">";
-    ops[7] = 4;
-#line 286 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (int i = 0;  (i < 8); (i)++) {
-#line 280 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t n = strlen(toks[i]);
-#line 285 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if ((strncmp(p->s, toks[i], n) == 0)) {
-#line 282 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            (p->s += n);
-#line 283 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            size_t right = pred_primary(p);
-#line 284 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return pred_push(p, 3, ops[i], (int)left, (int)right);
-        }
-    }
-#line 287 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int ci = 0;
-#line 288 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    char * strops[5];
-#line 289 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    int sbases[5];
-#line 290 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    strops[0] = "BEGINSWITH";
-    sbases[0] = 0;
-#line 291 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    strops[1] = "ENDSWITH";
-    sbases[1] = 1;
-#line 292 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    strops[2] = "CONTAINS";
-    sbases[2] = 2;
-#line 293 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    strops[3] = "LIKE";
-    sbases[3] = 3;
-#line 294 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    strops[4] = "MATCHES";
-    sbases[4] = 4;
-#line 300 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (int i = 0;  (i < 5); (i)++) {
-#line 299 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (pred_opword(p, strops[i], &ci)) {
-#line 297 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            size_t right = pred_primary(p);
-#line 298 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            return pred_push(p, 4, (sbases[i] | (ci ? 16 : 0)), (int)left, (int)right);
-        }
-    }
-#line 304 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (pred_word(p, "IN")) {
-#line 302 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t right = pred_primary(p);
-#line 303 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push(p, 5, 0, (int)left, (int)right);
-    }
-#line 308 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (pred_word(p, "BETWEEN")) {
-#line 306 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t right = pred_primary(p);
-#line 307 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return pred_push(p, 6, 0, (int)left, (int)right);
-    }
-#line 309 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return left;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_and(PredP * p) {
-#line 313 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t left = pred_cmp(p);
-#line 324 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (; ; ) {
-#line 315 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        pred_skipws(p);
-#line 316 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (p->failed)         return left;
-#line 317 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        int ci;
-#line 318 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        int matched = 0;
-#line 320 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (pred_opword(p, "AND", &ci))         matched = 1;
-        else         if (((p->s[0] == '&') && (p->s[1] == '&'))) {
-            (p->s += 2);
-            matched = 1;
-        }
-#line 321 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (!matched)         break;
-#line 322 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t right = pred_cmp(p);
-#line 323 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        left = pred_push(p, 0, 0, (int)left, (int)right);
-    }
-#line 325 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return left;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) size_t pred_or(PredP * p) {
-#line 329 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t left = pred_and(p);
-#line 340 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    for (; ; ) {
-#line 331 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        pred_skipws(p);
-#line 332 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (p->failed)         return left;
-#line 333 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        int ci;
-#line 334 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        int matched = 0;
-#line 336 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (pred_opword(p, "OR", &ci))         matched = 1;
-        else         if (((p->s[0] == '|') && (p->s[1] == '|'))) {
-            (p->s += 2);
-            matched = 1;
-        }
-#line 337 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        if (!matched)         break;
-#line 338 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        size_t right = pred_and(p);
-#line 339 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        left = pred_push(p, 1, 0, (int)left, (int)right);
-    }
-#line 341 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return left;
-}
-
-#line 1 "<jeti-generated>"
-__attribute__((weak)) int pred_parse(const char * src, jeti_pred_node * * out_nodes, size_t * out_count, size_t * out_root) {
-#line 348 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    PredP p;
-#line 349 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    memset(&p, 0, sizeof(p));
-#line 350 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    p.s = src;
-#line 351 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    size_t root = pred_or(&p);
-#line 352 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    pred_skipws(&p);
-#line 353 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if ((!p.failed && (*p.s != '\x00')))     pred_fail(&p, "trailing characters");
-#line 361 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    if (p.failed) {
-#line 358 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        for (size_t i = 0;  (i < p.count); (i)++) {
-#line 356 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            free(p.nodes[i].text);
-#line 357 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-            if (p.nodes[i].val)             jeti_release(p.nodes[i].val);
-        }
-#line 359 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        free(p.nodes);
-#line 360 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-        return 0;
-    }
-#line 362 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    *out_nodes = p.nodes;
-#line 363 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    *out_count = p.count;
-#line 364 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    *out_root = root;
-#line 365 "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/include/Foundation/NPPredicate.jeti"
-    return 1;
 }
 

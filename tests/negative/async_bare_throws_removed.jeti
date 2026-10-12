@@ -1,0 +1,10 @@
+// Negative (B′, plan §9.5): the trailing bare `throws` spelling was removed
+// with the second-batch try-await design. The unified failable annotation is
+// `@throws(ErrType *)` (same as the sync side). This file MUST fail with a
+// plain syntax error on the bare `throws` token — kept as documentation, the
+// runner skips tests/negative (verified by hand / cargo unit tests).
+#import <Foundation/Foundation.jth>
+
+@interface Svc : NPObject
+- (async int)fetch:(int)x throws;
+@end

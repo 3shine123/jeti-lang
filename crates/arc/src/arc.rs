@@ -144,7 +144,7 @@ fn collect_expr_vars(e: &AstExpr, out: &mut Vec<String>) {
         AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => collect_expr_vars(obj, out),
         AstExprData::Unary { operand, .. } => collect_expr_vars(operand, out),
         AstExprData::Cast { expr, .. } | AstExprData::Paren(expr) | AstExprData::Boxed(expr)
-        | AstExprData::Await(expr) => collect_expr_vars(expr, out),
+        | AstExprData::Await { inner: expr, .. } => collect_expr_vars(expr, out),
         AstExprData::Binary { left, right, .. } | AstExprData::Assign { target: left, value: right } => {
             collect_expr_vars(left, out);
             collect_expr_vars(right, out);
@@ -309,7 +309,7 @@ fn collect_captures_expr(e: &AstExpr, out: &mut Vec<String>) {
         AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => collect_captures_expr(obj, out),
         AstExprData::Unary { operand, .. } => collect_captures_expr(operand, out),
         AstExprData::Cast { expr, .. } | AstExprData::Paren(expr) | AstExprData::Boxed(expr)
-        | AstExprData::Await(expr) => collect_captures_expr(expr, out),
+        | AstExprData::Await { inner: expr, .. } => collect_captures_expr(expr, out),
         AstExprData::Binary { left, right, .. } | AstExprData::Assign { target: left, value: right } => {
             collect_captures_expr(left, out);
             collect_captures_expr(right, out);

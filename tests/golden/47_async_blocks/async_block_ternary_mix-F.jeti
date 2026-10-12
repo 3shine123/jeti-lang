@@ -1,0 +1,18 @@
+// Golden (-F deliberate failure): a ternary mixing a task-yielding branch
+// with an arithmetic value is NOT a valid await operand — the checker must
+// reject it ("ternary branches have incompatible types"). Kept in-tree so a
+// checker regression that silently accepts the mix fails the suite.
+#import <Foundation/Foundation.jth>
+
+@interface Svc : NPObject
+- (async int)a:(int)x;
+- (async void)run;
+@end
+
+@implementation Svc
+- (async int)a:(int)x { return await x; }
+- (async void)run {
+    int cond = 1;
+    int m = await (cond ? [self a:10] : 5);
+}
+@end

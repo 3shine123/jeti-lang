@@ -101,10 +101,6 @@ pub enum KeywordKind {
     AtRequired,
     AtClass,
     AtTry,
-    /// `@await` — suspension-point operator (async/await, route map #4).
-    /// `@` because the task-state-machine is a compiler/runtime mechanism
-    /// with no C syntax slot; `await` alone stays a plain C identifier.
-    AtAwait,
     /// `@defer` — scope-exit execution block (Go-style defer). `@` because C
     /// has no syntax slot for "run this at every exit of my enclosing block";
     /// without it the programmer hand-writes cleanup at every return/break/

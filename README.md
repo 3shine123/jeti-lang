@@ -558,42 +558,41 @@ if (a != b) { ... }
 p == &a               // pointer comparison semantics unchanged
 ```
 
-### async/await (`@await`)
+### async/await
 
-A method whose body contains `@await` is async — mirroring C++20's `co_await`-based coroutines. The `async` modifier sits **before the return type** and is part of the signature (visible in the `.jth`), so callers can see a method suspends without reading its body:
+An async method declares the modifier with its **business return type** — `async int`, `async void`, even `async NPArray<NPString *> *` — and awaits with the bare soft keyword `await` (context-sensitive: a C identifier named `await` still parses as an identifier everywhere else):
 
 ```jeti
 @interface Fetcher : NPObject
-- (async NPTask<int>)compute:(int)n;   // suspends, yields an int
-- (async NPTask<void>)runAll;          // async void = the entry method
+- (async int)compute:(int)n;   // suspends, yields an int
+- (async void)runAll;          // async void = the entry method
 @end
 
 @implementation Fetcher
-- (async NPTask<int>)compute:(int)n {
-    int raw = @await n;               // suspension point
+- (async int)compute:(int)n {
+    int raw = await n;                // suspension point
     return raw * 2;                   // the body returns T, not a task
 }
 
-- (async NPTask<void>)runAll {
-    int x = @await [self compute:21]; // awaiting a call unwraps to T
+- (async void)runAll {
+    int x = await [self compute:21]; // awaiting a call unwraps to T
     NPLog(@"result=%d", x);
 }
 @end
 
 int main() {
     Fetcher *f = [[Fetcher alloc] init];
-    NPTask<void> *t = [f runAll];     // form A: lazy — created, not executed
-    [t start];                        // statement position: driven to completion here
+    [f runAll];                       // statement position: driven to completion here
     return 0;
 }
 ```
 
 Design rules:
 
-- **`async` is a signature-level modifier on the return type** — `(async NPTask<T>)`. `NPTask<T>` is a real type: a bare `- (NPTask<int>)load` is an *ordinary synchronous* method that merely returns a task object, while `async NPTask<T>` suspends — the two are statically distinguishable.
-- **Infection is chain-based** — a method calling `@await` becomes async itself; a suspending method *must* declare the modifier (checker-enforced, see below). Task handles are first-class values: a bare async call *creates* the task (`NPTask<T> *`); `[task start]` and `@await t` drive it, and awaiting the same task twice is legal (the result is cached). Writing the call — or `[t start]` — at **statement position** is the async entry: hosted code drives it to completion right there (lowered to `jeti_task_await`), freestanding code never drives and leaves the pump to your `main`; there is deliberately no pump at `main`'s exit (ARC releases the receiver first).
-- **`@await` lowers to a state machine** — the body is split at suspension points into a `switch(task->state)` driver over a heap `NPTask`; locals that survive a suspension are lifted into a per-method frame struct.
-- **`@try` spanning an `@await`** is rejected (a `jmp_buf` cannot survive a suspension point); `@noarc` across awaits is allowed; break/continue across awaits become state jumps.
+- **`async` takes the business type directly** — `async int` / `async void` / `async NPString *`. The legacy `(async NPTask<T>)` spelling is rejected with a migration error; a bare `- (NPTask<int>)load` remains an *ordinary synchronous* method that merely returns a task object.
+- **Signatures declare, the checker enforces** — a suspending method *must* declare the modifier (body never suspends → error; `await` without the modifier → error). Task handles are first-class values: a bare async call *creates* the task (`NPTask<int> *`); `await t` or a statement-position `[t start]` drive it, and awaiting the same task twice is legal (the result is cached). A statement-position async call is the async entry: hosted code drives it to completion right there (lowered to `jeti_task_await`), freestanding code never drives and leaves the pump to your `main`; there is deliberately no pump at `main`'s exit (ARC releases the receiver first).
+- **`await` lowers to a state machine** — the body is split at suspension points into a `switch(task->state)` driver over a heap `NPTask`; locals that survive a suspension are lifted into a per-method frame struct.
+- **Errors are plain Objective-C-style EH** — a failable async method annotates `@throws(ErrType *)` (documentation-level, the same spelling as the sync side); callers handle failures with ordinary `@try/@catch`; an unhandled failure aborts loudly. A mere suspension never fires `@finally` — a failed await does. (Checked EH backend, the default.)
 - A cooperative single-thread scheduler (`jeti_sched_run`) and I/O integration are planned as the next milestone.
 
 ### Switch Pattern Matching (`case` patterns)
@@ -1173,14 +1172,14 @@ M1 limits (compile-time enforced): `@defer` must sit directly inside a block; th
 
 Implementation: pure desugar (`crates/defer`, pipeline step 3.9 — after the `-eh checked` rewrite, before ARC). Codegen, checker, and the runtime see ordinary statements — zero changes downstream. Golden: `tests/golden/36_defer/`.
 
-### `async NPTask<T>` — Async Method Modifier
+### `async T` — Async Method Modifier
 
-`@await` alone left one soft spot: a header cannot tell you whether a method suspends. The `async` modifier promotes async-ness to a **signature-level flag**: it sits before the return type (`(async NPTask<T>)`), so it is visible in the `.jth` while `NPTask<T>` stays a real type (the emitted C returns `NPTask *`). A bare `(NPTask<T>)` means the opposite — a synchronous method that merely returns a task object.
+Bare `await` alone left one soft spot: a header cannot tell you whether a method suspends. The `async` modifier promotes async-ness to a **signature-level flag**: it sits before the return type and takes the **business type** directly (`async int`), visible in the `.jth`. A bare `NPTask<T>` return means the opposite — a synchronous method that merely returns a task object.
 
 ```jeti
 @interface Fetcher : NPObject
-- (async NPTask<int>)compute:(int)n;   // suspends, yields an int
-+ (async NPTask<void>)runAll;          // entry point
+- (async int)compute:(int)n;           // suspends, yields an int
++ (async void)runAll;                  // entry point
 - (NPTask<int>)loadCached;             // bare NPTask<T> = ordinary sync method
 - (int)plain:(int)n;                   // unmarked = promises never to suspend
 @end
@@ -1190,18 +1189,18 @@ The body's awaits decide the truth, and the checker reconciles both directions:
 
 | declaration | body | verdict |
 |-------------|------|---------|
-| `async NPTask<T>` | has `@await` | ✅ |
-| `async NPTask<T>` | no `@await` | **error** — `'compute:' is declared 'async' but its body never suspends — drop the modifier or add an '@await'` |
-| unmarked | has `@await` | **error** — `'compute:' contains '@await' but is not declared 'async NPTask<T>' — a suspending method must declare the async modifier` |
-| unmarked | no `@await` | ✅ |
+| `async T` | has `await` | ✅ |
+| `async T` | no `await` | **error** — `'compute:' is declared 'async' but its body never suspends — drop the modifier or add an 'await'` |
+| unmarked | has `await` | **error** — `'compute:' contains 'await' but is not declared 'async' — a suspending method must declare the async modifier` |
+| unmarked | no `await` | ✅ |
 
 - The modifier is part of the signature: `@interface` and `@implementation` must agree — `'async' modifier mismatch on 'compute:': the @interface and @implementation disagree — the modifier is part of the method signature`. Header-only `@interface` methods are exempt (cross-TU safety).
-- `async` must modify an `NPTask<T>` return type and nothing else — `'async' requires return type 'NPTask<T>' — 'async' is a method modifier, not a type qualifier` (exactly one type argument).
-- Task handles are first-class values: `NPTask<T> *` is legal in variables, parameters and ivars (the opposite of the old `NPAsync` marker) — `@await t` is the only way to read the result.
-- `NPTask` is a reserved class name; `async` is now a keyword.
+- `async` takes the business type directly (`async int` / `async NPString *` / `async void`); the legacy `(async NPTask<T>)` spelling produces a migration error (see `tests/negative/async_nptask_*.jeti`).
+- Task handles are first-class values: `NPTask<T> *` is legal in variables, parameters and ivars — `await t` is the only way to read the result.
+- `NPTask` is a reserved class name.
 - **Entry is statement position** — `[f runAll];` (return value discarded) and a statement-position `[t start];` are the async entry: hosted code drives them to completion right there (lowered to `jeti_task_await`), bare-metal code only enqueues and expects the user's own pump. There is deliberately no pump at `main`'s exit — ARC's scope-end release lands later.
 
-Golden: `tests/golden/37_async_modifier/`; negatives under `tests/negative/async_nptask_*.jeti`.
+Golden: `tests/golden/37_async_modifier/`.
 
 ### Object Subscripting (`a[0]` on NPArray)
 

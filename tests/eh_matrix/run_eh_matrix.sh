@@ -180,7 +180,7 @@ run_scene "16_block_throw"     "tests/eh_diff/06_block_throw.jeti"              
 # run identically in all three modes (the static half, "checked emits zero
 # guards", lives in gen_quality.sh).
 run_scene "17_no_throw_plain"  "tests/eh_matrix/samples/no_throw_plain.jeti"         ""
-# 18: full-syntax sweep (C superset + Foundation + inline asm + @throws + @await)
+# 18: full-syntax sweep (C superset + Foundation + inline asm + @throws + await)
 run_scene "18_full_syntax"     "tests/full_syntax_test.jeti"                         "" -asm tests/full_syntax_test.s
 
 # ─────────────────────────────────────────────────────────────────────────────

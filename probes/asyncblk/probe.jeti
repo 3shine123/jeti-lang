@@ -1,0 +1,78 @@
+// Probe: async block literals — docs/plans/async_soft_keywords_plan.md §2 (5a/5b), §5.1, §5.3.
+// Shapes: full form (void / object / scalar return), ellided form, IIFE at
+// statement position (auto-drive, hosted), bare literal (created ≠ executed).
+#include <stdio.h>
+#import <Foundation/Foundation.jth>
+
+@interface Logger : NPObject
+- (void)log:(NPString *)msg;
+@end
+
+@implementation Logger
+- (void)log:(NPString *)msg {
+    printf("log: %s\n", msg->_cstr);
+}
+@end
+
+// Async method used as an await target inside block bodies.
+@interface Worker : NPObject
+- (async int)compute:(int)x;
+- (async int)compute2:(int)x;
+- (async void)run;
+@end
+
+@implementation Worker
+
+- (async int)compute:(int)x {
+    int y = await [self compute2:x];
+    return y * 2;
+}
+
+// Leaf: suspends via a statement-position async block IIFE (auto-drive).
+- (async int)compute2:(int)x {
+    async int ^(int n) {
+        return n * 10;
+    }(x);
+    return x;
+}
+
+- (async void)run {
+    printf("run begin\n");
+
+    // 5a full form, void return, param; IIFE with argument (statement position
+    // → auto-drive in hosted mode, §5.1).
+    async void ^(NPString *userID) {
+        int r = await [self compute:21];
+        printf("5a got %d for %s\n", r, userID->_cstr);
+    }([NPString stringWithUTF8String:"u1"]);
+
+    // 5a full form, scalar return + scalar params; bare literal → created but
+    // NOT executed (§5.3-3): no output expected from the body.
+    async int ^(int a, int b) {
+        int r = await [self compute:a];
+        return r + b;
+    };
+
+    // 5b ellided form; IIFE, statement position → auto-drive.
+    async ^{
+        int r = await [self compute:5];
+        printf("5b got %d\n", r);
+    }();
+
+    // await an async block IIFE in expression position (unwrap via await).
+    int v = await (async int ^(void) {
+        return await [self compute:100];
+    }());
+    printf("await-iife got %d\n", v);
+
+    printf("run end\n");
+}
+
+@end
+
+int main(void) {
+    Worker *w = [[Worker alloc] init];
+    [w run];
+    printf("main done\n");
+    return 0;
+}

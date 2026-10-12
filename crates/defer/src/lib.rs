@@ -343,7 +343,7 @@ fn desugar_expr(e: &mut AstExpr, diags: &mut DeferDiagnostics) {
         AstExprData::Comma(items) => {
             for x in items.iter_mut() { desugar_expr(x, diags); }
         }
-        AstExprData::Paren(inner) | AstExprData::Await(inner) => desugar_expr(inner, diags),
+        AstExprData::Paren(inner) | AstExprData::Await { inner, .. } => desugar_expr(inner, diags),
         AstExprData::Sizeof { expr: Some(ref mut x), .. } => desugar_expr(x, diags),
         AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => {
             desugar_expr(obj, diags)

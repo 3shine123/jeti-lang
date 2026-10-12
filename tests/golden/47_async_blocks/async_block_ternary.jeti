@@ -1,0 +1,33 @@
+// Golden: async block ternary forms — docs/plans/async_soft_keywords_plan §2/§9.
+// `await (cond ? [task] : [task])` drives the selected task; a
+// null-pointer-constant branch (`: 0`) stays total (jeti_task_await(NULL)
+// returns NULL); plain arithmetic ternaries are untouched. Expected:
+//   r=10
+//   z=10 d=1.0
+#import <Foundation/Foundation.jth>
+#import <stdio.h>
+
+@interface Svc : NPObject
+- (async int)a:(int)x;
+- (async int)b:(int)x;
+- (async void)run;
+@end
+
+@implementation Svc
+- (async int)a:(int)x { return await x; }
+- (async int)b:(int)x { return await x; }
+- (async void)run {
+    int cond = 1;
+    int r = await (cond ? [self a:10] : [self b:20]);
+    printf("r=%d\n", r);
+    int z = (int)await (cond ? [self a:10] : 0);
+    double d = cond ? 1 : 2.0;
+    printf("z=%d d=%.1f\n", z, d);
+}
+@end
+
+int main(void) {
+    Svc *s = [[Svc alloc] init];
+    [s run];
+    return 0;
+}

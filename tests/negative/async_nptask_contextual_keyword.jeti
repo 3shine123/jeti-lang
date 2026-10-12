@@ -1,6 +1,7 @@
-// NPTask positive-in-negative: `async` is a CONTEXTUAL keyword — only the
-// sequence `async` + `NPTask` at a return-type position is the modifier.
-// A C variable named `async` must keep compiling (C superset iron law).
+// NPTask positive-in-negative: `async` is a CONTEXTUAL keyword — only an
+// `async` at a return-type position (before a type or a block literal `^`)
+// is the modifier. A C variable named `async` must keep compiling
+// (C superset iron law).
 
 int async = 3;
 

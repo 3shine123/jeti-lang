@@ -2417,6 +2417,13 @@ AstExprData::Subscript { object, key, .. } => {
                 Some(AstType::new(TypePrim::Int))
             }
             AstExprData::Ternary { then, .. } => {
+                // Deliberately types from `then` only: the checker's type
+                // inference is too loose to gate ternary branches (MsgSends
+                // fall back to `id`, ivar reads to `Int`), so a hard
+                // branch-compat check here rejected LEGAL C like
+                // `s ? [s utf8String] : ""` and `_cstr ? _cstr : ""`.
+                // Truly illegal mixes (NPTask* : int) are hard errors in C
+                // itself, so the generated-C compile is the backstop.
                 self.check_expr(&mut *then.clone())
             }
             AstExprData::Comma(exprs) => {
@@ -2606,9 +2613,9 @@ AstExprData::Subscript { object, key, .. } => {
             // `await e` has the type of `e` (suspension does not change the
             // awaited value's type). Whether the enclosing method may suspend
             // is decided by the async analysis pass, not here.
-            AstExprData::Await(inner) => {
+            AstExprData::Await { inner, .. } => {
                 let inner_ty = self.check_expr(&mut *inner.clone());
-                // @await unwraps the task box: `@await` on `NPTask<T> *`
+                // await unwraps the task box: `await` on `NPTask<T> *`
                 // yields `T` (doc/async_nptask_plan.md). Await on a non-task
                 // expression keeps the expression's own type (async-call
                 // sugar: the call's return type IS the NPTask handle... so
@@ -2814,7 +2821,7 @@ AstExprData::Subscript { object, key, .. } => {
                 body.as_deref().is_some_and(Self::stmt_has_throw)
             }
             AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. }
-            | AstExprData::Await(inner) | AstExprData::Boxed(inner) => Self::expr_has_throw(inner),
+            | AstExprData::Await { inner, .. } | AstExprData::Boxed(inner) => Self::expr_has_throw(inner),
             AstExprData::Unary { operand: inner, .. } => Self::expr_has_throw(inner),
             AstExprData::Binary { left, right, .. } => {
                 Self::expr_has_throw(left) || Self::expr_has_throw(right)

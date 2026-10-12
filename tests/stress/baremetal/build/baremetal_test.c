@@ -1471,7 +1471,7 @@ __attribute__((weak)) int jeti_async_state_sumAsync_(NPTask * __jeti_task) {
                 int r = (__jeti_task->state = 2, ({ NPObject *__jeti_tmp_4 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_4 ? ((int (*)(NPObject *, SEL, int, int))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->addTo_times_)(__jeti_tmp_4, __jeti_sel_addTo_times_, __jeti_f->v, 2) : (int){0}; }));
 #line 197 "baremetal_test.jeti"
                 {
-                    __jeti_task->result = (void *)(unsigned)(r + __jeti_f->v);
+                    __jeti_task->result = (void *)(unsigned long)(r + __jeti_f->v);
                     __jeti_task->state = -1;
                     return 1;
                 }
@@ -1499,7 +1499,7 @@ __attribute__((weak)) int jeti_async_state_awaitMake(NPTask * __jeti_task) {
 #line 200 "baremetal_test.jeti"
                 int awaited = (__jeti_task->state = 2, Metal__Widget_make_plus_(&JETI_CLASS_$_Metal__Widget, __jeti_sel_make_plus_, 10, 3));
 #line 201 "baremetal_test.jeti"
-                kputs("[R5] @await make:plus:=");
+                kputs("[R5] await make:plus:=");
 #line 202 "baremetal_test.jeti"
                 kputdec(awaited);
 #line 203 "baremetal_test.jeti"
@@ -2546,201 +2546,219 @@ skip_hit:
 #line 638 "baremetal_test.jeti"
                                                                                 kputs("[R4] __weak FAIL\n");
                                                                             }
-#line 640 "baremetal_test.jeti"
-                                                                            Metal__Widget_awaitMake(&JETI_CLASS_$_Metal__Widget, __jeti_sel_awaitMake);
-#line 646 "baremetal_test.jeti"
-                                                                            defer_order();
-#line 647 "baremetal_test.jeti"
-                                                                            kputs("[D3] defer_return(5)=");
-#line 648 "baremetal_test.jeti"
-                                                                            kputdec(defer_return(5));
-#line 649 "baremetal_test.jeti"
-                                                                            kputs("\n");
-#line 652 "baremetal_test.jeti"
-                                                                            int nn_a = 40;
-    int nn_b = 2;
-#line 653 "baremetal_test.jeti"
-                                                                            kputs("[C9] nn_sum(40,2)=");
-#line 654 "baremetal_test.jeti"
-                                                                            kputdec(nn_sum(&nn_a, &nn_b));
-#line 655 "baremetal_test.jeti"
-                                                                            kputs(" nn_sum(40,0)=");
-#line 656 "baremetal_test.jeti"
-                                                                            kputdec(nn_sum(&nn_a, 0));
-#line 657 "baremetal_test.jeti"
-                                                                            int nullable = 5;
-#line 658 "baremetal_test.jeti"
-                                                                            kputs(" int nullable=");
-#line 659 "baremetal_test.jeti"
-                                                                            kputdec(nullable);
-#line 660 "baremetal_test.jeti"
-                                                                            kputs("\n");
-#line 663 "baremetal_test.jeti"
-                                                                            kputs("[C10] mode_name2(TURBO)=");
-#line 664 "baremetal_test.jeti"
-                                                                            kputs(mode_name2(MODE_TURBO));
-#line 665 "baremetal_test.jeti"
-                                                                            int in = 6;
-#line 666 "baremetal_test.jeti"
-                                                                            kputs(" in*7=");
-#line 667 "baremetal_test.jeti"
-                                                                            kputdec((in * 7));
-#line 668 "baremetal_test.jeti"
-                                                                            kputs("\n");
-#line 671 "baremetal_test.jeti"
-                                                                            int bm_arr[8];
-#line 672 "baremetal_test.jeti"
-                                                                            bm_arr[0] = 3;
-#line 673 "baremetal_test.jeti"
-                                                                            kputs("[C11] bm_arr[0]=");
-#line 674 "baremetal_test.jeti"
-                                                                            kputdec(bm_arr[0]);
-#line 675 "baremetal_test.jeti"
-                                                                            kputs(" (the BM_TAG #define line must be absent from the generated C)\n");
-#line 678 "baremetal_test.jeti"
-                                                                            pattern_scalar(42);
-#line 679 "baremetal_test.jeti"
-                                                                            pattern_scalar(7);
-#line 680 "baremetal_test.jeti"
-                                                                            pattern_scalar(999);
-#line 683 "baremetal_test.jeti"
-                                                                            NPObject *__jeti_tmp_47 = (Animal_alloc(&JETI_CLASS_$_Animal, __jeti_sel_alloc));
-                                                                            Animal * pet = (Animal *)(__jeti_tmp_47 ? ((struct jeti_vtable *)__jeti_tmp_47->isa->vtable)->init(__jeti_tmp_47, __jeti_sel_init) : 0);
-#line 684 "baremetal_test.jeti"
-                                                                            ({ NPObject *__jeti_tmp_48 = ((NPObject *)(pet)); __jeti_tmp_48 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_48->isa->vtable)->setVoice_)(__jeti_tmp_48, __jeti_sel_setVoice_, 5) : 0; });
-#line 685 "baremetal_test.jeti"
-                                                                            NPObject *__jeti_tmp_49 = (Dog_alloc(&JETI_CLASS_$_Dog, __jeti_sel_alloc));
-                                                                            Dog * rex = (Dog *)(__jeti_tmp_49 ? ((struct jeti_vtable *)__jeti_tmp_49->isa->vtable)->init(__jeti_tmp_49, __jeti_sel_init) : 0);
-#line 686 "baremetal_test.jeti"
-                                                                            ({ NPObject *__jeti_tmp_50 = ((NPObject *)(rex)); __jeti_tmp_50 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_50->isa->vtable)->setVoice_)(__jeti_tmp_50, __jeti_sel_setVoice_, 11) : 0; });
-#line 687 "baremetal_test.jeti"
-                                                                            pattern_obj(rex);
-#line 688 "baremetal_test.jeti"
-                                                                            pattern_obj(pet);
-#line 689 "baremetal_test.jeti"
-                                                                            pattern_obj(w);
-#line 692 "baremetal_test.jeti"
-                                                                            kputs("[N12] for-in typed:");
-#line 693 "baremetal_test.jeti"
-                                                                            {
-                                                                                NPObject * __jeti_fi = (NPObject *)(arr);
-                                                                                for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_51 = ((NPObject *)(__jeti_fi)); __jeti_tmp_51 ? ((unsigned (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_51->isa->vtable)->count)(__jeti_tmp_51, __jeti_sel_count) : (unsigned){0}; })); (__jeti_fi_i)++) {
-                                                                                    Metal__Widget * item = (Metal__Widget *)(({ NPObject *__jeti_tmp_52 = ((NPObject *)(__jeti_fi)); __jeti_tmp_52 ? ((NPObject * (*)(NPObject *, SEL, unsigned))((struct jeti_vtable *)__jeti_tmp_52->isa->vtable)->objectAtIndex_)(__jeti_tmp_52, __jeti_sel_objectAtIndex_, __jeti_fi_i) : 0; }));
-#line 694 "baremetal_test.jeti"
-                                                                                    __auto_type __jeti_eh_tmp_32 = ({ NPObject *__jeti_tmp_53 = ((NPObject *)(item)); __jeti_tmp_53 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_53->isa->vtable)->tag)(__jeti_tmp_53, __jeti_sel_tag) : (int){0}; });
-                                                                                    kputdec(__jeti_eh_tmp_32);
-#line 695 "baremetal_test.jeti"
-                                                                                    kputs(" ");
-                                                                                }
-                                                                            }
-#line 697 "baremetal_test.jeti"
-                                                                            kputs("\n");
-#line 700 "baremetal_test.jeti"
-                                                                            kputs("[M4] sync early=");
-#line 701 "baremetal_test.jeti"
-                                                                            kputdec(sync_early(w));
-#line 702 "baremetal_test.jeti"
-                                                                            kputdec(sync_early(w));
-#line 703 "baremetal_test.jeti"
-                                                                            kputs(" (relock survived)\n");
-#line 706 "baremetal_test.jeti"
-                                                                            NPObject *__jeti_tmp_54 = (Metal__SubErr_alloc(&JETI_CLASS_$_Metal__SubErr, __jeti_sel_alloc));
-                                                                            Metal__SubErr * se = (Metal__SubErr *)(__jeti_tmp_54 ? ((struct jeti_vtable *)__jeti_tmp_54->isa->vtable)->init(__jeti_tmp_54, __jeti_sel_init) : 0);
-#line 707 "baremetal_test.jeti"
-                                                                            ({ NPObject *__jeti_tmp_55 = ((NPObject *)(se)); __jeti_tmp_55 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_55->isa->vtable)->setCode_)(__jeti_tmp_55, __jeti_sel_setCode_, 99) : 0; });
-#line 716 "baremetal_test.jeti"
-                                                                            {
-                                                                                int __jeti_eh_saved_33 = __jeti_eh_flag;
+#line 641 "baremetal_test.jeti"
+                                                                            NPTask * mk = (NPTask *)(Metal__Widget_awaitMake(&JETI_CLASS_$_Metal__Widget, __jeti_sel_awaitMake));
+#line 642 "baremetal_test.jeti"
+                                                                            jeti_task_start(mk);
+#line 643 "baremetal_test.jeti"
+                                                                            jeti_sched_run();
 #line 1 "<jeti-generated>"
-                                                                                __jeti_eh_flag = 0;
-#line 716 "baremetal_test.jeti"
-                                                                                int __jeti_eh_done_33 = 0;
-#line 711 "baremetal_test.jeti"
+                                                                            if ((__jeti_eh_flag == 0)) {
                                                                                 {
-#line 709 "baremetal_test.jeti"
+#line 649 "baremetal_test.jeti"
+                                                                                    defer_order();
+#line 650 "baremetal_test.jeti"
+                                                                                    kputs("[D3] defer_return(5)=");
+#line 651 "baremetal_test.jeti"
+                                                                                    kputdec(defer_return(5));
+#line 652 "baremetal_test.jeti"
+                                                                                    kputs("\n");
+#line 655 "baremetal_test.jeti"
+                                                                                    int nn_a = 40;
+    int nn_b = 2;
+#line 656 "baremetal_test.jeti"
+                                                                                    kputs("[C9] nn_sum(40,2)=");
+#line 657 "baremetal_test.jeti"
+                                                                                    kputdec(nn_sum(&nn_a, &nn_b));
+#line 658 "baremetal_test.jeti"
+                                                                                    kputs(" nn_sum(40,0)=");
+#line 659 "baremetal_test.jeti"
+                                                                                    kputdec(nn_sum(&nn_a, 0));
+#line 660 "baremetal_test.jeti"
+                                                                                    int nullable = 5;
+#line 661 "baremetal_test.jeti"
+                                                                                    kputs(" int nullable=");
+#line 662 "baremetal_test.jeti"
+                                                                                    kputdec(nullable);
+#line 663 "baremetal_test.jeti"
+                                                                                    kputs("\n");
+#line 666 "baremetal_test.jeti"
+                                                                                    kputs("[C10] mode_name2(TURBO)=");
+#line 667 "baremetal_test.jeti"
+                                                                                    kputs(mode_name2(MODE_TURBO));
+#line 668 "baremetal_test.jeti"
+                                                                                    int in = 6;
+#line 669 "baremetal_test.jeti"
+                                                                                    kputs(" in*7=");
+#line 670 "baremetal_test.jeti"
+                                                                                    kputdec((in * 7));
+#line 671 "baremetal_test.jeti"
+                                                                                    kputs("\n");
+#line 674 "baremetal_test.jeti"
+                                                                                    int bm_arr[8];
+#line 675 "baremetal_test.jeti"
+                                                                                    bm_arr[0] = 3;
+#line 676 "baremetal_test.jeti"
+                                                                                    kputs("[C11] bm_arr[0]=");
+#line 677 "baremetal_test.jeti"
+                                                                                    kputdec(bm_arr[0]);
+#line 678 "baremetal_test.jeti"
+                                                                                    kputs(" (the BM_TAG #define line must be absent from the generated C)\n");
+#line 681 "baremetal_test.jeti"
+                                                                                    pattern_scalar(42);
+#line 682 "baremetal_test.jeti"
+                                                                                    pattern_scalar(7);
+#line 683 "baremetal_test.jeti"
+                                                                                    pattern_scalar(999);
+#line 686 "baremetal_test.jeti"
+                                                                                    NPObject *__jeti_tmp_47 = (Animal_alloc(&JETI_CLASS_$_Animal, __jeti_sel_alloc));
+                                                                                    Animal * pet = (Animal *)(__jeti_tmp_47 ? ((struct jeti_vtable *)__jeti_tmp_47->isa->vtable)->init(__jeti_tmp_47, __jeti_sel_init) : 0);
+#line 687 "baremetal_test.jeti"
+                                                                                    ({ NPObject *__jeti_tmp_48 = ((NPObject *)(pet)); __jeti_tmp_48 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_48->isa->vtable)->setVoice_)(__jeti_tmp_48, __jeti_sel_setVoice_, 5) : 0; });
+#line 688 "baremetal_test.jeti"
+                                                                                    NPObject *__jeti_tmp_49 = (Dog_alloc(&JETI_CLASS_$_Dog, __jeti_sel_alloc));
+                                                                                    Dog * rex = (Dog *)(__jeti_tmp_49 ? ((struct jeti_vtable *)__jeti_tmp_49->isa->vtable)->init(__jeti_tmp_49, __jeti_sel_init) : 0);
+#line 689 "baremetal_test.jeti"
+                                                                                    ({ NPObject *__jeti_tmp_50 = ((NPObject *)(rex)); __jeti_tmp_50 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_50->isa->vtable)->setVoice_)(__jeti_tmp_50, __jeti_sel_setVoice_, 11) : 0; });
+#line 690 "baremetal_test.jeti"
+                                                                                    pattern_obj(rex);
+#line 691 "baremetal_test.jeti"
+                                                                                    pattern_obj(pet);
+#line 692 "baremetal_test.jeti"
+                                                                                    pattern_obj(w);
+#line 695 "baremetal_test.jeti"
+                                                                                    kputs("[N12] for-in typed:");
+#line 696 "baremetal_test.jeti"
                                                                                     {
-                                                                                        NPObject * __jeti_eh_thrown_34 = (NPObject *)se;
+                                                                                        NPObject * __jeti_fi = (NPObject *)(arr);
+                                                                                        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_51 = ((NPObject *)(__jeti_fi)); __jeti_tmp_51 ? ((unsigned (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_51->isa->vtable)->count)(__jeti_tmp_51, __jeti_sel_count) : (unsigned){0}; })); (__jeti_fi_i)++) {
+                                                                                            Metal__Widget * item = (Metal__Widget *)(({ NPObject *__jeti_tmp_52 = ((NPObject *)(__jeti_fi)); __jeti_tmp_52 ? ((NPObject * (*)(NPObject *, SEL, unsigned))((struct jeti_vtable *)__jeti_tmp_52->isa->vtable)->objectAtIndex_)(__jeti_tmp_52, __jeti_sel_objectAtIndex_, __jeti_fi_i) : 0; }));
+#line 697 "baremetal_test.jeti"
+                                                                                            __auto_type __jeti_eh_tmp_32 = ({ NPObject *__jeti_tmp_53 = ((NPObject *)(item)); __jeti_tmp_53 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_53->isa->vtable)->tag)(__jeti_tmp_53, __jeti_sel_tag) : (int){0}; });
+                                                                                            kputdec(__jeti_eh_tmp_32);
+#line 698 "baremetal_test.jeti"
+                                                                                            kputs(" ");
+                                                                                        }
+                                                                                    }
+#line 700 "baremetal_test.jeti"
+                                                                                    kputs("\n");
+#line 703 "baremetal_test.jeti"
+                                                                                    kputs("[M4] sync early=");
+#line 704 "baremetal_test.jeti"
+                                                                                    kputdec(sync_early(w));
+#line 705 "baremetal_test.jeti"
+                                                                                    kputdec(sync_early(w));
+#line 706 "baremetal_test.jeti"
+                                                                                    kputs(" (relock survived)\n");
+#line 709 "baremetal_test.jeti"
+                                                                                    NPObject *__jeti_tmp_54 = (Metal__SubErr_alloc(&JETI_CLASS_$_Metal__SubErr, __jeti_sel_alloc));
+                                                                                    Metal__SubErr * se = (Metal__SubErr *)(__jeti_tmp_54 ? ((struct jeti_vtable *)__jeti_tmp_54->isa->vtable)->init(__jeti_tmp_54, __jeti_sel_init) : 0);
+#line 710 "baremetal_test.jeti"
+                                                                                    ({ NPObject *__jeti_tmp_55 = ((NPObject *)(se)); __jeti_tmp_55 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_55->isa->vtable)->setCode_)(__jeti_tmp_55, __jeti_sel_setCode_, 99) : 0; });
+#line 719 "baremetal_test.jeti"
+                                                                                    {
+                                                                                        int __jeti_eh_saved_33 = __jeti_eh_flag;
 #line 1 "<jeti-generated>"
-                                                                                        __jeti_eh_val = __jeti_eh_thrown_34;
-                                                                                        jeti_retain(__jeti_eh_val);
-                                                                                        jeti_autorelease(__jeti_eh_val);
-                                                                                        __jeti_eh_flag = 1;
+                                                                                        __jeti_eh_flag = 0;
+#line 719 "baremetal_test.jeti"
+                                                                                        int __jeti_eh_done_33 = 0;
+#line 714 "baremetal_test.jeti"
+                                                                                        {
+#line 712 "baremetal_test.jeti"
+                                                                                            {
+                                                                                                NPObject * __jeti_eh_thrown_34 = (NPObject *)se;
+#line 1 "<jeti-generated>"
+                                                                                                __jeti_eh_val = __jeti_eh_thrown_34;
+                                                                                                jeti_retain(__jeti_eh_val);
+                                                                                                jeti_autorelease(__jeti_eh_val);
+                                                                                                __jeti_eh_flag = 1;
+                                                                                            }
+                                                                                            if ((__jeti_eh_flag == 0)) {
+                                                                                                {
+#line 713 "baremetal_test.jeti"
+                                                                                                    kputs("[N13] unreachable\n");
+                                                                                                }
+                                                                                            }
+                                                                                        }
+#line 719 "baremetal_test.jeti"
+                                                                                        if (((__jeti_eh_flag == 1) && (__jeti_eh_done_33 == 0))) {
+                                                                                            if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_Metal__Err)) {
+#line 1 "<jeti-generated>"
+                                                                                                __jeti_eh_done_33 = 1;
+                                                                                                __jeti_eh_flag = 0;
+#line 719 "baremetal_test.jeti"
+                                                                                                Metal__Err * err4 = (Metal__Err *)__jeti_eh_val;
+                                                                                                {
+#line 716 "baremetal_test.jeti"
+                                                                                                    kputs("[N13] parent catch code=");
+#line 717 "baremetal_test.jeti"
+                                                                                                    __auto_type __jeti_eh_tmp_35 = ({ NPObject *__jeti_tmp_56 = ((NPObject *)(err4)); __jeti_tmp_56 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_56->isa->vtable)->errorCode)(__jeti_tmp_56, __jeti_sel_errorCode) : (int){0}; });
+                                                                                                    kputdec(__jeti_eh_tmp_35);
+#line 718 "baremetal_test.jeti"
+                                                                                                    kputs("\n");
+                                                                                                }
+                                                                                            }
+                                                                                        }
+#line 1 "<jeti-generated>"
+                                                                                        __jeti_eh_flag = (__jeti_eh_saved_33 || __jeti_eh_flag);
                                                                                     }
                                                                                     if ((__jeti_eh_flag == 0)) {
                                                                                         {
-#line 710 "baremetal_test.jeti"
-                                                                                            kputs("[N13] unreachable\n");
-                                                                                        }
-                                                                                    }
-                                                                                }
-#line 716 "baremetal_test.jeti"
-                                                                                if (((__jeti_eh_flag == 1) && (__jeti_eh_done_33 == 0))) {
-                                                                                    if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_Metal__Err)) {
-#line 1 "<jeti-generated>"
-                                                                                        __jeti_eh_done_33 = 1;
-                                                                                        __jeti_eh_flag = 0;
-#line 716 "baremetal_test.jeti"
-                                                                                        Metal__Err * err4 = (Metal__Err *)__jeti_eh_val;
-                                                                                        {
-#line 713 "baremetal_test.jeti"
-                                                                                            kputs("[N13] parent catch code=");
-#line 714 "baremetal_test.jeti"
-                                                                                            __auto_type __jeti_eh_tmp_35 = ({ NPObject *__jeti_tmp_56 = ((NPObject *)(err4)); __jeti_tmp_56 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_56->isa->vtable)->errorCode)(__jeti_tmp_56, __jeti_sel_errorCode) : (int){0}; });
-                                                                                            kputdec(__jeti_eh_tmp_35);
-#line 715 "baremetal_test.jeti"
-                                                                                            kputs("\n");
-                                                                                        }
-                                                                                    }
-                                                                                }
-#line 1 "<jeti-generated>"
-                                                                                __jeti_eh_flag = (__jeti_eh_saved_33 || __jeti_eh_flag);
-                                                                            }
-                                                                            if ((__jeti_eh_flag == 0)) {
-                                                                                {
-#line 719 "baremetal_test.jeti"
-                                                                                    Metal__Widget_awaitSum_(&JETI_CLASS_$_Metal__Widget, __jeti_sel_awaitSum_, w);
-#line 731 "baremetal_test.jeti"
-                                                                                    {
+#line 722 "baremetal_test.jeti"
+                                                                                            NPTask * sum = (NPTask *)(Metal__Widget_awaitSum_(&JETI_CLASS_$_Metal__Widget, __jeti_sel_awaitSum_, w));
 #line 723 "baremetal_test.jeti"
-                                                                                        NPObject *__jeti_tmp_57 = (Metal__Widget_alloc(&JETI_CLASS_$_Metal__Widget, __jeti_sel_alloc));
-                                                                                        Metal__Widget * src = (Metal__Widget *)(__jeti_tmp_57 ? ((struct jeti_vtable *)__jeti_tmp_57->isa->vtable)->init(__jeti_tmp_57, __jeti_sel_init) : 0);
+                                                                                            jeti_task_start(sum);
 #line 724 "baremetal_test.jeti"
-                                                                                        __block Metal__Widget * __attribute__((cleanup(jeti_weakAutoCleanup))) wz;
-#line 725 "baremetal_test.jeti"
-                                                                                        {
-                                                                                            __auto_type __jeti_weak_val_3 = src;
-                                                                                            jeti_weakUnregister((NPObject **)&wz);
-                                                                                            wz = __jeti_weak_val_3;
-                                                                                            jeti_weakRegister((NPObject **)&wz, (NPObject *)__jeti_weak_val_3);
-                                                                                        }
-#line 727 "baremetal_test.jeti"
-                                                                                        if (wz)                                                                                         kputs("[R6] weak assign alias OK\n");
-                                                                                        else                                                                                         kputs("[R6] weak assign FAIL\n");
+                                                                                            jeti_sched_run();
+#line 1 "<jeti-generated>"
+                                                                                            if ((__jeti_eh_flag == 0)) {
+                                                                                                {
+#line 736 "baremetal_test.jeti"
+                                                                                                    {
 #line 728 "baremetal_test.jeti"
-                                                                                        ({ NPObject *__jeti_tmp_58 = ((NPObject *)(src)); __jeti_tmp_58 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_58->isa->vtable)->release)(__jeti_tmp_58, __jeti_sel_release) : 0; });
+                                                                                                        NPObject *__jeti_tmp_57 = (Metal__Widget_alloc(&JETI_CLASS_$_Metal__Widget, __jeti_sel_alloc));
+                                                                                                        Metal__Widget * src = (Metal__Widget *)(__jeti_tmp_57 ? ((struct jeti_vtable *)__jeti_tmp_57->isa->vtable)->init(__jeti_tmp_57, __jeti_sel_init) : 0);
+#line 729 "baremetal_test.jeti"
+                                                                                                        __block Metal__Widget * __attribute__((cleanup(jeti_weakAutoCleanup))) wz;
 #line 730 "baremetal_test.jeti"
-                                                                                        if (!wz)                                                                                         kputs("[R7] weak zeroed OK\n");
-                                                                                        else                                                                                         kputs("[R7] weak zero FAIL\n");
-                                                                                    }
+                                                                                                        {
+                                                                                                            __auto_type __jeti_weak_val_3 = src;
+                                                                                                            jeti_weakUnregister((NPObject **)&wz);
+                                                                                                            wz = __jeti_weak_val_3;
+                                                                                                            jeti_weakRegister((NPObject **)&wz, (NPObject *)__jeti_weak_val_3);
+                                                                                                        }
+#line 732 "baremetal_test.jeti"
+                                                                                                        if (wz)                                                                                                         kputs("[R6] weak assign alias OK\n");
+                                                                                                        else                                                                                                         kputs("[R6] weak assign FAIL\n");
 #line 733 "baremetal_test.jeti"
-                                                                                    kputs("=== baremetal stress done ===\n");
+                                                                                                        ({ NPObject *__jeti_tmp_58 = ((NPObject *)(src)); __jeti_tmp_58 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_58->isa->vtable)->release)(__jeti_tmp_58, __jeti_sel_release) : 0; });
+#line 735 "baremetal_test.jeti"
+                                                                                                        if (!wz)                                                                                                         kputs("[R7] weak zeroed OK\n");
+                                                                                                        else                                                                                                         kputs("[R7] weak zero FAIL\n");
+                                                                                                    }
+#line 738 "baremetal_test.jeti"
+                                                                                                    kputs("=== baremetal stress done ===\n");
+#line 1 "<jeti-generated>"
+                                                                                                    jeti_release(se);
+                                                                                                    jeti_release(rex);
+                                                                                                    jeti_release(pet);
+                                                                                                    jeti_release(box);
+                                                                                                    jeti_release(e);
+                                                                                                    jeti_release(arr);
+                                                                                                    jeti_release(tw);
+                                                                                                    jeti_release(w);
+#line 739 "baremetal_test.jeti"
+                                                                                                    return 0;
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
 #line 1 "<jeti-generated>"
                                                                                     jeti_release(se);
                                                                                     jeti_release(rex);
                                                                                     jeti_release(pet);
-                                                                                    jeti_release(box);
-                                                                                    jeti_release(e);
-                                                                                    jeti_release(arr);
-                                                                                    jeti_release(tw);
-                                                                                    jeti_release(w);
-#line 734 "baremetal_test.jeti"
-                                                                                    return 0;
                                                                                 }
                                                                             }
-#line 1 "<jeti-generated>"
-                                                                            jeti_release(se);
-                                                                            jeti_release(rex);
-                                                                            jeti_release(pet);
                                                                         }
                                                                     }
                                                                 }

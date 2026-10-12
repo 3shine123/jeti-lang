@@ -14,7 +14,6 @@ const KW_TABLE: &[(&str, KeywordKind)] = &[
     ("@required", KeywordKind::AtRequired),
     ("@class", KeywordKind::AtClass),
     ("@try", KeywordKind::AtTry),
-    ("@await", KeywordKind::AtAwait),
     ("@defer", KeywordKind::AtDefer),
     ("@catch", KeywordKind::AtCatch),
     ("@finally", KeywordKind::AtFinally),

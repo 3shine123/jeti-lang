@@ -1,32 +1,31 @@
 #import <Foundation/Foundation.jth>
 #include <stdio.h>
 
-// async method modifier (doc/async_nptask_plan.md, 4th-gen design):
-// - `(async NPTask<T>)` — the modifier is part of the signature: the method
-//   suspends, its body returns T directly, `@await` unwraps to T
+// async method modifier (soft keywords, docs/plans/async_soft_keywords_plan.md):
+// - `(async T)` — the modifier is part of the signature: the method
+//   suspends, its body returns T directly, `await` unwraps to T
 // - bare `(NPTask<T>)` — an ORDINARY sync method that merely returns a task
 //   object (the two forms are statically distinguishable)
 // - lazy start: a bare async call only creates the task; `[task start]` runs
 //   it — at statement position in hosted code it drives to completion there
 // - NPTask<void>: await-able, no value
-// Negative cases live in tests/negative/async_nptask_*.jeti
 
 @interface Fetcher : NPObject
-- (async NPTask<int>)compute:(int)n;
-- (async NPTask<void>)runAll;
+- (async int)compute:(int)n;
+- (async void)runAll;
 - (NPTask<int>)loadCachedValue;   // sync method returning a task object
 - (int)plain:(int)n;
 @end
 
 @implementation Fetcher
-- (async NPTask<int>)compute:(int)n {
-    int raw = @await n;          // suspension point
+- (async int)compute:(int)n {
+    int raw = await n;            // suspension point
     return raw * 2;
 }
-- (async NPTask<void>)runAll {
-    int x = @await [self compute:21];         // await across a call chain
+- (async void)runAll {
+    int x = await [self compute:21];          // await across a call chain
     NPTask<int> *t = [self loadCachedValue];  // sync call: just a task object
-    int y = @await t;                         // form B: await a task variable
+    int y = await t;                          // form B: await a task variable
     int z = [self plain:5];                   // plain sync call, no task involved
     printf("runAll x=%d y=%d z=%d\n", x, y, z);
 }

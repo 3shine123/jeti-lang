@@ -1301,6 +1301,33 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_primary(&mut self) -> Option<CstExpr> {
+        // Soft keyword `await` — suspension-point operator
+        // (doc/async_soft_keywords_plan.md §3). Operator only in
+        // expression-prefix position followed by a unary-start token
+        // (at_await_operator judgment table §3.4); otherwise plain C
+        // identifier. Replaces the removed `@await` machinery token.
+        if self.at_await_operator() {
+            self.advance(); // consume `await`
+            let inner = self.parse_unary()?;
+            return Some(CstExpr {
+                kind: CstExprKind::Await, expr_type: None,
+                line: self.previous.line, col: self.previous.column,
+                data: CstExprData::Await { inner: Box::new(inner) },
+            });
+        }
+        // Async block literal: `async ReturnType? ^...` (§5.1). In EXPRESSION
+        // position `async` followed by a type start or `^` is always an async
+        // block (a fn decl can't start here); `at_async_modifier` covers both.
+        // Return type sits BETWEEN `async` and `^`; anything else (`async = 5;`,
+        // `async(x)`) stays a plain C identifier. Must precede the generic
+        // Identifier arm below.
+        if self.current.kind == TokenKind::Identifier
+            && self.current_text() == "async"
+            && self.at_async_modifier()
+        {
+            self.advance(); // consume `async`
+            return self.parse_async_block_literal();
+        }
         if self.match_keyword(KeywordKind::Extension) {
             // __extension__ is a prefix that suppresses pedantic warnings.
             // Skip it and parse the underlying expression.
@@ -1658,7 +1685,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
 
         // Block literal: ^(params) { ... }
         if self.match_token(TokenKind::Caret) {
-            return self.parse_block_literal();
+            return self.parse_block_literal(false);
         }
 
         // Message send [receiver ...]
@@ -1986,32 +2013,88 @@ else if self.match_keyword(KeywordKind::Typeof) {
         })
     }
 
-    fn parse_block_literal(&mut self) -> Option<CstExpr> {
+    /// Async block literal (§5.1): `async` already consumed; next is
+    /// ReturnType? `^` Parameters? BlockBody. Return type lives between
+    /// `async` and `^` (may be omitted → ellided form, inference rules TBD
+    /// §8-①; parsing only guarantees acceptance). Params/body reuse the plain
+    /// block machinery; IIFE `(args)` call is handled by postfix parsing.
+    fn parse_async_block_literal(&mut self) -> Option<CstExpr> {
+        // Optional return type before `^`: builtin type keyword or typename
+        // identifier (`async void ^`, `async Result *^`, `async int ^`,
+        // `async NPArray<NPString *> *^`). Stop at `^` / `{` / `(`.
+        let return_type = if self.check(TokenKind::Caret) || self.check(TokenKind::LBrace) {
+            None
+        } else {
+            let saved_annotating = self.annotating;
+            self.annotating = true;
+            let rt = if self.current.kind == TokenKind::Keyword &&
+                matches!(self.current.keyword, KeywordKind::Void | KeywordKind::Int |
+                    KeywordKind::Char | KeywordKind::Short | KeywordKind::Long |
+                    KeywordKind::Float | KeywordKind::Double | KeywordKind::Bool |
+                    KeywordKind::Signed | KeywordKind::Unsigned | KeywordKind::Id |
+                    KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype) {
+                self.parse_type_name().map(Box::new)
+            } else if self.current.kind == TokenKind::Identifier {
+                self.parse_type_full().map(Box::new)
+            } else {
+                None
+            };
+            self.annotating = saved_annotating;
+            rt
+        };
+
+        if !self.match_token(TokenKind::Caret) {
+            self.error("expected '^' after 'async' return type");
+            return None;
+        }
+        // Shared tail: Parameters? BlockBody — identical to plain blocks.
+        self.parse_block_literal_tail(return_type, true)
+    }
+
+    fn parse_block_literal(&mut self, is_async: bool) -> Option<CstExpr> {
+        self.parse_block_literal_tail(None, is_async)
+    }
+
+    /// Shared block tail after `^` (plain blocks) or after the return type
+    /// (async blocks): Parameters? BlockBody. `is_async` marks the CST node
+    /// (§5.2: evaluation/call yields `NPTask<T> *`).
+    fn parse_block_literal_tail(
+        &mut self,
+        return_type: Option<Box<CstType>>,
+        is_async: bool,
+    ) -> Option<CstExpr> {
         let mut params: Option<Box<CstParam>> = None;
         let mut param_count = 0;
-        let mut return_type: Option<Box<CstType>> = None;
 
-        // Optional return type: ^returnType(params) { body }
-        // Use parse_type_name (not parse_type_full) to avoid consuming ( as block/function type.
+        // Plain block form `^ReturnType?`: optional return type right after
+        // `^` (async blocks resolve theirs BEFORE `^`, in
+        // parse_async_block_literal).
         //
         // `annotating` is set by hand rather than going through
         // `parse_type_annotated`, because that helper calls `parse_type_full`,
         // which would eat the `(` that starts the parameter list — the exact
         // hazard the comment above warns about. The flag is what lets the
         // qualifier loop recognize a leading `nullable` / `nonnull`.
-        let saved_annotating = self.annotating;
-        self.annotating = true;
-        if self.current.kind == TokenKind::Keyword &&
-            matches!(self.current.keyword, KeywordKind::Void | KeywordKind::Int |
-                KeywordKind::Char | KeywordKind::Short | KeywordKind::Long |
-                KeywordKind::Float | KeywordKind::Double | KeywordKind::Bool |
-                KeywordKind::Signed | KeywordKind::Unsigned | KeywordKind::Id |
-                KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype) {
-            return_type = self.parse_type_name().map(Box::new);
-        } else if self.current.kind == TokenKind::Identifier {
-            return_type = self.parse_type_full().map(Box::new);
-        }
-        self.annotating = saved_annotating;
+        let return_type = if return_type.is_some() {
+            return_type
+        } else {
+            let saved_annotating = self.annotating;
+            self.annotating = true;
+            let rt = if self.current.kind == TokenKind::Keyword &&
+                matches!(self.current.keyword, KeywordKind::Void | KeywordKind::Int |
+                    KeywordKind::Char | KeywordKind::Short | KeywordKind::Long |
+                    KeywordKind::Float | KeywordKind::Double | KeywordKind::Bool |
+                    KeywordKind::Signed | KeywordKind::Unsigned | KeywordKind::Id |
+                    KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype) {
+                self.parse_type_name().map(Box::new)
+            } else if self.current.kind == TokenKind::Identifier {
+                self.parse_type_full().map(Box::new)
+            } else {
+                None
+            };
+            self.annotating = saved_annotating;
+            rt
+        };
 
         if self.match_token(TokenKind::LParen) {
             // `(void)` (C's spelling of "no parameters") is handled INSIDE the
@@ -2071,6 +2154,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     param_count,
                     return_type,
                     body: body.map(Box::new),
+                    is_async,
                 },
             });
         }
@@ -2083,6 +2167,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 param_count,
                 return_type,
                 body: None,
+                is_async,
             },
         })
     }
@@ -2225,25 +2310,6 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_unary(&mut self) -> Option<CstExpr> {
-        // `@await <unary-expr>` — suspension point (async/await).
-        // Design (2026-09-27 定案): `@` prefix, not a bare contextual
-        // keyword. Rationale: a bare `await` in the prefix-operator position
-        // is an OPEN context (any expression can start with it) and has real
-        // ambiguity with an identifier named `await` (`await * 2`, calling a
-        // C function `await(x)`). The `@` marks the task-state-machine
-        // mechanism (same criterion as @try) and keeps `await` a 100%-legal
-        // C identifier with zero ambiguity — the ObjC precedent is
-        // expression-position `@` machinery like `@selector(...)` and the
-        // `@42` boxing literal. Unlike C#/Swift, jeti is a C superset and
-        // cannot afford to appropriate the identifier.
-        if self.match_keyword(KeywordKind::AtAwait) {
-            let inner = self.parse_unary()?;
-            return Some(CstExpr {
-                kind: CstExprKind::Await, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
-                data: CstExprData::Await(Box::new(inner)),
-            });
-        }
         if self.match_token(TokenKind::Incr) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
@@ -3516,6 +3582,18 @@ else if self.match_keyword(KeywordKind::Typeof) {
             }
         } else if self.current.kind == TokenKind::Identifier {
             let tname = self.current_text().to_string();
+            // Soft keywords (§3/§5): `await`/`async` in operator position
+            // START an expression, never a declaration — otherwise the
+            // IDENT-IDENT shape rule below reads `await await e` as a decl of
+            // variable `await`, and `async ^{...}` / `async void ^...` as a
+            // decl of variable `async` (probe-verified misparses). Top-level
+            // `async T f(...)` fn decls don't route through here, so this
+            // doesn't break the §4.2 function position.
+            if (tname == "await" && self.at_await_operator())
+                || (tname == "async" && self.at_async_modifier())
+            {
+                return false;
+            }
             // Check if it's a known type name, a type parameter, or a namespace-qualified name
             // Also: `IDENT IDENT` (e.g. `clock_t t0 = ...`) is a declaration —
             // the first identifier is a typedef from an included C header.
@@ -3606,10 +3684,15 @@ else if self.match_keyword(KeywordKind::Typeof) {
         Some(name)
     }
 
-    /// Contextual `async` return-type modifier (doc/async_nptask_plan.md):
-    /// the identifier `async` immediately followed by `NPTask`. Lookahead is a
-    /// raw-source scan (same style as `peek_colon_colon`), so a user typedef
-    /// named `async` keeps working everywhere else — C superset iron law.
+    /// Contextual `async` modifier (doc/async_soft_keywords_plan.md §4):
+    /// the identifier `async` followed by a TYPE START (`void`, builtin type
+    /// keyword, `struct/union/enum`, or a typename identifier) = async
+    /// function/method modifier; followed by `^` = async block literal (§5,
+    /// handled in expression position); anything else (`= ; ) .` …) = a plain
+    /// C identifier. Raw-source scan (same style as `peek_colon_colon`), so a
+    /// user typedef/variable named `async` keeps working everywhere else —
+    /// C superset iron law. `require_nptask_async` (old NPTask-only rule) is
+    /// gone: `async` may precede ANY legal return type, including `void`.
     fn at_async_modifier(&self) -> bool {
         if self.current.kind != TokenKind::Identifier || self.current_text() != "async" {
             return false;
@@ -3619,30 +3702,60 @@ else if self.match_keyword(KeywordKind::Typeof) {
         while i < bytes.len() && (bytes[i] as char).is_whitespace() {
             i += 1;
         }
-        if !self.source[i..].starts_with("NPTask") {
+        if i >= bytes.len() {
             return false;
         }
-        self.source[i + "NPTask".len()..]
-            .chars()
-            .next()
-            .map_or(true, |c| !(c.is_alphanumeric() || c == '_'))
+        let c = bytes[i] as char;
+        if c == '^' {
+            return true; // async block literal (expression position)
+        }
+        // Type start: builtin type keyword spellings.
+        for kw in ["void", "int", "char", "float", "double", "long", "short",
+                   "signed", "unsigned", "bool", "struct", "union", "enum",
+                   "const", "volatile", "id", "instancetype"] {
+            if self.source[i..].starts_with(kw) {
+                let after = self.source[i + kw.len()..].chars().next();
+                if after.map_or(true, |a| !(a.is_alphanumeric() || a == '_')) {
+                    return true;
+                }
+            }
+        }
+        // Typename identifier: `async Result *f(void)` — an identifier start
+        // (including the `id`/`Class` keyword spellings covered above).
+        c.is_alphabetic() || c == '_'
     }
 
-    /// After a consumed `async` modifier, the return type must be `NPTask<T>`
-    /// with exactly one type argument. The type is kept as-is — a real type
-    /// in the signature, nothing is unwrapped.
-    fn require_nptask_async(&mut self, rt: CstType) -> CstType {
-        if rt.name.as_deref() != Some("NPTask") {
-            self.error("'async' requires return type 'NPTask<T>' — 'async' is a method modifier, not a type qualifier");
-            return rt;
+    /// Soft keyword `await` (doc/async_soft_keywords_plan.md §3.2): in
+    /// expression-prefix position, `await` is the suspension operator iff the
+    /// next non-whitespace char starts a unary expression — EXCEPT the
+    /// unary/binary same-shape operators `+ - * &`, which stay C-compatible
+    /// (`await + 1`, `await * p` keep `await` an identifier; `++`/`--` are in
+    /// the start set). Raw-source scan, same style as `at_async_modifier`, so
+    /// a user variable/function named `await` keeps working in every other
+    /// position — C superset iron law. Judgment table: doc §3.4.
+    fn at_await_operator(&self) -> bool {
+        if self.current.kind != TokenKind::Identifier || self.current_text() != "await" {
+            return false;
         }
-        if rt.type_args.len() != 1 {
-            self.error("'async NPTask' requires exactly one type argument: 'async NPTask<T>'");
+        let bytes = self.source.as_bytes();
+        let mut i = self.current.start + self.current.length;
+        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+            i += 1;
         }
-        rt
+        if i >= bytes.len() {
+            return false;
+        }
+        let c = bytes[i] as char;
+        match c {
+            '(' | '[' | '^' | '!' | '~' | '@' | '"' | '\'' => true,
+            '0'..='9' => true,                          // int/float literal start
+            '+' => bytes.get(i + 1) == Some(&b'+'),     // `++` yes, `+` no
+            '-' => bytes.get(i + 1) == Some(&b'-'),     // `--` yes, `-` no
+            c => c.is_alphabetic() || c == '_',         // Identifier / sizeof
+        }
     }
 
-    fn parse_function_decl_or_definition(&mut self, return_type: CstType, name: String, prefix_attrs: Vec<String>) -> Option<CstDecl> {
+    fn parse_function_decl_or_definition(&mut self, return_type: CstType, name: String, prefix_attrs: Vec<String>, top_level_async: bool) -> Option<CstDecl> {
         let mut params = Vec::new();
         let mut has_variadic = false;
 
@@ -3742,9 +3855,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 has_variadic,
                 body,
                 throws,
-                // plain C functions are never async (the `async` modifier is
-                // method/selector syntax only)
-                async_marker: false,
+                // async_marker: true for a top-level `async T f(...)` function
+                // (§4.2); method-position async is set in parse_method.
+                async_marker: top_level_async,
             },
                     attributes: trailing_attrs,
 })
@@ -3903,6 +4016,19 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_declaration_inner(&mut self) -> Option<CstDecl> {
+        // Top-level function-position `async` modifier (§4.2): identifier
+        // `async` followed by a type start = `async T f(...)` / `async void
+        // f(...)`; followed by `^` = async block literal, left to expression
+        // parsing. Otherwise `async` is a plain C identifier (`async = 5;`).
+        // Declared up front so the struct-fallthrough path can carry it too.
+        let mut top_level_async = false;
+        if self.current.kind == TokenKind::Identifier
+            && self.current_text() == "async"
+            && self.at_async_modifier()
+        {
+            self.advance(); // consume `async`
+            top_level_async = true;
+        }
         // __extension__ suppresses pedantic warnings — skip it and continue.
         if self.match_keyword(KeywordKind::Extension) {
             return self.parse_declaration_inner();
@@ -4017,7 +4143,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 let name = self.parse_qualified_name_with_keywords()?;
                 // Function or variable?
                 if self.check(TokenKind::LParen) {
-                    return self.parse_function_decl_or_definition(struct_type, name, Vec::new());
+                    return self.parse_function_decl_or_definition(struct_type, name, Vec::new(), top_level_async);
                 } else {
                     // Variable declaration
                     let mut var = CstDecl {
@@ -4117,6 +4243,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
             return self.parse_enum();
         }
 
+        // `async` detection moved to the top of parse_declaration_inner
+        // (struct fallthrough path needs it too).
+
         // Regular declaration: type name = ...; or type name(params) { ... }
         let qualifiers = self.parse_decl_qualifiers();
         // Annotated: a top-level function's return type is a nullability
@@ -4150,7 +4279,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
 
         // Function or variable?
         if self.check(TokenKind::LParen) {
-            self.parse_function_decl_or_definition(return_type, name, mid_attrs)
+            self.parse_function_decl_or_definition(return_type, name, mid_attrs, top_level_async)
         } else {
             // Variable declaration
             let mut var = CstDecl {
@@ -5346,9 +5475,9 @@ if self.current.kind == TokenKind::Identifier {
             self.consume(TokenKind::RParen, "expected ')' after method return type");
             if async_modifier {
                 match rt {
-                    Some(t) => Some(self.require_nptask_async(t)),
+                    Some(t) => Some(t),
                     None => {
-                        self.error("'async' requires return type 'NPTask<T>'");
+                        self.error("'async' requires a return type");
                         None
                     }
                 }
@@ -5438,6 +5567,26 @@ if self.current.kind == TokenKind::Identifier {
                             KeywordKind::Sel | KeywordKind::Instancetype |
                             KeywordKind::Block | KeywordKind::Weak | KeywordKind::Strong |
                             KeywordKind::AtThrow | KeywordKind::AtThrows)) {
+                        // Consume `next_part` only if it really starts another
+                        // `sel:` segment (colon AFTER the identifier). Parser
+                        // discipline: a failed consume must not advance —
+                        // blindly eating the token here used to swallow the
+                        // trailing soft keyword `throws` (§9.2) and leave the
+                        // method's failable flag silently dropped.
+                        let colon_follows = {
+                            let saved_lex = self.lexer.save_pos();
+                            let saved_cur = self.current.clone();
+                            let saved_prev = self.previous.clone();
+                            self.advance();
+                            let c = self.match_token(TokenKind::Colon);
+                            self.lexer.restore_pos(saved_lex);
+                            self.current = saved_cur;
+                            self.previous = saved_prev;
+                            c
+                        };
+                        if !colon_follows {
+                            break; // trailing identifier (e.g. `throws`) — not a selector segment
+                        }
                         let next_part = self.current_text().to_string();
                         self.advance();
                         if self.match_token(TokenKind::Colon) {
@@ -5525,6 +5674,11 @@ if self.current.kind == TokenKind::Identifier {
         } else if self.match_keyword(KeywordKind::AtThrow) {
             self.error("@throw is a statement (it raises an exception inside a body); use '@throws' or '@throws(<type>)' to annotate this declaration");
         }
+
+        // Trailing bare `throws` on an async method was removed with the
+        // second-batch design (plan §9.5): the failable declaration is the
+        // unified `@throws(ErrType *)` annotation parsed above, same as the
+        // sync side. A bare `throws` here is now a plain syntax error.
 
         // Body
         let body = if self.check(TokenKind::LBrace) {
@@ -6042,6 +6196,84 @@ mod tests {
     // through the file-level `use jeti_cst::*` in the parent). Gate it.
     #[cfg(test)]
     use super::*;
+    #[cfg(test)]
+    use crate::Parser;
+
+    /// True iff the parsed unit contains at least one Await operator node.
+    // `mod tests` itself is not cfg(test)-gated in this file (historical
+    // shape); every non-`#[test]` item here must carry the gate or its body
+    // gets type-checked in a normal build, where `#[cfg(test)]` uses are gone.
+    #[cfg(test)]
+    fn unit_has_await(src: &str) -> bool {
+        let mut p = Parser::new(src);
+        let unit = p.parse_translation_unit().unwrap();
+        // `Await { inner }` (CST struct variant): match the variant name
+        // without assuming the old tuple form `Await(`.
+        let dbg = format!("{:?}", unit);
+        dbg.contains("Await {") || dbg.contains("Await(")
+    }
+
+    #[test]
+    fn test_await_soft_keyword_table() {
+        // Operator: `await` followed by a unary-start token (§3.2 start set).
+        assert!(unit_has_await("void f(void) { await [w m]; }"));
+        assert!(unit_has_await("void f(void) { await (x); }")); // callsite: C fn `await` renamed
+        assert!(unit_has_await("void f(void) { await await [f m]; }")); // nested double unwrap
+        assert!(unit_has_await("void f(void) { await ++x; }"));
+        assert!(unit_has_await("void f(void) { await 42; }"));
+
+        // Identifier: C-compat boundary table (§3.4).
+        assert!(!unit_has_await("void f(void) { int await = 1; }")); // decl position
+        assert!(!unit_has_await("void f(void) { await = 5; }")); // `=` not in set
+        assert!(!unit_has_await("void f(void) { return await; }")); // `;`
+        assert!(!unit_has_await("void f(void) { int r = await + 1; }")); // `+` excluded
+        assert!(!unit_has_await("void f(void) { int r = await * p; }")); // `*` excluded
+        assert!(!unit_has_await("void f(void) { await -t; }")); // `-` excluded
+        assert!(!unit_has_await("void f(void) { await; }")); // bare, no operand
+    }
+
+    #[test]
+    fn test_at_await_spelling_removed() {
+        // §6: the old `@await` spelling is no longer accepted — it must not
+        // produce an Await node (lexer has no AtAwait token anymore).
+        assert!(!unit_has_await("void f(void) { @await [w m]; }"));
+    }
+
+    #[test]
+    fn test_async_block_literal() {
+        // §5.1 five shapes; async blocks carry is_async = true.
+        let async_block = |src: &str| {
+            let mut p = Parser::new(src);
+            let unit = p.parse_translation_unit().unwrap();
+            let text = format!("{:?}", unit);
+            (text.contains("is_async: true"), text.contains("is_async: false"), p.last_error().is_empty())
+        };
+
+        // Complete forms: return type between `async` and `^`.
+        let (a, has_plain, ok) = async_block("void f(void) { async void ^(NPString *u) { await [self fetchUser:u]; }; }");
+        assert!(a && ok && !has_plain, "async void form: a={} ok={} err", a, ok);
+        let (a, _, ok) = async_block("void f(void) { async int ^(int x) { return x + 1; }; }");
+        assert!(a && ok, "async int form");
+        let (a, _, ok) = async_block("void f(void) { async NPString *^(NPString *k) { return await [self get:k]; }; }");
+        assert!(a && ok, "async object-return form");
+
+        // Ellided form (inference rules TBD §8-①; parse-only acceptance).
+        let (a, _, ok) = async_block("void f(void) { async ^ { [self performTask]; }; }");
+        assert!(a && ok, "ellided form");
+        // `(void)` no-param spelling.
+        let (a, _, ok) = async_block("void f(void) { async void ^(void) { [self t]; }; }");
+        assert!(a && ok, "(void) param form");
+
+        // IIFE: definition-then-call, empty and with args (user 2026-10-11).
+        let (a, _, ok) = async_block("void f(void) { async void ^(void) { [self t]; }(); }");
+        assert!(a && ok, "IIFE empty-args form");
+        let (a, _, ok) = async_block("void f(void) { async void ^(NPString *u) { await [self fetchUser:u]; }(u); }");
+        assert!(a && ok, "IIFE with-args form");
+
+        // Plain blocks stay is_async: false.
+        let (_, has_plain, ok) = async_block("void f(void) { int (^b)(int) = ^(int x) { return x; }; }");
+        assert!(has_plain && ok, "plain block not marked async");
+    }
 
     #[test]
     fn test_parse_empty() {

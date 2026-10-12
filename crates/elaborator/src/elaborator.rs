@@ -175,9 +175,11 @@ impl Elaborator {
     fn convert_expr(&mut self, ce: &CstExpr) -> Option<AstExpr> {
         let line = ce.line; let col = ce.col;
         let ae = match &ce.data {
-            CstExprData::Await(inner) => AstExpr {
+            CstExprData::Await { inner } => AstExpr {
                 kind: AstExprKind::Await, expr_type: None, line, col,
-                data: AstExprData::Await(Box::new(self.convert_expr(inner).unwrap_or_else(make_int_expr))),
+                data: AstExprData::Await {
+                    inner: Box::new(self.convert_expr(inner).unwrap_or_else(make_int_expr)),
+                },
             },
             CstExprData::Boxed(inner) => AstExpr {
                 kind: AstExprKind::Boxed, expr_type: None, line, col,
@@ -341,12 +343,13 @@ impl Elaborator {
                 };
                 let converted_callee = self.convert_expr(callee);
                 if let Some(ref ce) = converted_callee {
-                    // Member expressions are renderable call targets: ivar
-                    // access (block invocation) and struct fields via dot/arrow
-                    // (`w.cb(3)` where cb is a fn-ptr — C-superset member call).
-                    // Keep the callee so codegen emits the member call instead
-                    // of dropping it.
-                    if matches!(ce.data, AstExprData::IvarRef { .. } | AstExprData::PropRef { .. }) {
+                    // Renderable call targets: member expressions (ivar access,
+                    // struct fields via dot/arrow — `w.cb(3)` where cb is a
+                    // fn-ptr, C-superset member call) and the block literal
+                    // itself (immediately-invoked block, `^{…}(args)` IIFE).
+                    // Keep the callee so codegen emits the call instead of
+                    // dropping it.
+                    if matches!(ce.data, AstExprData::IvarRef { .. } | AstExprData::PropRef { .. } | AstExprData::Block { .. }) {
                         // Block invocation on ivar — store callee expression
                         AstExpr { kind: AstExprKind::FuncCall, expr_type: None, line, col,
                             data: AstExprData::FuncCall { func: None, name, callee: Some(Box::new(ce.clone())), args: args_list } }
@@ -375,7 +378,7 @@ impl Elaborator {
             CstExprData::DictLit { keys, values } => {
                 AstExpr { kind: AstExprKind::DictLit, expr_type: None, line, col, data: AstExprData::DictLit { keys: keys.iter().filter_map(|k| self.convert_expr(k)).collect(), values: values.iter().filter_map(|v| self.convert_expr(v)).collect() } }
             }
-            CstExprData::Block { params, return_type, body, .. } => {
+            CstExprData::Block { params, return_type, body, is_async, .. } => {
                 let mut ast_params = Vec::new();
                 let mut bp = params.as_ref().map(|p| &**p);
                 while let Some(param) = bp {
@@ -384,7 +387,7 @@ impl Elaborator {
                     ast_params.push((pt, pn));
                     bp = param.next.as_ref().map(|n| &**n);
                 }
-                AstExpr { kind: AstExprKind::BlockLit, expr_type: None, line, col, data: AstExprData::Block { params: ast_params, return_type: return_type.as_ref().and_then(|t| self.convert_type(t)).map(Box::new), body: body.as_ref().and_then(|b| self.convert_stmt(b)).map(Box::new) } }
+                AstExpr { kind: AstExprKind::BlockLit, expr_type: None, line, col, data: AstExprData::Block { params: ast_params, return_type: return_type.as_ref().and_then(|t| self.convert_type(t)).map(Box::new), body: body.as_ref().and_then(|b| self.convert_stmt(b)).map(Box::new), is_async: *is_async } }
             }
             CstExprData::InitList(exprs) => {
                 AstExpr { kind: AstExprKind::InitList, expr_type: None, line, col, data: AstExprData::InitList(exprs.iter().filter_map(|e| self.convert_expr(e)).collect()) }

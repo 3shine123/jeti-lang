@@ -1,32 +1,32 @@
 #import <Foundation/Foundation.jth>
 
-// async/await (NPTask design, doc/async_nptask_plan.md):
-// - `(async NPTask<T>)` marks a suspending method; the signature tells the truth
-// - `@await e` marks a suspension point; it lowers to `jeti_task_await`
+// async/await (soft keywords, docs/plans/async_soft_keywords_plan.md):
+// - `(async T)` marks a suspending method; the signature tells the truth
+// - `await e` marks a suspension point; it lowers to `jeti_task_await`
 //   (lazy tasks: auto-start if not started, result cached — multi-await safe)
 // - a bare async call from sync code is legal (form A: lazy task creation,
 //   the handle is a first-class value); at STATEMENT position it is the entry
 //   form — hosted code drives it to completion right there
 
 @interface Fetcher : NPObject
-- (async NPTask<int>)compute:(int)n;
-- (async NPTask<int>)twice:(int)n;
-- (async NPTask<void>)runAll;
+- (async int)compute:(int)n;
+- (async int)twice:(int)n;
+- (async void)runAll;
 @end
 
 @implementation Fetcher
-- (async NPTask<int>)compute:(int)n {
-    int raw = @await n;          // suspension point
+- (async int)compute:(int)n {
+    int raw = await n;           // suspension point
     return raw * 2;
 }
-- (async NPTask<int>)twice:(int)n {
-    int a = @await [self compute:n];   // await across a call chain
-    int b = @await [self compute:a];   // ...and twice in one body
+- (async int)twice:(int)n {
+    int a = await [self compute:n];    // await across a call chain
+    int b = await [self compute:a];    // ...and twice in one body
     return a + b;
 }
 // async void: the entry method — driven at its statement-position call
-- (async NPTask<void>)runAll {
-    int x = @await [self twice:3];
+- (async void)runAll {
+    int x = await [self twice:3];
     NPLog(@"result=%d", x);      // 3 -> 6 -> 12 => a+b = 18
 }
 @end

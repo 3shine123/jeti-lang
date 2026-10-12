@@ -173,7 +173,7 @@ fn expr_children(e: &AstExpr) -> Vec<&AstExpr> {
             if let Some(c) = callee { v.insert(0, &**c); }
             v
         }
-        AstExprData::Await(inner) => vec![inner],
+        AstExprData::Await { inner, .. } => vec![inner],
         _ => Vec::new(),
     }
 }
@@ -832,7 +832,7 @@ impl EffectTable {
             AstExprData::Comma(exprs) => exprs.iter().collect(),
             AstExprData::InitList(items) | AstExprData::ArrayLit(items) => items.iter().collect(),
             AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => vec![obj],
-            AstExprData::Await(inner) => vec![inner],
+            AstExprData::Await { inner, .. } => vec![inner],
             _ => Vec::new(),
         }
     }
@@ -1658,7 +1658,7 @@ fn expr_refs_name(e: &AstExpr, name: &str) -> bool {
         AstExprData::Subscript { object, key } => expr_refs_name(object, name) || expr_refs_name(key, name),
         AstExprData::Comma(exprs) => exprs.iter().any(|x| expr_refs_name(x, name)),
         AstExprData::InitList(items) | AstExprData::ArrayLit(items) => items.iter().any(|x| expr_refs_name(x, name)),
-        AstExprData::Await(inner) => expr_refs_name(inner, name),
+        AstExprData::Await { inner, .. } => expr_refs_name(inner, name),
         _ => false,
     }
 }

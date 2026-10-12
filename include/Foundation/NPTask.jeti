@@ -1,6 +1,6 @@
 // Foundation/NPTask.jeti —— 空壳（路线 A：薄别名）。
 //
-// `NPTask<T>` 没有实现可内联：它不是 Foundation 类，`[t start]` / `@await` 由 desugar
+// `NPTask<T>` 没有实现可内联：它不是 Foundation 类，`[t start]` / `await` 由 desugar
 // 直接降为 include/jeti/runtime.c 的 `jeti_task_*` C API（见 NPTask.jth 的说明）。
 //
 // 本文件存在只为保持 .jth/.jeti 对约定；tools/build-foundation-lib.sh 会像跳过

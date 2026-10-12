@@ -49,10 +49,10 @@ JETIC=target/release/jetic ./tests/eh_matrix/gen_quality.sh
 | 12 | 纯 C 超集 | `golden/22_c_superset/c_superset.jeti` | 无 Foundation/无 block 的生成 C 也须含 EH 声明 |
 | 13 | `-ffreestanding` | `golden/25_freestanding/`（golden/25 方法论） | 裸机转译 + host 编译链接运行 |
 | 14 | ARM64 裸机 | `tests/stress/baremetal/` | `-ffreestanding` + 真 `asm_ext.s` + `helpers.c` |
-| 15 | `@await` + 异常 | `samples/async_eh.jeti` | `@try` 不跨挂起点（语言规则） |
+| 15 | `await` + 异常 | `samples/async_eh.jeti` | `@try` 不跨挂起点（语言规则） |
 | 16 | Blocks + 异常 | `tests/eh_diff/06_block_throw.jeti` | block 体独立函数 + 旗标跨 invoke 边界 |
 | 17 | 零异常程序（守卫密度运行侧） | `samples/no_throw_plain.jeti` | 静态侧见 `gen_quality.sh` 硬门 |
-| 18 | 全语法总检 | `tests/full_syntax_test.jeti`（+ `-asm full_syntax_test.s`） | C 超集 + Foundation + 内联 asm + `@throws` + `@await` 同居 |
+| 18 | 全语法总检 | `tests/full_syntax_test.jeti`（+ `-asm full_syntax_test.s`） | C 超集 + Foundation + 内联 asm + `@throws` + `await` 同居 |
 
 结果（Apple clang 21, arm64-darwin）：**18 场景 x 3 模式全部 PASS**，
 `default` 与显式 `-eh checked` 在每个场景上逐字节一致（`06_cross_frame`

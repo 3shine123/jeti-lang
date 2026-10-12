@@ -1,0 +1,15 @@
+// Golden: async block IIFE in a plain function (main) — §5 self-context.
+// There is no `self` in scope; the IIFE's hidden capture argument is
+// `(NPObject *)0` (a block body that actually uses `self` here is already a
+// checker error). Statement position auto-drives (hosted, §5.1). Expected:
+//   main done
+#import <Foundation/Foundation.jth>
+#import <stdio.h>
+
+int main(void) {
+    async int ^(void) {
+        return 42;
+    }();
+    printf("main done\n");
+    return 0;
+}

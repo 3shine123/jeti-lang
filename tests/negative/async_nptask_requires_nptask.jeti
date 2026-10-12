@@ -1,13 +1,17 @@
-// NPTask negative: `async` modifier requires return type NPTask<T>
-// (doc/async_nptask_plan.md, stage A). `async int` must be rejected —
-// 'async' is a method modifier, not a type qualifier.
+// NPTask negative: the legacy spelling `(async NPTask<T>)` is rejected.
+// Under the soft-keyword design (docs/plans/async_soft_keywords_plan.md §6)
+// the async modifier takes the BUSINESS type — write `(async T)`. The
+// sequence `async NPTask<...>` at a return-type position produces the
+// migration error "legacy spelling 'async NPTask<...>' — write '(async T)'".
+// (Rule inverted 2026-10: `async int` used to be the rejected shape; it is
+// now the ONLY valid spelling.)
 
 @interface A : NPObject
-- (async int)f;
+- (async NPTask<int>)f;
 @end
 
 @implementation A
-- (async int)f { return 1; }
+- (async NPTask<int>)f { return 0; }
 @end
 
 int main() { return 0; }

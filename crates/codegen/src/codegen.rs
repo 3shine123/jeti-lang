@@ -219,6 +219,55 @@ fn vtable_sig_segment(
     }
 }
 
+/// §8-④ (`docs/plans/async_soft_keywords_plan.md`): the shared-segment
+/// fingerprint must encode the async part of a method's signature, because the
+/// generated C signature does not show it — every async method is emitted with
+/// the uniform `NPTask *` return, so `(async int) fetch` and `(async long)
+/// fetch` (and a plain synchronous `fetch`) are byte-identical to the `__sig`
+/// guard. A client that disagrees with the owner would pass the startup check
+/// and then mis-dispatch the awaited value — exactly what R3 exists to catch.
+///
+/// The marker is derived from the *declaration* AST, which every TU sees (the
+/// owner from its `@implementation`, a client from the `#import`ed `.jth`), so
+/// both sides compute the same string without any extra metadata.
+///
+/// Format: `<name>|async[:<business C spelling>]` — the type part is the
+/// business type T of `async T`. Plain methods keep their bare name, so their
+/// fingerprints are unchanged. (The old `!` failable mark died with the
+/// second-batch try-await design, plan §9.5.)
+fn async_sig_marks(ast: &AstUnit) -> HashMap<String, String> {
+    let mut marks: HashMap<String, String> = HashMap::new();
+    for d in &ast.decls {
+        if let AstDeclData::Class { methods, .. } = &d.data {
+            for m in methods {
+                if let (AstDeclData::Method { async_marker: true, return_type, .. }, Some(sel)) =
+                    (&m.data, &m.name)
+                {
+                    let mut mark = String::from("|async");
+                    if let Some(t) = return_type.as_deref().and_then(business_return_type) {
+                        mark.push(':');
+                        mark.push_str(&ast_type_to_c_str(t));
+                    }
+                    marks.insert(sanitize_sel_name(sel), mark);
+                }
+            }
+        }
+    }
+    marks
+}
+
+/// The business return type of an async method: the pipeline stores the
+/// signature as the task handle `NPTask<T> *`, so T is the first type argument;
+/// anything else (a non-async declaration, or an already-normalized client)
+/// is its own business type.
+fn business_return_type(t: &AstType) -> Option<&AstType> {
+    if t.is_pointer && t.name.as_deref() == Some("NPTask") {
+        t.type_args.first()
+    } else {
+        Some(t)
+    }
+}
+
 // ─── Global vtable method metadata (set during ast_to_cg_unit) ────────────
 static METHOD_METADATA: OnceLock<HashMap<String, (usize, String)>> = OnceLock::new();
 // Per-class method signature: class_flat -> (method_name -> (index, ptr_type)).
@@ -1430,7 +1479,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
         // `await e`: if the async desugar pass ran, no Await node survives to
         // codegen. This arm is the passthrough safety net (e.g. -fno-async or
         // an await outside any method): treat as its inner expression.
-        AstExprData::Await(inner) => convert_expr(inner, class_infos),
+        AstExprData::Await { inner, .. } => convert_expr(inner, class_infos),
         // `@(expr)`: the checker rewrites this into the `NPNumber` factory
         // matching the operand's static type — only the checker has types, and
         // the C99 backend has no `_Generic` to fall back on. This arm is the
@@ -1924,6 +1973,55 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     }
                 }
             }
+            // Immediately-invoked block literal (IIFE): `^{ … }(args)` /
+            // `^int(void){ … }(3)`. The callee IS the block — convert it (this
+            // also registers the gcc invoke static into the block_defs buffer)
+            // and call it in place, instead of rendering an empty callee name.
+            if let Some(ref ce) = callee {
+                if matches!(&ce.data, AstExprData::Block { .. }) {
+                    let blk = convert_expr(ce, class_infos);
+                    let lit = match blk.data {
+                        CgExprData::BlockLit(d) => d,
+                        _ => unreachable!("block callee must convert to BlockLit"),
+                    };
+                    let call_name = if is_clang_backend() {
+                        // clang: emit the literal inline and invoke it —
+                        // `^rt(params){ … }(args)` is valid blocks syntax.
+                        let mut s = String::new();
+                        s.push('^');
+                        s.push_str(&lit.return_type);
+                        s.push('(');
+                        for (i, (pt, pn)) in lit.params.iter().enumerate() {
+                            if i > 0 { s.push_str(", "); }
+                            s.push_str(pt); s.push(' '); s.push_str(pn);
+                        }
+                        s.push(')');
+                        if let Some(ref b) = lit.body {
+                            s.push(' ');
+                            emit_stmt_inline(b, &mut s);
+                        } else {
+                            s.push_str(" {}");
+                        }
+                        s
+                    } else {
+                        // gcc/portable: call the invoke static directly; plain
+                        // blocks carry no captures, so a null cself is fine.
+                        lit.func_name.clone()
+                    };
+                    let mut cg_args: Vec<CgExpr> = args.iter().map(|a| convert_expr(a, class_infos)).collect();
+                    if !is_clang_backend() {
+                        cg_args.insert(0, CgExpr { kind: CgExprKind::Int, type_str: None, line, col, data: CgExprData::Int(0) });
+                    }
+                    return CgExpr {
+                        kind: CgExprKind::Call, type_str, line, col,
+                        data: CgExprData::Call {
+                            name: call_name, args: cg_args,
+                            vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
+                            sel_const_name: None, method_index: None,
+                        },
+                    };
+                }
+            }
             // When `callee` is Some (block invocation on ivar), use it as
             // the call target instead of a bare function name.
             let call_name = if let Some(ref ce) = callee {
@@ -2291,7 +2389,9 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
         AstExprData::TypeLiteral(ty) => {
             CgExpr { kind: CgExprKind::TypeLiteral, type_str, line, col, data: CgExprData::TypeLiteral(ast_type_to_c_str(&ty)) }
         }
-        AstExprData::Block { params, return_type, body } => {
+        // `is_async` ignored at codegen for now: the async desugar pass (§8-3)
+        // owns async block lowering; plain block emission is the fallback path.
+        AstExprData::Block { params, return_type, body, .. } => {
             let tid = next_temp_id();
             let func_name = format!("__jeti_block_{}", tid);
             let rt = return_type.as_ref().map(|t| ast_type_to_c_str(t))
@@ -2313,10 +2413,15 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     if i > 0 { params_sig.push_str(", "); }
                     params_sig.push_str(pt); params_sig.push(' '); params_sig.push_str(pn);
                 }
-                // Struct definition
-                defs.push_str(&format!("struct {} {{\n    void *isa;\n    int flags;\n    int reserved;\n    {} (*invoke)(struct {} *, {});\n}};\n",
-                    layout_name, rt, layout_name,
-                    if params_sig.is_empty() { "void" } else { &params_sig }));
+                // Struct definition. A zero-param invoke is `(struct L *)` —
+                // appending `, void` after a real parameter is illegal C.
+                let invoke_params = if params_sig.is_empty() {
+                    format!("struct {} *", layout_name)
+                } else {
+                    format!("struct {} *, {}", layout_name, params_sig)
+                };
+                defs.push_str(&format!("struct {} {{\n    void *isa;\n    int flags;\n    int reserved;\n    {} (*invoke)({});\n}};\n",
+                    layout_name, rt, invoke_params));
                 // Invoke function (emit body now since we have the CgStmt)
                 // NOTE: no `{` here — the body's Compound statement emits its own braces.
                 defs.push_str(&format!("static {} {}(struct {} *cself{}) ", rt, func_name, layout_name,
@@ -5484,8 +5589,20 @@ method_names: info.method_names,
 
     // R3: the `__sig` fingerprint covers only the shared segment — see
     // `vtable_sig_segment` for the segment rules.
+    //
+    // §8-④: async methods additionally carry their async signature in the
+    // fingerprint (see `async_sig_marks`) — the C spelling of an async method
+    // is the uniform `NPTask *`, so async-ness, failability and the business
+    // type T would otherwise be invisible to the guard.
+    let sig_marks = async_sig_marks(ast);
     let vtable_sig_names: Vec<String> =
-        vtable_sig_segment(slots_manifest, public_methods, &global_instance_method_names);
+        vtable_sig_segment(slots_manifest, public_methods, &global_instance_method_names)
+            .into_iter()
+            .map(|name| match sig_marks.get(&name) {
+                Some(mark) => format!("{}{}", name, mark),
+                None => name,
+            })
+            .collect();
 
     let mut method_meta: HashMap<String, (usize, String)> = HashMap::new();
     for (idx, mname) in global_instance_method_names.iter().enumerate() {
@@ -6736,7 +6853,9 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
                 out.push_str(&ind);
                 if *is_static { out.push_str("static "); }
                 // For block types like `int (^name)(int)`, the variable name is already inside the type
-                let is_block_type = decl_type.contains("(^") || decl_type.contains("(*");
+                // (clang spelling `(^name)…`, portable spelling `struct __jeti_block_header *name`).
+                let is_block_type = decl_type.contains("(^") || decl_type.contains("(*")
+                    || decl_type.contains("__jeti_block_header");
                 if is_block_type {
                     out.push_str(decl_type);
                 } else {

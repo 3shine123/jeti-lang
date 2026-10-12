@@ -83,6 +83,46 @@ impl AstType {
         t
     }
 
+    /// Rebuild a CST type from an AST type — the inverse of `from_cst_type`
+    /// on the surface that round-trips through it (primitives, pointers,
+    /// named/struct types, generics, arrays). Used by lowering passes that
+    /// must hand AST-typed parameters back to CST-shaped consumers (e.g. the
+    /// async block-literal thunk builder re-creates a `CstParam` chain from
+    /// the elaborator-normalized `Vec<(AstType, String)>`).
+    pub fn to_cst_type(&self) -> CstType {
+        let mut ct = CstType::new(self.prim);
+        ct.is_pointer = self.is_pointer;
+        ct.is_const = self.is_const;
+        ct.is_block = self.is_block;
+        ct.is_array = self.is_array;
+        ct.is_struct = self.is_struct;
+        ct.is_fn_ptr = self.is_fn_ptr;
+        ct.is_complex = self.is_complex;
+        ct.is_unsigned = self.is_unsigned;
+        ct.tag = self.tag;
+        ct.array_size = self.array_size;
+        ct.array_size_name = self.array_size_name.clone();
+        ct.block_name = self.block_name.clone();
+        ct.block_params = self.block_params.as_ref().map(|bp| Box::new(bp.to_cst_type()));
+        ct.protocols = self.protocol_refs.clone();
+        ct.type_args = self.type_args.iter().map(|t| t.to_cst_type()).collect();
+        ct.nulls = self.nulls;
+        // from_cst_type pulls a pointer's target name up into the outer type;
+        // mirror that by pushing the name back down into the subtype so the
+        // round-trip is stable.
+        if self.is_pointer {
+            if let Some(ref name) = self.name {
+                let mut sub = CstType::new(self.prim);
+                sub.name = Some(name.clone());
+                sub.is_struct = self.is_struct;
+                sub.type_args = ct.type_args.clone();
+                ct.subtype = Some(Box::new(sub));
+            }
+        }
+        ct.name = self.name.clone();
+        ct
+    }
+
     /// True if this type is a pointer-to-object, `id`, `instancetype`, or `Class`.
     pub fn is_object(&self) -> bool {
         self.is_pointer
@@ -181,12 +221,17 @@ pub enum AstExprData {
     Subscript { object: Box<AstExpr>, key: Box<AstExpr> },
     Sizeof { type_expr: AstType, expr: Option<Box<AstExpr>> },
     Alignof(AstType),
-    Block { params: Vec<(AstType, String)>, return_type: Option<Box<AstType>>, body: Option<Box<AstStmt>> },
+    /// Async block literal `async T? ^…` (async_soft_keywords_plan §5):
+    /// carries its own `is_async` so a plain block never inherits async
+    /// context (§5.3-1: `await` inside a plain block is an error).
+    Block { params: Vec<(AstType, String)>, return_type: Option<Box<AstType>>, body: Option<Box<AstStmt>>, is_async: bool },
     Ternary { cond: Box<AstExpr>, then: Box<AstExpr>, else_: Box<AstExpr> },
     Selector(String),
     TypeLiteral(AstType),
     /// `await <expr>` — the awaited expression (message send / call).
-    Await(Box<AstExpr>),
+    Await {
+        inner: Box<AstExpr>,
+    },
     /// `@(expr)` — the boxed expression, before the checker rewrites it into
     /// the `NPNumber` factory matching its static type.
     Boxed(Box<AstExpr>),

@@ -249,6 +249,9 @@ typedef int (*jeti_task_entry_fn)(NPTask *task);
 struct NPTask {
     int state;                          /* current state-machine state */
     int finished;                       /* 0 = running/suspended, 1 = done */
+    int failed;                         /* 1 = finished with an async error
+                                           (try-await propagation, §9): the
+                                           error value rides `result` */
     int queued;                         /* 1 = linked in the ready queue
                                            (scheduling layer; distinct from
                                            `state` — legacy create uses
@@ -277,6 +280,26 @@ void *jeti_task_join(NPTask *task);
 
 /* Mark the task finished (called by the state machine's final state). */
 void jeti_task_finish(NPTask *task);
+
+/* try-await error propagation (§9): mark the CURRENT task failed with the
+ * error value. The next await/consume point re-arms the checked-EH flag from
+ * these two slots instead of aborting — the failure propagates outward by
+ * the async error rules. Never silently swallowed (§9.3). */
+void jeti_task_fail(NPTask *task, NPObject *err);
+
+/* try-await propagation helper (§9), emitted around every `try await` point
+ * by the async desugar pass: when the checked-EH flag is armed (the awaited
+ * child failed) it also marks the CURRENT task failed, so an enclosing task's
+ * await re-raises the failure too. No-op when the flag is clear — a mere
+ * suspension must not fail the task (§9.4). */
+void __jeti_try_await_propagate(void);
+
+/* Await-value passthrough (§9): run the propagation helper, then yield the
+ * awaited value UNCHANGED. A macro rather than a function because the runtime
+ * carries every result in a single `void *` slot: the value's own type has to
+ * survive the wrap, and any fixed parameter type would break one half of the
+ * language — `long` breaks object results, `void *` breaks scalar ones. */
+#define __jeti_try_await_passthrough(v) (__jeti_try_await_propagate(), (v))
 
 // ─── NPTask scheduling layer (doc/async_nptask_plan.md, stage C) ────────────
 /* Lazy tasks + a cooperative ready queue. Mechanism only: scheduling POLICY

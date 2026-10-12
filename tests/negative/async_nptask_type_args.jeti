@@ -1,5 +1,10 @@
-// NPTask negative: 'async NPTask' requires exactly one type argument
-// (doc/async_nptask_plan.md, stage A).
+// NPTask negative: `async NPTask<...>` is rejected at EVERY type-argument
+// shape. Under the soft-keyword design (docs/plans/async_soft_keywords_plan.md
+// §6) the modifier takes the business type directly (`async T`); `NPTask<...>`
+// after `async` is the legacy spelling and produces the migration error
+// before any type-argument checking. (Historically this file asserted
+// "exactly one type argument"; that constraint is subsumed by the
+// legacy-spelling error under the new design.)
 
 @interface A : NPObject
 - (async NPTask<int, int>)f;

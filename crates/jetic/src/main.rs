@@ -268,6 +268,16 @@ fn find_libjetifoundation(custom_libs: &[String]) -> Option<String> {
             if lib_path.exists() {
                 return Some(exe_dir.to_string_lossy().to_string());
             }
+            // In-repo dev layout: target/debug/jetic → target/foundation —
+            // derived from the BINARY's location, not the process cwd, so
+            // the auto-link holds no matter which directory jetic runs from
+            // (harnesses and test runners cd into test directories).
+            if let Some(repo_target) = exe_dir.parent() {
+                let lib_path = repo_target.join("foundation/libjetifoundation.a");
+                if lib_path.exists() {
+                    return Some(lib_path.parent().unwrap().to_string_lossy().to_string());
+                }
+            }
         }
     }
     let mut paths = vec![

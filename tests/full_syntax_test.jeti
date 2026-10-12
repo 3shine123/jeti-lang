@@ -2,7 +2,7 @@
 //
 // 覆盖：C 超集基础 / 类·继承·协议·命名空间·泛型·容器·variadic / 表达式全家
 //       控制流（for-in·switch 模式） / 运行时块（try·synchronized·pool·defer·noarc·weak）
-//       nullability 全位 / @throws / @await / 内联 asm / Foundation 走查
+//       nullability 全位 / @throws / await / 内联 asm / Foundation 走查
 //
 // 配套 tests/full_syntax_test.s（ARM64 外部汇编，test_all 自动链接同名 .s）。
 // 预期：exit=0，输出确定（无地址/无时序依赖）。
@@ -727,7 +727,7 @@ static void sec4_control_runtime(void) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// §5  nullability 全位 / @throws / @await / 内联 asm / Foundation 走查
+// §5  nullability 全位 / @throws / await / 内联 asm / Foundation 走查
 // ═══════════════════════════════════════════════════════════════════
 
 // NP_ASSUME_NONNULL 区域：真语法非宏；未标注指针 → nonnull，nullable 显式退出
@@ -799,23 +799,23 @@ static void fs_take_fn(nonnull NPString *s) { printf("5.4 fn %s\n", [s UTF8Strin
 }
 @end
 
-// @await / async NPTask<T>：async 修饰符是签名一部分（头文件可见）；入口 = async void 方法
+// await / async 软关键字：async 修饰符是签名一部分（头文件可见）；入口 = async void 方法
 // 被同步上下文调用 → 自动 blocking wrapper（体内泵调度器），main 照常调用
 @interface FsFetcher : NPObject
-- (async NPTask<int>)compute:(int)n;                     // async 修饰符 + 体内 @await
+- (async int)compute:(int)n;                             // async 修饰符 + 体内 await
 - (int)helper:(int)n;                                    // 纯同步（无修饰符无 await）
-+ (async NPTask<void>)runAll;                            // 入口（类方法 async void）
++ (async void)runAll;                                    // 入口（类方法 async void）
 @end
 
 @implementation FsFetcher
 - (int)helper:(int)n { return n + 1; }
-- (async NPTask<int>)compute:(int)n {
-    int a = @await [self helper:n];                      // 挂起点（同步调用立即恢复）
+- (async int)compute:(int)n {
+    int a = await [self helper:n];                       // 挂起点（同步调用立即恢复）
     return a * 2;
 }
-+ (async NPTask<void>)runAll {
++ (async void)runAll {
     FsFetcher *f = [[FsFetcher alloc] init];
-    int x = @await [f compute:20];                       // 跨方法 await 链
+    int x = await [f compute:20];                        // 跨方法 await 链
     printf("5.7 async %d\n", x);
 }
 @end
@@ -862,7 +862,7 @@ static void sec5_misc(void) {
     @catch (FsErrLow *e) { caught += 1000; }
     printf("5.6 throws %d\n", caught);
 
-    // 5.7 @await 入口（sync 调 async void → blocking wrapper）
+    // 5.7 await 入口（sync 调 async void → blocking wrapper）
     [FsFetcher runAll];
 
     // 5.8 内联 asm：basic / extended(volatile+clobber) / 命名操作数 / 读写 / asm goto

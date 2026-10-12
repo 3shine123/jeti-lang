@@ -1,7 +1,7 @@
 // hosted_test.jeti — FULL-syntax stress test against the standard library
 // (Foundation). Runs via:  jetic run hosted_test.jeti -asm asm_host.s
 // Companion to the freestanding stress (tests/stress/baremetal) — this one
-// uses Foundation + ARC + @await, everything the bare-metal build can't.
+// uses Foundation + ARC + await, everything the bare-metal build can't.
 
 #import <Foundation/Foundation.jeti>
 #include <stdio.h>
@@ -73,26 +73,26 @@ static void check_struct_eq(void) {
 @protocol Renderable <Drawable & Serializable>   // composed protocol
 @end
 
-// ── async classes (declared like plain ObjC; @await in the body) ──
+// ── async classes (soft keywords: async in the signature, await in the body) ──
 @interface Fetcher : NPObject {
     int _base;
 }
-- (int) compute:(int)n;
-- (int) fetchRemote:(int)seed;
-- (void) runAll;
+- (async int) compute:(int)n;
+- (async int) fetchRemote:(int)seed;
+- (async void) runAll;
 @end
 
 @implementation Fetcher
-- (int) compute:(int)n {
-    int raw = @await n;                 // suspension point
+- (async int) compute:(int)n {
+    int raw = await n;                  // suspension point
     return raw * 2;
 }
-- (int) fetchRemote:(int)seed {
-    int doubled = @await [self compute:seed];   // await a method → infected
+- (async int) fetchRemote:(int)seed {
+    int doubled = await [self compute:seed];   // await across a call chain
     return doubled + 1;
 }
-- (void) runAll {                       // async void entry (blocking wrapper)
-    int x = @await [self fetchRemote:21];
+- (async void) runAll {                 // async void entry
+    int x = await [self fetchRemote:21];
     printf("[ASY] result=%d (expect 43)\n", x);
 }
 @end

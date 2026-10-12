@@ -1,10 +1,10 @@
 #import <Foundation/Foundation.jth>
 
-// Scenario 15 of the EH acceptance matrix: @await coexisting with the
+// Scenario 15 of the EH acceptance matrix: await coexisting with the
 // exception machinery.
 //
 // The language rule being respected here (README "async/await"): a `@try`
-// must NOT span an `@await` (a jmp_buf/flag cannot survive a suspension
+// must NOT span an `await` (a jmp_buf/flag cannot survive a suspension
 // point), so the try/catch below is a same-body, post-await region. The
 // async chain itself is untouched by -eh: it is a separate lowering pass.
 
@@ -19,19 +19,19 @@
 @end
 
 @interface EhFetcher : NPObject
-- (async NPTask<int>)compute:(int)n;
-- (async NPTask<void>)runAll;
+- (async int)compute:(int)n;
+- (async void)runAll;
 @end
 
 @implementation EhFetcher
-- (async NPTask<int>)compute:(int)n {
-    int raw = @await n;              // suspension point
+- (async int)compute:(int)n {
+    int raw = await n;              // suspension point
     return raw * 2;
 }
 
-- (async NPTask<void>)runAll {
-    int x = @await [self compute:21];   // 42
-    @try {                               // does not span the @await above
+- (async void)runAll {
+    int x = await [self compute:21];   // 42
+    @try {                               // does not span the await above
         EhBoom *b = [[EhBoom alloc] init];
         [b fire];
         NPLog(@"never runs");

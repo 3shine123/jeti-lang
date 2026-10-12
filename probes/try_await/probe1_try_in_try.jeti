@@ -1,0 +1,63 @@
+// Probe 1 (B′ form, plan §9.3): async failure handled by plain @try/@catch —
+// zero new keywords. A FAILED await fires @catch and @finally; a SUSPENDED
+// await fires neither (the failed flag distinguishes the two control flows).
+// An unhandled failure propagates to the top and aborts loudly (form ①).
+// Expected output:
+//   ok=1002
+//   caught
+//   finally
+//   main done
+//
+// The service is passed as a PARAMETER: `self->ivar` access inside an async
+// body hits the async-frame self-typing gap (frame `self_obj` is `NPObject *`
+// — delegated separately, predates B′). A typed local/param receiver is the
+// supported path.
+#import <Foundation/Foundation.jth>
+#import <stdio.h>
+
+@interface UserService : NPObject
+- (async int)fetchUser:(int)uid @throws(NPString *);
+@end
+
+@implementation UserService
+- (async int)fetchUser:(int)uid @throws(NPString *) {
+    // Suspension point first, then failure — proves a suspended await does
+    // not fire @finally, but a FAILED one does. The IIFE captures
+    // nothing (async-block capture of enclosing locals is still open).
+    int probe = await (async int ^(void) { return 1; }());
+    if (uid == 999) {
+        @throw @"boom";
+    }
+    return (uid + probe) * probe;
+}
+@end
+
+@interface Controller : NPObject
+- (async void)buttonActionWithService:(UserService *)svc;
+@end
+
+@implementation Controller
+- (async void)buttonActionWithService:(UserService *)svc {
+    @try {
+        int ok = await [svc fetchUser:1001];
+        printf("ok=%d\n", ok);
+        int bad = await [svc fetchUser:999];
+        printf("unreachable %d\n", bad);
+    }
+    @catch (NPString *e) {
+        printf("caught\n");
+    }
+    @finally {
+        printf("finally\n");
+    }
+}
+@end
+
+int main(void) {
+    UserService *svc = [[UserService alloc] init];
+    Controller *c = [[Controller alloc] init];
+    // Statement-position async call = auto-drive (hosted).
+    [c buttonActionWithService:svc];
+    printf("main done\n");
+    return 0;
+}

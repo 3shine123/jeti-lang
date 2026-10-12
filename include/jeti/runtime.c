@@ -398,11 +398,14 @@ NPTask *jeti_task_create(jeti_task_entry_fn entry, NPObject *self_obj, size_t fr
     if (!t) return NULL;
     t->state = 1;   /* state 1 = the entry's first case; 0 means "not started" */
     t->finished = 0;
+    t->failed = 0;  /* §9 try-await channel: garbage here makes every await
+                       look failed (ASan/scribble exposed exactly that) */
     t->entry = entry;
     t->self_obj = self_obj;
     t->frame = frame_size ? task_alloc(frame_size) : NULL;
     t->result = NULL;
     t->parent = NULL;
+    t->queued = 0;  /* scheduler idempotency flag reads this before enqueue */
     return t;
 }
 
@@ -420,6 +423,19 @@ int jeti_task_resume(NPTask *task) {
 
 void jeti_task_finish(NPTask *task) {
     if (task) task->finished = 1;
+}
+
+/* try-await error propagation (§9): mark the task failed. `result` carries
+ * the error object; the awaiting `try await` site re-arms __jeti_eh_flag
+ * from `failed` (checked EH), so the failure propagates outward through the
+ * ordinary EH machinery — including @finally. A PLAIN await ignores `failed`
+ * and keeps returning `result` (the checker already forces `try` on failable
+ * methods, so this path only exists for defense in depth). */
+void jeti_task_fail(NPTask *task, NPObject *err) {
+    if (!task) return;
+    task->failed = 1;
+    task->result = (void *)err;
+    task->finished = 1;
 }
 
 void *jeti_task_join(NPTask *task) {
@@ -446,6 +462,23 @@ static NPTask *sched_tail = NULL;
 static NPTask *sched_current = NULL;
 
 NPTask *jeti_task_current(void) { return sched_current; }
+
+/* try-await propagation helper (§9), emitted around every `try await` point by
+ * the async desugar pass. The runtime's jeti_task_await has already armed
+ * __jeti_eh_flag when the child failed; this marks the CURRENT task failed
+ * with the same error so an enclosing task's await sees the failure too. The
+ * flag is deliberately left armed — the EH pass's call-site guards after this
+ * statement (`if (__jeti_eh_flag) return <zero>;`) and the @finally exit
+ * splices route the failure outward. When the flag is clear this is a no-op
+ * (a mere suspension must not fail the task). The value passthrough around
+ * this call is the `__jeti_try_await_passthrough` macro in runtime.h. */
+void __jeti_try_await_propagate(void) {
+    if (!__jeti_eh_flag) return;
+    NPTask *cur = sched_current;
+    if (!cur) return; /* top-level drive: no task to mark; flag stays armed */
+    cur->failed = 1;
+    cur->result = (void *)__jeti_eh_val;
+}
 
 static void sched_enqueue(NPTask *t) {
     t->parent = NULL;          /* reuse `parent` as the queue link */
@@ -496,6 +529,17 @@ void *jeti_task_await(NPTask *task) {
     while (!task->finished) {
         if (sched_head) { jeti_sched_run(); continue; }
         (void)jeti_task_resume(task);
+    }
+    /* try-await error propagation (§9): a failed child re-arms the checked-EH
+     * flag with its error value. The awaiting site's ordinary EH call-site
+     * guard then routes the failure outward (@catch / @finally / further
+     * try-await frames) — exactly like a synchronous @throw, and a SUSPENDED
+     * await (child merely unfinished when a segment returns) never arms it,
+     * so @finally does not fire on suspension (§9.4). */
+    if (task->failed) {
+        __jeti_eh_flag = 1;
+        __jeti_eh_val = (id)task->result;
+        return NULL;
     }
     return task->result;
 }

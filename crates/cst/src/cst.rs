@@ -255,6 +255,10 @@ pub enum CstExprData {
         param_count: usize,
         return_type: Option<Box<CstType>>,
         body: Option<Box<CstStmt>>,
+        /// `async ^{...}` async block literal (async_soft_keywords_plan §5):
+        /// return type written between `async` and `^`; evaluation/call
+        /// yields `NPTask<T> *`. Plain `^{...}` blocks keep `false`.
+        is_async: bool,
     },
     InitList(Vec<CstExpr>),
     /// A single C99 designated initializer entry inside an `InitList`:
@@ -274,7 +278,9 @@ pub enum CstExprData {
     Paren(Box<CstExpr>),
     /// `await <expr>` — the awaited value (a message send / call that may
     /// suspend this method).
-    Await(Box<CstExpr>),
+    Await {
+        inner: Box<CstExpr>,
+    },
     /// `@(expr)` — the boxed expression, before type-directed desugaring.
     Boxed(Box<CstExpr>),
 }

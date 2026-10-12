@@ -1,0 +1,86 @@
+// Probe 2 (B′ form, plan §9.3): a statement-position async block IIFE that
+// takes parameters, awaits two `@throws`-annotated async methods with plain
+// `await`, and calls back into `self` (captured by the block). The second
+// awaited method returns a monomorphized generic `NPArray<NPString *> *`
+// (async × generic, §5.2).
+// Expected output:
+//   user=1001 friends=2
+//   main done
+//
+// The service is passed INTO the block as a parameter: `self->ivar` access
+// inside an async block body hits the async-frame self-typing gap (frame
+// `self_obj` is `NPObject *` — delegated separately, predates B′). Reading
+// it in the SYNC `loadProfile` body and passing the typed pointer down is
+// the supported path.
+//
+// Two documented deviations from the plan's literal example, both forced by
+// gaps outside this workstream:
+//   * `[friends count]` instead of `friends.count` — the elaborator's dot
+//     syntax resolves ivars and @property only; a plain zero-arg getter
+//     spelled with a dot emits a bare struct member access (invalid C) in
+//     sync context too.
+//   * `user.userID->_cstr` — the properties are real @property declarations,
+//     so their dot access is the supported path.
+#import <Foundation/Foundation.jth>
+#import <stdio.h>
+
+@interface User : NPObject
+@property (nonatomic, copy) NPString *name;
+@property (nonatomic, copy) NPString *userID;
+@end
+
+@implementation User
+@end
+
+@interface UserService : NPObject
+- (async User *)fetchUser:(NPString *)userID @throws(NPString *);
+- (async NPArray<NPString *> *)fetchFriends:(NPString *)userID @throws(NPString *);
+@end
+
+@implementation UserService
+- (async User *)fetchUser:(NPString *)userID @throws(NPString *) {
+    // Suspension point (an awaited async block IIFE that captures nothing).
+    await (async int ^(void) { return 1; }());
+    User *u = [[User alloc] init];
+    u.userID = userID;
+    u.name = userID;
+    return u;
+}
+- (async NPArray<NPString *> *)fetchFriends:(NPString *)userID @throws(NPString *) {
+    await (async int ^(void) { return 1; }());
+    return @[ @"ann", @"bob" ];
+}
+@end
+
+@interface ProfileController : NPObject
+@property (nonatomic, strong) UserService *service;
+- (void)displayUser:(User *)user friends:(NPArray<NPString *> *)friends;
+- (void)loadProfile:(NPString *)userID;
+@end
+
+@implementation ProfileController
+- (void)loadProfile:(NPString *)userID {
+    // Statement-position IIFE: define + call; hosted statement position
+    // auto-drives the resulting handle. Both the service and userID are
+    // PARAMETERS (async blocks do not capture enclosing locals yet).
+    UserService *svc = self->_service;
+    async void ^(UserService *svc, NPString *userID) {
+        User *user = await [svc fetchUser:userID];
+        NPArray<NPString *> *friends =
+            await [svc fetchFriends:userID];
+        [self displayUser:user friends:friends];
+    }(svc, userID);
+}
+- (void)displayUser:(User *)user friends:(NPArray<NPString *> *)friends {
+    printf("user=%s friends=%lu\n",
+           user.userID->_cstr, (unsigned long)[friends count]);
+}
+@end
+
+int main(void) {
+    ProfileController *c = [[ProfileController alloc] init];
+    c.service = [[UserService alloc] init];
+    [c loadProfile:@"1001"];
+    printf("main done\n");
+    return 0;
+}

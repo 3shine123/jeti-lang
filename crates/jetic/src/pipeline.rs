@@ -384,7 +384,20 @@ impl Pipeline {
         // `hosted` gates the entry auto-pump (doc/async_nptask_plan.md
         // §静态分析 3): a hosted chain drives itself, bare metal pumps from
         // its own main loop.
-        jeti_async::desugar_unit_m2(&mut ast, !self.no_libc);
+        let async_desugar_warnings = jeti_async::desugar_unit_m2(&mut ast, !self.no_libc);
+        // §8-①: warnings the desugar's elided-return inference produced — same
+        // channel/format as the check warnings above (positions are
+        // inline-buffer ones, translated through the SourceMap).
+        if !async_desugar_warnings.is_empty() {
+            if self.werror {
+                self.has_error = true;
+                self.error_msg = format!("Async inference failed (-Werror):\n{}", prefix_lines("[async]", &translate_lines(&async_desugar_warnings.join("\n"), &pre.source_map)));
+                return Err(self.error_msg.clone());
+            }
+            for w in &async_desugar_warnings {
+                eprintln!("\x1b[1;35m[async] warning:\x1b[0m {}", translate_lines(w, &pre.source_map));
+            }
+        }
 
         // Step 5: Check types (skipped when -fno-checker is set)
         if self.verbose { eprintln!("[jetic] checking types..."); }
