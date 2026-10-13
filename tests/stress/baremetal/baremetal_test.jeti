@@ -310,13 +310,13 @@ static unsigned loopsum(int n) {
 static int poke_tag(Metal::Widget *w) { return [w tag]; }
 static int poke_id_proto(id<Metal::Tagged> t) { return [t tag]; }   // id<P> receiver
 
-// ── @throws 声明标注（编译期对账；freestanding 同样生效，零运行时开销） ──
+// ── throws 声明标注（编译期对账；freestanding 同样生效，零运行时开销） ──
 
-static void rethrow_err(Metal::Err *e) @throws(Metal::Err *) {
+static void rethrow_err(Metal::Err *e) throws(Metal::Err *) {
     @throw e;                            // typed：抛出类型与声明一致
 }
 
-static void bare_rethrow_err(Metal::Err *e) @throws {
+static void bare_rethrow_err(Metal::Err *e) throws {
     @throw e;                            // bare：只声明"会抛"
 }
 
@@ -477,14 +477,14 @@ int main() {
         kputs("[N7] finally ran\n");
     }
 
-    // ── 7b. @throws 声明标注（typed / bare / 本地 try 豁免） ──
-    kputs("[N7b] @throws local=");
+    // ── 7b. throws 声明标注（typed / bare / 本地 try 豁免） ──
+    kputs("[N7b] throws local=");
     kputdec(local_catch(7, e));
     kputs("/");
     kputdec(local_catch(-7, e));
     kputs(" (expect 21/-1)\n");
     @try {
-        rethrow_err(e);                    // typed @throws(Metal::Err *)
+        rethrow_err(e);                    // typed throws(Metal::Err *)
         kputs("[N7b] unreachable\n");
     }
     @catch (Metal::Err *err2) {
@@ -493,7 +493,7 @@ int main() {
         kputs("\n");
     }
     @try {
-        bare_rethrow_err(e);               // bare @throws
+        bare_rethrow_err(e);               // bare throws
     }
     @catch (Metal::Err *err3) {
         kputs("[N7b] bare rethrow caught\n");

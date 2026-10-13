@@ -16,11 +16,11 @@
 #import <stdio.h>
 
 @interface UserService : NPObject
-- (async int)fetchUser:(int)uid @throws(NPString *);
+- (async int)fetchUser:(int)uid throws(NPString *);
 @end
 
 @implementation UserService
-- (async int)fetchUser:(int)uid @throws(NPString *) {
+- (async int)fetchUser:(int)uid throws(NPString *) {
     // Suspension point first, then failure — proves a suspended await does
     // not fire @finally, but a FAILED one does. The IIFE captures
     // nothing (async-block capture of enclosing locals is still open).

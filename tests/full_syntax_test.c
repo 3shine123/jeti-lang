@@ -40,6 +40,7 @@
 /* ------------- Section 2 · Forward declarations -------------- */
 struct jeti_vtable;
 struct JETI_META_VTABLE_$_NPObject;
+struct JETI_META_VTABLE_$_FsBox;
 struct JETI_META_VTABLE_$_FsBox_NPMutableString_ptr;
 struct JETI_META_VTABLE_$_FsEngine__FsRenderable;
 struct JETI_META_VTABLE_$_FsErrLow;
@@ -47,6 +48,7 @@ struct JETI_META_VTABLE_$_FsFetcher;
 struct JETI_META_VTABLE_$_FsForwardUser;
 struct JETI_META_VTABLE_$_FsGuarded;
 struct JETI_META_VTABLE_$_FsModes;
+struct JETI_META_VTABLE_$_FsNetErr;
 struct JETI_META_VTABLE_$_FsParser;
 struct JETI_META_VTABLE_$_FsTypedStore;
 struct JETI_META_VTABLE_$_NPArray;
@@ -58,7 +60,7 @@ struct JETI_META_VTABLE_$_FsAnnotated;
 struct JETI_META_VTABLE_$_NPPredicate;
 struct JETI_META_VTABLE_$_NPSet;
 struct JETI_META_VTABLE_$_NPString;
-struct JETI_META_VTABLE_$_FsBox;
+struct JETI_META_VTABLE_$_FsApi;
 struct JETI_META_VTABLE_$_NPMutableString;
 struct JETI_META_VTABLE_$_FsSprite;
 struct JETI_META_VTABLE_$_FsErrHigh;
@@ -210,6 +212,12 @@ static const SEL __jeti_sel_looseParse_ = {.name = "looseParse:", .hash = 0x0BD5
 static const SEL __jeti_sel_compute_ = {.name = "compute:", .hash = 0xE951A1C0};
 static const SEL __jeti_sel_helper_ = {.name = "helper:", .hash = 0x576A4835};
 static const SEL __jeti_sel_runAll = {.name = "runAll", .hash = 0xBEC240F1};
+static const SEL __jeti_sel_load_ = {.name = "load:", .hash = 0xF0926729};
+static const SEL __jeti_sel_box_ = {.name = "box:", .hash = 0x90786698};
+static const SEL __jeti_sel_decode_ = {.name = "decode:", .hash = 0xAB743D2F};
+static const SEL __jeti_sel_wrap_ = {.name = "wrap:", .hash = 0xE642164D};
+static const SEL __jeti_sel_asObj = {.name = "asObj", .hash = 0x422126D2};
+static const SEL __jeti_sel_runAll10 = {.name = "runAll10", .hash = 0x02085A50};
 static const SEL __jeti_sel_decorate = {.name = "decorate", .hash = 0xB4330F66};
 
 /* --------- Section 4 · Type declarations & typedefs ---------- */
@@ -229,6 +237,8 @@ struct NPObject {
 };
 typedef struct NPObject NPObject;
 #endif
+struct FsBox;
+typedef struct FsBox FsBox;
 struct FsBox_NPMutableString_ptr;
 typedef struct FsBox_NPMutableString_ptr FsBox_NPMutableString_ptr;
 struct FsEngine__FsRenderable;
@@ -243,6 +253,8 @@ struct FsGuarded;
 typedef struct FsGuarded FsGuarded;
 struct FsModes;
 typedef struct FsModes FsModes;
+struct FsNetErr;
+typedef struct FsNetErr FsNetErr;
 struct FsParser;
 typedef struct FsParser FsParser;
 struct FsTypedStore;
@@ -265,8 +277,8 @@ struct NPSet;
 typedef struct NPSet NPSet;
 struct NPString;
 typedef struct NPString NPString;
-struct FsBox;
-typedef struct FsBox FsBox;
+struct FsApi;
+typedef struct FsApi FsApi;
 struct NPMutableString;
 typedef struct NPMutableString NPMutableString;
 struct FsSprite;
@@ -301,6 +313,15 @@ struct compute__frame {
     int n;
 };
 struct runAll_frame {
+    char __jeti_pad;
+};
+struct load__frame {
+    int uid;
+};
+struct box__frame {
+    int uid;
+};
+struct runAll10_frame {
     char __jeti_pad;
 };
 typedef struct NPRange {
@@ -538,8 +559,18 @@ int FsParser_looseParse_(NPObject * self, SEL _cmd, NPString * s);
 NPTask * FsFetcher_compute_(NPObject * self, SEL _cmd, int n);
 int FsFetcher_helper_(NPObject * self, SEL _cmd, int n);
 NPTask * FsFetcher_runAll(NPClass * self, SEL _cmd);
+NPTask * FsApi_load_(NPObject * self, SEL _cmd, int uid);
+NPTask * FsApi_box_(NPObject * self, SEL _cmd, int uid);
+int FsApi_decode_(NPObject * self, SEL _cmd, int raw);
+int FsApi_wrap_(NPObject * self, SEL _cmd, int v);
+int FsApi_value(NPObject * self, SEL _cmd);
+FsApi * FsApi_asObj(NPObject * self, SEL _cmd);
+NPTask * FsApi_runAll10(NPClass * self, SEL _cmd);
 int jeti_async_state_compute_(NPTask * __jeti_task);
 int jeti_async_state_runAll(NPTask * __jeti_task);
+int jeti_async_state_load_(NPTask * __jeti_task);
+int jeti_async_state_box_(NPTask * __jeti_task);
+int jeti_async_state_runAll10(NPTask * __jeti_task);
 __attribute__((format (printf , 1 , 2 ))) int fs_format_fn(const char * fmt, ...);
 int fs_asm_square(int x);
 int fs_asm_add3(int a, int b, int c);
@@ -593,6 +624,7 @@ NPString * NPArray_NPNumber_ptr_description(NPObject * self, SEL _cmd);
 /* ------------- Section 7 · File-level variables -------------- */
 /* ------------ Section 8 · VTable & class layouts ------------- */
 NPClass * JETI_GETCLASS_$_NPObject(NPClass * self, SEL _cmd);
+NPClass * JETI_GETCLASS_$_FsBox(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsBox_NPMutableString_ptr(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsEngine__FsRenderable(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsErrLow(NPClass * self, SEL _cmd);
@@ -600,6 +632,7 @@ NPClass * JETI_GETCLASS_$_FsFetcher(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsForwardUser(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsGuarded(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsModes(NPClass * self, SEL _cmd);
+NPClass * JETI_GETCLASS_$_FsNetErr(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsParser(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsTypedStore(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_NPArray(NPClass * self, SEL _cmd);
@@ -611,7 +644,7 @@ NPClass * JETI_GETCLASS_$_FsAnnotated(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_NPPredicate(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_NPSet(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_NPString(NPClass * self, SEL _cmd);
-NPClass * JETI_GETCLASS_$_FsBox(NPClass * self, SEL _cmd);
+NPClass * JETI_GETCLASS_$_FsApi(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_NPMutableString(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsSprite(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_FsErrHigh(NPClass * self, SEL _cmd);
@@ -730,13 +763,17 @@ struct jeti_vtable {
     NPString * (*substringWithRange_)(NPObject *, SEL, NPRange);
     NPString * (*uppercaseString)(NPObject *, SEL);
     NPDictionary * (*userInfo)(NPObject *, SEL);
+    FsApi * (*asObj)(NPObject *, SEL);
+    NPTask * (*box_)(NPObject *, SEL, int);
     int (*color)(NPObject *, SEL);
     NPTask * (*compute_)(NPObject *, SEL, int);
+    int (*decode_)(NPObject *, SEL, int);
     void (*draw)(NPObject *, SEL);
     int (*helper_)(NPObject *, SEL, int);
     FsSprite * (*initWithId_)(NPObject *, SEL, int);
-    FsBox * (*initWith_)(NPObject *, SEL, NPMutableString *);
+    FsBox * (*initWith_)(NPObject *, SEL, NPObject *);
     NPString * (*label)(NPObject *, SEL);
+    NPTask * (*load_)(NPObject *, SEL, int);
     NPString * (*localizedDescription)(NPObject *, SEL);
     int (*looseParse_)(NPObject *, SEL, NPString *);
     NPString * (*maybe)(NPObject *, SEL);
@@ -750,12 +787,13 @@ struct jeti_vtable {
     void (*run)(NPObject *, SEL);
     void (*setLabel_)(NPObject *, SEL, NPString *);
     void (*setTag_)(NPObject *, SEL, NPString *);
-    void (*setValue_)(NPObject *, SEL, NPMutableString *);
+    void (*setValue_)(NPObject *, SEL, NPObject *);
     int (*strictParse_)(NPObject *, SEL, NPString *);
     int (*sum_)(NPObject *, SEL, int, ...);
     NPString * (*tag)(NPObject *, SEL);
     void (*take_)(NPObject *, SEL, NPString *);
-    NPMutableString * (*value)(NPObject *, SEL);
+    NPObject * (*value)(NPObject *, SEL);
+    int (*wrap_)(NPObject *, SEL, int);
 };
 
 /* respondsToSelector: helper for selector member 'color' */
@@ -769,6 +807,11 @@ return __o && ((struct jeti_vtable *)__o->isa->vtable)->poke != 0;
 }
 
 struct JETI_META_VTABLE_$_NPObject {
+    NPObject * (*alloc)(NPClass *, SEL);
+    NPObject * (*new)(NPClass *, SEL);
+    NPClass * (*class)(NPClass *, SEL);
+};
+struct JETI_META_VTABLE_$_FsBox {
     NPObject * (*alloc)(NPClass *, SEL);
     NPObject * (*new)(NPClass *, SEL);
     NPClass * (*class)(NPClass *, SEL);
@@ -805,6 +848,11 @@ struct JETI_META_VTABLE_$_FsGuarded {
     NPClass * (*class)(NPClass *, SEL);
 };
 struct JETI_META_VTABLE_$_FsModes {
+    NPObject * (*alloc)(NPClass *, SEL);
+    NPObject * (*new)(NPClass *, SEL);
+    NPClass * (*class)(NPClass *, SEL);
+};
+struct JETI_META_VTABLE_$_FsNetErr {
     NPObject * (*alloc)(NPClass *, SEL);
     NPObject * (*new)(NPClass *, SEL);
     NPClass * (*class)(NPClass *, SEL);
@@ -890,9 +938,10 @@ struct JETI_META_VTABLE_$_NPString {
     NPString * (*stringWithString_)(NPClass *, SEL, NPString *);
     NPClass * (*class)(NPClass *, SEL);
 };
-struct JETI_META_VTABLE_$_FsBox {
+struct JETI_META_VTABLE_$_FsApi {
     NPObject * (*alloc)(NPClass *, SEL);
     NPObject * (*new)(NPClass *, SEL);
+    NPTask * (*runAll10)(NPClass *, SEL);
     NPClass * (*class)(NPClass *, SEL);
 };
 struct JETI_META_VTABLE_$_NPMutableString {
@@ -964,6 +1013,14 @@ struct JETI_META_VTABLE_$_NPMutableSet {
     NPClass * (*class)(NPClass *, SEL);
 };
 
+/* Class layout: FsBox (super: NPObject) */
+struct FsBox {
+    struct NPClass *isa;
+    uint32_t retain_count;
+    NPObject * _value;
+};
+typedef struct FsBox FsBox;
+
 /* Class layout: FsBox<NPMutableString *> (super: NPObject) */
 struct FsBox_NPMutableString_ptr {
     struct NPClass *isa;
@@ -1015,6 +1072,13 @@ struct FsModes {
     uint32_t retain_count;
 };
 typedef struct FsModes FsModes;
+
+/* Class layout: FsNetErr (super: NPObject) */
+struct FsNetErr {
+    struct NPClass *isa;
+    uint32_t retain_count;
+};
+typedef struct FsNetErr FsNetErr;
 
 /* Class layout: FsParser (super: NPObject) */
 struct FsParser {
@@ -1122,13 +1186,12 @@ struct NPString {
 };
 typedef struct NPString NPString;
 
-/* Class layout: FsBox (super: NPObject) */
-struct FsBox {
+/* Class layout: FsApi (super: NPObject) */
+struct FsApi {
     struct NPClass *isa;
     uint32_t retain_count;
-    NPObject * _value;
 };
-typedef struct FsBox FsBox;
+typedef struct FsApi FsApi;
 
 /* Class layout: NPMutableString (super: NPString) */
 struct NPMutableString {
@@ -1212,6 +1275,7 @@ typedef struct NPMutableSet NPMutableSet;
 /* --------- Section 9 · Class metadata infrastructure --------- */
 extern NPClass JETI_CLASS_$_jeti_root;
 extern NPClass JETI_CLASS_$_NPObject;
+extern NPClass JETI_CLASS_$_FsBox;
 extern NPClass JETI_CLASS_$_FsBox_NPMutableString_ptr;
 extern NPClass JETI_CLASS_$_FsEngine__FsRenderable;
 extern NPClass JETI_CLASS_$_FsErrLow;
@@ -1219,6 +1283,7 @@ extern NPClass JETI_CLASS_$_FsFetcher;
 extern NPClass JETI_CLASS_$_FsForwardUser;
 extern NPClass JETI_CLASS_$_FsGuarded;
 extern NPClass JETI_CLASS_$_FsModes;
+extern NPClass JETI_CLASS_$_FsNetErr;
 extern NPClass JETI_CLASS_$_FsParser;
 extern NPClass JETI_CLASS_$_FsTypedStore;
 extern NPClass JETI_CLASS_$_NPArray;
@@ -1230,7 +1295,7 @@ extern NPClass JETI_CLASS_$_FsAnnotated;
 extern NPClass JETI_CLASS_$_NPPredicate;
 extern NPClass JETI_CLASS_$_NPSet;
 extern NPClass JETI_CLASS_$_NPString;
-extern NPClass JETI_CLASS_$_FsBox;
+extern NPClass JETI_CLASS_$_FsApi;
 extern NPClass JETI_CLASS_$_NPMutableString;
 extern NPClass JETI_CLASS_$_FsSprite;
 extern NPClass JETI_CLASS_$_FsErrHigh;
@@ -1326,13 +1391,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -1352,6 +1421,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: NPObject */
@@ -1438,13 +1508,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPObject = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -1464,2022 +1538,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPObject = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
-};
-
-/* VTable instance: FsBox<NPMutableString *> */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_FsBox_NPMutableString_ptr = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = (FsBox * (*)(NPObject *, SEL, NPMutableString *))FsBox_NPMutableString_ptr_initWith_,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = (void (*)(NPObject *, SEL, NPMutableString *))FsBox_NPMutableString_ptr_setValue_,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = (NPMutableString * (*)(NPObject *, SEL))FsBox_NPMutableString_ptr_value,
-};
-
-/* VTable instance: FsEngine::FsRenderable */
-struct jeti_vtable JETI_VTABLE_$_FsEngine__FsRenderable = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = (int (*)(NPObject *, SEL))FsEngine__FsRenderable_render,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsErrLow */
-struct jeti_vtable JETI_VTABLE_$_FsErrLow = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsFetcher */
-struct jeti_vtable JETI_VTABLE_$_FsFetcher = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = (NPTask * (*)(NPObject *, SEL, int))FsFetcher_compute_,
-    .draw = NULL,
-    .helper_ = (int (*)(NPObject *, SEL, int))FsFetcher_helper_,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsForwardUser */
-struct jeti_vtable JETI_VTABLE_$_FsForwardUser = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = (int (*)(NPObject *, SEL))FsForwardUser_poke,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsGuarded */
-struct jeti_vtable JETI_VTABLE_$_FsGuarded = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = (void (*)(NPObject *, SEL, NPString *))FsGuarded_optOut_,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = (NPString * (*)(NPObject *, SEL))FsGuarded_produce,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = (void (*)(NPObject *, SEL, NPString *))FsGuarded_take_,
-    .value = NULL,
-};
-
-/* VTable instance: FsModes */
-struct jeti_vtable JETI_VTABLE_$_FsModes = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = (int (*)(NPObject *, SEL, FsMode, struct FsPoint))FsModes_mix_point_,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsParser */
-struct jeti_vtable JETI_VTABLE_$_FsParser = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = (int (*)(NPObject *, SEL, NPString *))FsParser_looseParse_,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = (int (*)(NPObject *, SEL, NPString *))FsParser_strictParse_,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsTypedStore */
-struct jeti_vtable JETI_VTABLE_$_FsTypedStore = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = (void (*)(NPObject *, SEL))FsTypedStore_run,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPArray */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = NULL,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPArray<NPNumber *> */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray_NPNumber_ptr = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = NULL,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPDictionary */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPDictionary = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = NULL,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = NULL,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPError */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPError = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = (NPString * (*)(NPObject *, SEL))NPError_localizedDescription,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPNumber */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = NULL,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = NULL,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: FsAnnotated */
-struct jeti_vtable JETI_VTABLE_$_FsAnnotated = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = (NPString * (*)(NPObject *, SEL))FsAnnotated_maybe,
-    .maybeC = (NPString * (*)(NPObject *, SEL))FsAnnotated_maybeC,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = (void (*)(NPObject *, SEL, NPString *, NPString *))FsAnnotated_pre_post_,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPPredicate */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPSet */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = NULL,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = NULL,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
-};
-
-/* VTable instance: NPString */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
-    .__sig = 0x53851d190abf2c3bULL,
-    .UTF8String = NULL,
-    ._grow = NULL,
-    .addEntriesFromDictionary_ = NULL,
-    .addObject_ = NULL,
-    .addObjectsFromArray_ = NULL,
-    .allKeys = NULL,
-    .allObjects = NULL,
-    .allValues = NULL,
-    .anyObject = NULL,
-    .appendString_ = NULL,
-    .appendUTF8String_ = NULL,
-    .boolValue = NULL,
-    .charValue = NULL,
-    .characterAtIndex_ = NULL,
-    .code = NULL,
-    .compare_ = NULL,
-    .containsObject_ = NULL,
-    .copy = NULL,
-    .count = NULL,
-    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-    .deleteCharactersInRange_ = NULL,
-    .description = NULL,
-    .domain = NULL,
-    .doubleValue = NULL,
-    .evaluateWithObject_ = NULL,
-    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
-    .filterUsingPredicate_ = NULL,
-    .filteredArrayUsingPredicate_ = NULL,
-    .firstObject = NULL,
-    .hasPrefix_ = NULL,
-    .hasSuffix_ = NULL,
-    .hash = NULL,
-    .indexOfObjectMatchingPredicate_ = NULL,
-    .indexOfObject_ = NULL,
-    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
-    .initWithArray_ = NULL,
-    .initWithCapacity_ = NULL,
-    .initWithCode_domain_userInfo_ = NULL,
-    .initWithDictionary_ = NULL,
-    .initWithDouble_ = NULL,
-    .initWithFormat_args_count_ = NULL,
-    .initWithLongLong_ = NULL,
-    .initWithObjects_count_ = NULL,
-    .initWithSet_ = NULL,
-    .initWithString_ = NULL,
-    .initWithUTF8String_ = NULL,
-    .insertObject_atIndex_ = NULL,
-    .insertString_atIndex_ = NULL,
-    .intValue = NULL,
-    .isEqualToNumber_ = NULL,
-    .isEqualToString_ = NULL,
-    .isEqual_ = NULL,
-    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
-    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
-    .lastObject = NULL,
-    .length = NULL,
-    .longLongValue = NULL,
-    .lowercaseString = NULL,
-    .objectAtIndex_ = NULL,
-    .objectForKey_ = NULL,
-    .predicateFormat = NULL,
-    .rangeOfString_ = NULL,
-    .release = (void (*)(NPObject *, SEL))NPObject_release,
-    .removeAllObjects = NULL,
-    .removeLastObject = NULL,
-    .removeObjectAtIndex_ = NULL,
-    .removeObjectForKey_ = NULL,
-    .removeObject_ = NULL,
-    .replaceCharactersInRange_withString_ = NULL,
-    .replaceObjectAtIndex_withObject_ = NULL,
-    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
-    .setObject_atIndex_ = NULL,
-    .setObject_forKey_ = NULL,
-    .setString_ = NULL,
-    .stringByAppendingString_ = NULL,
-    .stringByAppendingUTF8String_ = NULL,
-    .substringFromIndex_ = NULL,
-    .substringToIndex_ = NULL,
-    .substringWithRange_ = NULL,
-    .uppercaseString = NULL,
-    .userInfo = NULL,
-    .color = NULL,
-    .compute_ = NULL,
-    .draw = NULL,
-    .helper_ = NULL,
-    .initWithId_ = NULL,
-    .initWith_ = NULL,
-    .label = NULL,
-    .localizedDescription = NULL,
-    .looseParse_ = NULL,
-    .maybe = NULL,
-    .maybeC = NULL,
-    .mix_point_ = NULL,
-    .optOut_ = NULL,
-    .poke = NULL,
-    .pre_post_ = NULL,
-    .produce = NULL,
-    .render = NULL,
-    .run = NULL,
-    .setLabel_ = NULL,
-    .setTag_ = NULL,
-    .setValue_ = NULL,
-    .strictParse_ = NULL,
-    .sum_ = NULL,
-    .tag = NULL,
-    .take_ = NULL,
-    .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: FsBox */
@@ -3566,13 +1625,17 @@ struct jeti_vtable JETI_VTABLE_$_FsBox = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
-    .initWith_ = (FsBox * (*)(NPObject *, SEL, NPMutableString *))FsBox_initWith_,
+    .initWith_ = (FsBox * (*)(NPObject *, SEL, NPObject *))FsBox_initWith_,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -3586,12 +1649,2353 @@ struct jeti_vtable JETI_VTABLE_$_FsBox = {
     .run = NULL,
     .setLabel_ = NULL,
     .setTag_ = NULL,
-    .setValue_ = (void (*)(NPObject *, SEL, NPMutableString *))FsBox_setValue_,
+    .setValue_ = (void (*)(NPObject *, SEL, NPObject *))FsBox_setValue_,
     .strictParse_ = NULL,
     .sum_ = NULL,
     .tag = NULL,
     .take_ = NULL,
-    .value = (NPMutableString * (*)(NPObject *, SEL))FsBox_value,
+    .value = (NPObject * (*)(NPObject *, SEL))FsBox_value,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsBox<NPMutableString *> */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_FsBox_NPMutableString_ptr = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = (FsBox * (*)(NPObject *, SEL, NPObject *))FsBox_NPMutableString_ptr_initWith_,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = (void (*)(NPObject *, SEL, NPObject *))FsBox_NPMutableString_ptr_setValue_,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = (NPObject * (*)(NPObject *, SEL))FsBox_NPMutableString_ptr_value,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsEngine::FsRenderable */
+struct jeti_vtable JETI_VTABLE_$_FsEngine__FsRenderable = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = (int (*)(NPObject *, SEL))FsEngine__FsRenderable_render,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsErrLow */
+struct jeti_vtable JETI_VTABLE_$_FsErrLow = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsFetcher */
+struct jeti_vtable JETI_VTABLE_$_FsFetcher = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = (NPTask * (*)(NPObject *, SEL, int))FsFetcher_compute_,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = (int (*)(NPObject *, SEL, int))FsFetcher_helper_,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsForwardUser */
+struct jeti_vtable JETI_VTABLE_$_FsForwardUser = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = (int (*)(NPObject *, SEL))FsForwardUser_poke,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsGuarded */
+struct jeti_vtable JETI_VTABLE_$_FsGuarded = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = (void (*)(NPObject *, SEL, NPString *))FsGuarded_optOut_,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = (NPString * (*)(NPObject *, SEL))FsGuarded_produce,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = (void (*)(NPObject *, SEL, NPString *))FsGuarded_take_,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsModes */
+struct jeti_vtable JETI_VTABLE_$_FsModes = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = (int (*)(NPObject *, SEL, FsMode, struct FsPoint))FsModes_mix_point_,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsNetErr */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_FsNetErr = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsParser */
+struct jeti_vtable JETI_VTABLE_$_FsParser = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = (int (*)(NPObject *, SEL, NPString *))FsParser_looseParse_,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = (int (*)(NPObject *, SEL, NPString *))FsParser_strictParse_,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsTypedStore */
+struct jeti_vtable JETI_VTABLE_$_FsTypedStore = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = (void (*)(NPObject *, SEL))FsTypedStore_run,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPArray */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPArray<NPNumber *> */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray_NPNumber_ptr = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPDictionary */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPDictionary = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPError */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPError = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = (NPString * (*)(NPObject *, SEL))NPError_localizedDescription,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPNumber */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsAnnotated */
+struct jeti_vtable JETI_VTABLE_$_FsAnnotated = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = (NPString * (*)(NPObject *, SEL))FsAnnotated_maybe,
+    .maybeC = (NPString * (*)(NPObject *, SEL))FsAnnotated_maybeC,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = (void (*)(NPObject *, SEL, NPString *, NPString *))FsAnnotated_pre_post_,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPPredicate */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPSet */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: NPString */
+__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = NULL,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = NULL,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = NULL,
+    .wrap_ = NULL,
+};
+
+/* VTable instance: FsApi */
+struct jeti_vtable JETI_VTABLE_$_FsApi = {
+    .__sig = 0x53851d190abf2c3bULL,
+    .UTF8String = NULL,
+    ._grow = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .boolValue = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .code = NULL,
+    .compare_ = NULL,
+    .containsObject_ = NULL,
+    .copy = NULL,
+    .count = NULL,
+    .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    .deleteCharactersInRange_ = NULL,
+    .description = (NPObject * (*)(NPObject *, SEL))jeti_root_description,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .firstObject = NULL,
+    .hasPrefix_ = NULL,
+    .hasSuffix_ = NULL,
+    .hash = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
+    .init = (NPObject * (*)(NPObject *, SEL))NPObject_init,
+    .initWithArray_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = (_Bool (*)(NPObject *, SEL, NPObject *))jeti_root_isEqual_,
+    .isKindOfClass_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOfClass_,
+    .isKindOf_ = (_Bool (*)(NPObject *, SEL, NPClass *))jeti_root_isKindOf_,
+    .lastObject = NULL,
+    .length = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .predicateFormat = NULL,
+    .rangeOfString_ = NULL,
+    .release = (void (*)(NPObject *, SEL))NPObject_release,
+    .removeAllObjects = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = (NPObject * (*)(NPObject *, SEL))NPObject_retain,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setString_ = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .asObj = (FsApi * (*)(NPObject *, SEL))FsApi_asObj,
+    .box_ = (NPTask * (*)(NPObject *, SEL, int))FsApi_box_,
+    .color = NULL,
+    .compute_ = NULL,
+    .decode_ = (int (*)(NPObject *, SEL, int))FsApi_decode_,
+    .draw = NULL,
+    .helper_ = NULL,
+    .initWithId_ = NULL,
+    .initWith_ = NULL,
+    .label = NULL,
+    .load_ = (NPTask * (*)(NPObject *, SEL, int))FsApi_load_,
+    .localizedDescription = NULL,
+    .looseParse_ = NULL,
+    .maybe = NULL,
+    .maybeC = NULL,
+    .mix_point_ = NULL,
+    .optOut_ = NULL,
+    .poke = NULL,
+    .pre_post_ = NULL,
+    .produce = NULL,
+    .render = NULL,
+    .run = NULL,
+    .setLabel_ = NULL,
+    .setTag_ = NULL,
+    .setValue_ = NULL,
+    .strictParse_ = NULL,
+    .sum_ = NULL,
+    .tag = NULL,
+    .take_ = NULL,
+    .value = (NPObject * (*)(NPObject *, SEL))FsApi_value,
+    .wrap_ = (int (*)(NPObject *, SEL, int))FsApi_wrap_,
 };
 
 /* VTable instance: NPMutableString */
@@ -3678,13 +4082,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .substringWithRange_ = (NPString * (*)(NPObject *, SEL, NPRange))NPString_substringWithRange_,
     .uppercaseString = (NPString * (*)(NPObject *, SEL))NPString_uppercaseString,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -3704,6 +4112,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: FsSprite */
@@ -3790,13 +4199,17 @@ struct jeti_vtable JETI_VTABLE_$_FsSprite = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = (int (*)(NPObject *, SEL))FsSprite_color,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = (void (*)(NPObject *, SEL))FsSprite_draw,
     .helper_ = NULL,
     .initWithId_ = (FsSprite * (*)(NPObject *, SEL, int))FsSprite_initWithId_,
     .initWith_ = NULL,
     .label = (NPString * (*)(NPObject *, SEL))FsSprite_label,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -3816,6 +4229,7 @@ struct jeti_vtable JETI_VTABLE_$_FsSprite = {
     .tag = (NPString * (*)(NPObject *, SEL))FsSprite_tag,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: FsErrHigh */
@@ -3902,13 +4316,17 @@ struct jeti_vtable JETI_VTABLE_$_FsErrHigh = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -3928,6 +4346,7 @@ struct jeti_vtable JETI_VTABLE_$_FsErrHigh = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: NPOrderedSet */
@@ -4014,13 +4433,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -4040,6 +4463,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: NPMutableArray */
@@ -4126,13 +4550,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -4152,6 +4580,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: NPMutableArray<NPString *> */
@@ -4238,13 +4667,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray_NPString_p
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -4264,6 +4697,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray_NPString_p
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: NPMutableDictionary */
@@ -4350,13 +4784,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -4376,6 +4814,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* VTable instance: NPMutableSet */
@@ -4462,13 +4901,17 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .substringWithRange_ = NULL,
     .uppercaseString = NULL,
     .userInfo = NULL,
+    .asObj = NULL,
+    .box_ = NULL,
     .color = NULL,
     .compute_ = NULL,
+    .decode_ = NULL,
     .draw = NULL,
     .helper_ = NULL,
     .initWithId_ = NULL,
     .initWith_ = NULL,
     .label = NULL,
+    .load_ = NULL,
     .localizedDescription = NULL,
     .looseParse_ = NULL,
     .maybe = NULL,
@@ -4488,6 +4931,7 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .tag = NULL,
     .take_ = NULL,
     .value = NULL,
+    .wrap_ = NULL,
 };
 
 /* Meta vtable instance: NPObject */
@@ -4495,6 +4939,13 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPObject JETI_META_VTABLE_$_NPOb
     .alloc = NULL,
     .new = NULL,
     .class = JETI_GETCLASS_$_NPObject,
+};
+
+/* Meta vtable instance: FsBox */
+struct JETI_META_VTABLE_$_FsBox JETI_META_VTABLE_$_FsBox_inst = {
+    .alloc = NPObject_alloc,
+    .new = NPObject_new,
+    .class = JETI_GETCLASS_$_FsBox,
 };
 
 /* Meta vtable instance: FsBox<NPMutableString *> */
@@ -4545,6 +4996,13 @@ struct JETI_META_VTABLE_$_FsModes JETI_META_VTABLE_$_FsModes_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
     .class = JETI_GETCLASS_$_FsModes,
+};
+
+/* Meta vtable instance: FsNetErr */
+__attribute__((weak)) struct JETI_META_VTABLE_$_FsNetErr JETI_META_VTABLE_$_FsNetErr_inst = {
+    .alloc = NPObject_alloc,
+    .new = NPObject_new,
+    .class = JETI_GETCLASS_$_FsNetErr,
 };
 
 /* Meta vtable instance: FsParser */
@@ -4650,11 +5108,12 @@ __attribute__((weak)) struct JETI_META_VTABLE_$_NPString JETI_META_VTABLE_$_NPSt
     .class = JETI_GETCLASS_$_NPString,
 };
 
-/* Meta vtable instance: FsBox */
-struct JETI_META_VTABLE_$_FsBox JETI_META_VTABLE_$_FsBox_inst = {
+/* Meta vtable instance: FsApi */
+struct JETI_META_VTABLE_$_FsApi JETI_META_VTABLE_$_FsApi_inst = {
     .alloc = NPObject_alloc,
     .new = NPObject_new,
-    .class = JETI_GETCLASS_$_FsBox,
+    .runAll10 = FsApi_runAll10,
+    .class = JETI_GETCLASS_$_FsApi,
 };
 
 /* Meta vtable instance: NPMutableString */
@@ -4747,6 +5206,12 @@ __attribute__((weak)) NPClass * JETI_GETCLASS_$_NPObject(NPClass * self, SEL _cm
     return self;
 }
 
+/* +getClass for FsBox */
+NPClass * JETI_GETCLASS_$_FsBox(NPClass * self, SEL _cmd) {
+    (void)_cmd;
+    return self;
+}
+
 /* +getClass for FsBox<NPMutableString *> */
 __attribute__((weak)) NPClass * JETI_GETCLASS_$_FsBox_NPMutableString_ptr(NPClass * self, SEL _cmd) {
     (void)_cmd;
@@ -4785,6 +5250,12 @@ NPClass * JETI_GETCLASS_$_FsGuarded(NPClass * self, SEL _cmd) {
 
 /* +getClass for FsModes */
 NPClass * JETI_GETCLASS_$_FsModes(NPClass * self, SEL _cmd) {
+    (void)_cmd;
+    return self;
+}
+
+/* +getClass for FsNetErr */
+__attribute__((weak)) NPClass * JETI_GETCLASS_$_FsNetErr(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
@@ -4855,8 +5326,8 @@ __attribute__((weak)) NPClass * JETI_GETCLASS_$_NPString(NPClass * self, SEL _cm
     return self;
 }
 
-/* +getClass for FsBox */
-NPClass * JETI_GETCLASS_$_FsBox(NPClass * self, SEL _cmd) {
+/* +getClass for FsApi */
+NPClass * JETI_GETCLASS_$_FsApi(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
@@ -4943,6 +5414,15 @@ static void FsSprite__jeti_arc_dealloc(NPObject * self, SEL _cmd) {
     jeti_release(((struct FsSprite *)self)->_label);
 }
 
+static id jeti_kvc_wrap_FsBox_value(id self) {
+    return (id)FsBox_value((NPObject *)self, __jeti_sel_value);
+}
+
+static const jeti_kvc_entry JETI_KVC_$_FsBox[] = {
+    { .key = "value", .get = jeti_kvc_wrap_FsBox_value },
+    { .key = NULL, .get = NULL },
+};
+
 static id jeti_kvc_wrap_FsBox_NPMutableString_ptr_value(id self) {
     return (id)FsBox_NPMutableString_ptr_value((NPObject *)self, __jeti_sel_value);
 }
@@ -5002,12 +5482,17 @@ static const jeti_kvc_entry JETI_KVC_$_FsAnnotated[] = {
     { .key = NULL, .get = NULL },
 };
 
-static id jeti_kvc_wrap_FsBox_value(id self) {
-    return (id)FsBox_value((NPObject *)self, __jeti_sel_value);
+static id jeti_kvc_wrap_FsApi_value(id self) {
+    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_value, FsApi_value((NPObject *)self, __jeti_sel_value));
 }
 
-static const jeti_kvc_entry JETI_KVC_$_FsBox[] = {
-    { .key = "value", .get = jeti_kvc_wrap_FsBox_value },
+static id jeti_kvc_wrap_FsApi_asObj(id self) {
+    return (id)FsApi_asObj((NPObject *)self, __jeti_sel_asObj);
+}
+
+static const jeti_kvc_entry JETI_KVC_$_FsApi[] = {
+    { .key = "value", .get = jeti_kvc_wrap_FsApi_value },
+    { .key = "asObj", .get = jeti_kvc_wrap_FsApi_asObj },
     { .key = NULL, .get = NULL },
 };
 
@@ -5069,6 +5554,17 @@ __attribute__((used, weak)) struct NPProtocol JETI_PROTO_$_FsNode = {
 __attribute__((used)) static struct NPProtocol *JETI_PROTOS_$_FsSprite[] = {&JETI_PROTO_$_FsColored};
 NPClass JETI_CLASS_$_jeti_root;
 NPClass JETI_CLASS_$_NPObject;
+NPClass JETI_CLASS_$_FsBox = {
+        .name = "FsBox",
+        .superclass = &JETI_CLASS_$_NPObject,
+        .instance_size = sizeof(struct FsBox),
+        .vtable = &JETI_VTABLE_$_FsBox,
+        .class_vtable = &JETI_META_VTABLE_$_FsBox_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+        .kvc_entries = JETI_KVC_$_FsBox,
+    };
 NPClass JETI_CLASS_$_FsBox_NPMutableString_ptr;
 NPClass JETI_CLASS_$_FsEngine__FsRenderable = {
         .name = "FsEngine::FsRenderable",
@@ -5133,6 +5629,7 @@ NPClass JETI_CLASS_$_FsModes = {
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
+NPClass JETI_CLASS_$_FsNetErr;
 NPClass JETI_CLASS_$_FsParser = {
         .name = "FsParser",
         .superclass = &JETI_CLASS_$_NPObject,
@@ -5172,16 +5669,16 @@ NPClass JETI_CLASS_$_FsAnnotated = {
 NPClass JETI_CLASS_$_NPPredicate;
 NPClass JETI_CLASS_$_NPSet;
 NPClass JETI_CLASS_$_NPString;
-NPClass JETI_CLASS_$_FsBox = {
-        .name = "FsBox",
+NPClass JETI_CLASS_$_FsApi = {
+        .name = "FsApi",
         .superclass = &JETI_CLASS_$_NPObject,
-        .instance_size = sizeof(struct FsBox),
-        .vtable = &JETI_VTABLE_$_FsBox,
-        .class_vtable = &JETI_META_VTABLE_$_FsBox_inst,
+        .instance_size = sizeof(struct FsApi),
+        .vtable = &JETI_VTABLE_$_FsApi,
+        .class_vtable = &JETI_META_VTABLE_$_FsApi_inst,
         .protocols = NULL,
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-        .kvc_entries = JETI_KVC_$_FsBox,
+        .kvc_entries = JETI_KVC_$_FsApi,
     };
 NPClass JETI_CLASS_$_NPMutableString;
 NPClass JETI_CLASS_$_FsSprite = {
@@ -5212,35 +5709,37 @@ NPClass JETI_CLASS_$_NPMutableDictionary;
 NPClass JETI_CLASS_$_NPMutableSet;
 
 __attribute__((constructor)) static void __jeti_vtable_layout_check(void) {
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_jeti_root)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class jeti_root | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPObject)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPObject | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsBox_NPMutableString_ptr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsBox<NPMutableString *> | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsEngine__FsRenderable)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsEngine::FsRenderable | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsErrLow)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsErrLow | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsFetcher)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsFetcher | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsForwardUser)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsForwardUser | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsGuarded)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsGuarded | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsModes)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsModes | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsParser)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsParser | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsTypedStore)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsTypedStore | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPArray | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray_NPNumber_ptr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPArray<NPNumber *> | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPDictionary | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPError)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPError | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPNumber)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPNumber | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsAnnotated)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsAnnotated | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPPredicate)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPPredicate | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPSet | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPString | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsBox)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsBox | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPMutableString | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsSprite)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsSprite | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsErrHigh)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class FsErrHigh | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPOrderedSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPOrderedSet | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPMutableArray | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray_NPString_ptr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPMutableArray<NPString *> | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPMutableDictionary | tu tests/full_syntax_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo color compute_ draw helper_ initWithId_ initWith_ label localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value | class NPMutableSet | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_jeti_root)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class jeti_root | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPObject)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPObject | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsBox)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsBox | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsBox_NPMutableString_ptr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsBox<NPMutableString *> | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsEngine__FsRenderable)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsEngine::FsRenderable | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsErrLow)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsErrLow | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsFetcher)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsFetcher | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsForwardUser)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsForwardUser | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsGuarded)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsGuarded | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsModes)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsModes | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsNetErr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsNetErr | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsParser)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsParser | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsTypedStore)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsTypedStore | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPArray | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray_NPNumber_ptr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPArray<NPNumber *> | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPDictionary | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPError)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPError | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPNumber)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPNumber | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsAnnotated)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsAnnotated | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPPredicate)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPPredicate | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPSet | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPString | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsApi)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsApi | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPMutableString | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsSprite)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsSprite | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_FsErrHigh)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class FsErrHigh | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPOrderedSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPOrderedSet | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPMutableArray | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray_NPString_ptr)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPMutableArray<NPString *> | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPMutableDictionary | tu tests/full_syntax_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo asObj box_ color compute_ decode_ draw helper_ initWithId_ initWith_ label load_ localizedDescription looseParse_ maybe maybeC mix_point_ optOut_ poke pre_post_ produce render run setLabel_ setTag_ setValue_ strictParse_ sum_ tag take_ value wrap_ | class NPMutableSet | tu tests/full_syntax_test.jeti");
 }
 
 __attribute__((weak)) void jeti_metaInit(void) {
@@ -5263,6 +5762,17 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .protocols = NULL,
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    };
+    JETI_CLASS_$_FsBox = (NPClass){
+        .name = "FsBox",
+        .superclass = &JETI_CLASS_$_NPObject,
+        .instance_size = sizeof(struct FsBox),
+        .vtable = &JETI_VTABLE_$_FsBox,
+        .class_vtable = &JETI_META_VTABLE_$_FsBox_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+        .kvc_entries = JETI_KVC_$_FsBox,
     };
     JETI_CLASS_$_FsBox_NPMutableString_ptr = (NPClass){
         .name = "FsBox<NPMutableString *>",
@@ -5334,6 +5844,16 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct FsModes),
         .vtable = &JETI_VTABLE_$_FsModes,
         .class_vtable = &JETI_META_VTABLE_$_FsModes_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
+    };
+    JETI_CLASS_$_FsNetErr = (NPClass){
+        .name = "FsNetErr",
+        .superclass = &JETI_CLASS_$_NPObject,
+        .instance_size = sizeof(struct FsNetErr),
+        .vtable = &JETI_VTABLE_$_FsNetErr,
+        .class_vtable = &JETI_META_VTABLE_$_FsNetErr_inst,
         .protocols = NULL,
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
@@ -5450,16 +5970,16 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
     };
-    JETI_CLASS_$_FsBox = (NPClass){
-        .name = "FsBox",
+    JETI_CLASS_$_FsApi = (NPClass){
+        .name = "FsApi",
         .superclass = &JETI_CLASS_$_NPObject,
-        .instance_size = sizeof(struct FsBox),
-        .vtable = &JETI_VTABLE_$_FsBox,
-        .class_vtable = &JETI_META_VTABLE_$_FsBox_inst,
+        .instance_size = sizeof(struct FsApi),
+        .vtable = &JETI_VTABLE_$_FsApi,
+        .class_vtable = &JETI_META_VTABLE_$_FsApi_inst,
         .protocols = NULL,
         .protocol_count = 0,
         .dealloc = (void (*)(NPObject *, SEL))NPObject_dealloc,
-        .kvc_entries = JETI_KVC_$_FsBox,
+        .kvc_entries = JETI_KVC_$_FsApi,
     };
     JETI_CLASS_$_NPMutableString = (NPClass){
         .name = "NPMutableString",
@@ -6120,74 +6640,106 @@ NPString * NPError_domain(NPObject * self, SEL _cmd);
 NPDictionary * NPError_userInfo(NPObject * self, SEL _cmd);
 
 /* -[NPError localizedDescription] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPString * NPError_localizedDescription(NPObject * self, SEL _cmd) {
     return ((struct NPError *)self)->_localizedDescription;
 }
 
 /* -[FsForwardUser poke] */
 __attribute__((weak)) int FsForwardUser_poke(NPObject * self, SEL _cmd) {
+#line 207 "tests/full_syntax_test.jeti"
     return 7;
 }
 
 /* -[FsBox initWith_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) FsBox * FsBox_initWith_(NPObject * self, SEL _cmd, NPObject * v) {
+#line 222 "tests/full_syntax_test.jeti"
     self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
+#line 223 "tests/full_syntax_test.jeti"
     if (self) {
         ((struct FsBox *)self)->_value = v;
     }
+#line 224 "tests/full_syntax_test.jeti"
     return (FsBox *)self;
 }
 
 /* -[FsBox value] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * FsBox_value(NPObject * self, SEL _cmd) {
+#line 226 "tests/full_syntax_test.jeti"
     return ((struct FsBox *)self)->_value;
 }
 
 /* -[FsBox setValue_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void FsBox_setValue_(NPObject * self, SEL _cmd, NPObject * v) {
+#line 227 "tests/full_syntax_test.jeti"
     ((struct FsBox *)self)->_value = v;
 }
 
 /* -[FsRenderable render] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsEngine__FsRenderable_render(NPObject * self, SEL _cmd) {
+#line 238 "tests/full_syntax_test.jeti"
     return 1;
 }
 
 /* -[FsSprite initWithId_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) FsSprite * FsSprite_initWithId_(NPObject * self, SEL _cmd, int i) {
+#line 267 "tests/full_syntax_test.jeti"
     self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
+#line 268 "tests/full_syntax_test.jeti"
     if (self) {
         ((struct FsSprite *)self)->_id = i;
     }
+#line 269 "tests/full_syntax_test.jeti"
     return (FsSprite *)self;
 }
 
 /* -[FsSprite sum_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsSprite_sum_(NPObject * self, SEL _cmd, int first, ...) {
+#line 278 "tests/full_syntax_test.jeti"
     va_list ap;
+#line 279 "tests/full_syntax_test.jeti"
     va_start(ap, first);
+#line 280 "tests/full_syntax_test.jeti"
     int total = first;
+#line 281 "tests/full_syntax_test.jeti"
     int v;
+#line 282 "tests/full_syntax_test.jeti"
     while (((v = va_arg(ap, int)) != 0)) {
         (total += v);
     }
+#line 283 "tests/full_syntax_test.jeti"
     va_end(ap);
+#line 284 "tests/full_syntax_test.jeti"
     return total;
 }
 
 /* +[FsSprite classSum_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsSprite_classSum_(NPClass * self, SEL _cmd, int first, ...) {
+#line 287 "tests/full_syntax_test.jeti"
     va_list ap;
+#line 288 "tests/full_syntax_test.jeti"
     va_start(ap, first);
+#line 289 "tests/full_syntax_test.jeti"
     int total = first;
+#line 290 "tests/full_syntax_test.jeti"
     for (int i = 0;  (i < 2); (i)++) {
         (total += va_arg(ap, int));
     }
+#line 291 "tests/full_syntax_test.jeti"
     va_end(ap);
+#line 292 "tests/full_syntax_test.jeti"
     return total;
 }
 
 /* -[FsSprite label] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPString * FsSprite_label(NPObject * self, SEL _cmd) {
     return ((struct FsSprite *)self)->_label;
 }
@@ -6209,89 +6761,123 @@ __attribute__((weak)) void FsSprite_setTag_(NPObject * self, SEL _cmd, NPString 
 
 /* -[FsSprite draw] */
 __attribute__((weak)) void FsSprite_draw(NPObject * self, SEL _cmd) {
+#line 271 "tests/full_syntax_test.jeti"
     printf("2.x draw sprite\n");
 }
 
 /* -[FsSprite color] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsSprite_color(NPObject * self, SEL _cmd) {
+#line 272 "tests/full_syntax_test.jeti"
     return 65280;
 }
 
 /* -[FsSprite render] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsSprite_render(NPObject * self, SEL _cmd) {
+#line 275 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_0 = (&JETI_VTABLE_$_FsEngine__FsRenderable)->render(self, __jeti_sel_render);
     return (10 + __jeti_eh_tmp_0);
 }
 
 /* -[FsTypedStore run] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void FsTypedStore_run(NPObject * self, SEL _cmd) {
+#line 303 "tests/full_syntax_test.jeti"
     NPMutableArray * arr = (NPMutableArray *)(NPMutableArray_array(&JETI_CLASS_$_NPMutableArray, __jeti_sel_array));
+#line 304 "tests/full_syntax_test.jeti"
     ({ NPObject *__jeti_tmp_5 = ((NPObject *)(arr)); __jeti_tmp_5 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->addObject_)(__jeti_tmp_5, __jeti_sel_addObject_, jeti_stringFromCstr("one")) : 0; });
+#line 305 "tests/full_syntax_test.jeti"
     ({ NPObject *__jeti_tmp_6 = ((NPObject *)(arr)); __jeti_tmp_6 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_6->isa->vtable)->addObject_)(__jeti_tmp_6, __jeti_sel_addObject_, jeti_stringFromCstr("two")) : 0; });
+#line 307 "tests/full_syntax_test.jeti"
     NPString * s0 = (NPString *)(({ NPObject *__jeti_tmp_7 = ((NPObject *)(arr)); __jeti_tmp_7 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_7->isa->vtable)->objectAtIndex_)(__jeti_tmp_7, __jeti_sel_objectAtIndex_, 0) : (NPObject *){0}; }));
+#line 308 "tests/full_syntax_test.jeti"
     NPString * s1 = (NPString *)(({ NPObject *__jeti_tmp_8 = ((NPObject *)(arr)); __jeti_tmp_8 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_8->isa->vtable)->objectAtIndex_)(__jeti_tmp_8, __jeti_sel_objectAtIndex_, 1) : (NPObject *){0}; }));
+#line 309 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_1 = ({ NPObject *__jeti_tmp_9 = ((NPObject *)(s0)); __jeti_tmp_9 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_9->isa->vtable)->UTF8String)(__jeti_tmp_9, __jeti_sel_UTF8String) : 0; });
     __auto_type __jeti_eh_tmp_2 = ({ NPObject *__jeti_tmp_10 = ((NPObject *)(s1)); __jeti_tmp_10 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_10->isa->vtable)->UTF8String)(__jeti_tmp_10, __jeti_sel_UTF8String) : 0; });
     __auto_type __jeti_eh_tmp_3 = ({ NPObject *__jeti_tmp_11 = ((NPObject *)(arr)); __jeti_tmp_11 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_11->isa->vtable)->count)(__jeti_tmp_11, __jeti_sel_count) : (size_t){0}; });
     printf("2.6 typed %s %s %zu\n", __jeti_eh_tmp_1, __jeti_eh_tmp_2, __jeti_eh_tmp_3);
+#line 313 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_4 = NPMutableString_stringWithUTF8String_(&JETI_CLASS_$_NPMutableString, __jeti_sel_stringWithUTF8String_, "boxed");
     NPObject *__jeti_tmp_12 = (NPObject_alloc(&JETI_CLASS_$_FsBox, __jeti_sel_alloc));
     FsBox * box = (FsBox *)(__jeti_tmp_12 ? ((struct jeti_vtable *)__jeti_tmp_12->isa->vtable)->initWith_(__jeti_tmp_12, __jeti_sel_initWith_, __jeti_eh_tmp_4) : 0);
+#line 314 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_5 = ({ NPObject *__jeti_tmp_13 = ((NPObject *)(box)); __jeti_tmp_13 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_13->isa->vtable)->value)(__jeti_tmp_13, __jeti_sel_value) : (NPObject *){0}; });
     __auto_type __jeti_eh_tmp_6 = ({ NPObject *__jeti_tmp_14 = ((NPObject *)(__jeti_eh_tmp_5)); __jeti_tmp_14 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_14->isa->vtable)->UTF8String)(__jeti_tmp_14, __jeti_sel_UTF8String) : 0; });
     printf("2.7 box %s\n", __jeti_eh_tmp_6);
+#line 315 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_7 = NPMutableString_stringWithUTF8String_(&JETI_CLASS_$_NPMutableString, __jeti_sel_stringWithUTF8String_, "reboxed");
     ({ NPObject *__jeti_tmp_15 = ((NPObject *)(box)); __jeti_tmp_15 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_15->isa->vtable)->setValue_)(__jeti_tmp_15, __jeti_sel_setValue_, __jeti_eh_tmp_7) : 0; });
+#line 316 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_8 = ({ NPObject *__jeti_tmp_16 = ((NPObject *)(box)); __jeti_tmp_16 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_16->isa->vtable)->value)(__jeti_tmp_16, __jeti_sel_value) : (NPObject *){0}; });
     __auto_type __jeti_eh_tmp_9 = ({ NPObject *__jeti_tmp_17 = ((NPObject *)(__jeti_eh_tmp_8)); __jeti_tmp_17 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_17->isa->vtable)->UTF8String)(__jeti_tmp_17, __jeti_sel_UTF8String) : 0; });
     printf("2.8 box %s\n", __jeti_eh_tmp_9);
+#line 1 "<jeti-generated>"
     jeti_release(box);
 }
 
 /* -[FsGuarded take_] */
 __attribute__((weak)) void FsGuarded_take_(NPObject * self, SEL _cmd, NPString * s) {
+#line 747 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_67 = ({ NPObject *__jeti_tmp_18 = ((NPObject *)(s)); __jeti_tmp_18 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_18->isa->vtable)->UTF8String)(__jeti_tmp_18, __jeti_sel_UTF8String) : 0; });
     printf("5.1 region take %s\n", __jeti_eh_tmp_67);
 }
 
 /* -[FsGuarded optOut_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void FsGuarded_optOut_(NPObject * self, SEL _cmd, NPString * s) {
+#line 748 "tests/full_syntax_test.jeti"
     printf("5.2 opt %s\n", s ? ({ NPObject *__jeti_tmp_19 = ((NPObject *)(s)); __jeti_tmp_19 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_19->isa->vtable)->UTF8String)(__jeti_tmp_19, __jeti_sel_UTF8String) : 0; }) : "(nil)");
 }
 
 /* -[FsGuarded produce] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPString * FsGuarded_produce(NPObject * self, SEL _cmd) {
+#line 749 "tests/full_syntax_test.jeti"
     return jeti_stringFromCstr("made");
 }
 
 /* -[FsAnnotated pre_post_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void FsAnnotated_pre_post_(NPObject * self, SEL _cmd, NPString * a, NPString * b) {
+#line 761 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_68 = ({ NPObject *__jeti_tmp_20 = ((NPObject *)(a)); __jeti_tmp_20 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_20->isa->vtable)->UTF8String)(__jeti_tmp_20, __jeti_sel_UTF8String) : 0; });
     __auto_type __jeti_eh_tmp_69 = ({ NPObject *__jeti_tmp_21 = ((NPObject *)(b)); __jeti_tmp_21 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_21->isa->vtable)->UTF8String)(__jeti_tmp_21, __jeti_sel_UTF8String) : 0; });
     printf("5.3 anno %s %s\n", __jeti_eh_tmp_68, __jeti_eh_tmp_69);
 }
 
 /* -[FsAnnotated maybe] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPString * FsAnnotated_maybe(NPObject * self, SEL _cmd) {
+#line 763 "tests/full_syntax_test.jeti"
     return NULL;
 }
 
 /* -[FsAnnotated maybeC] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPString * FsAnnotated_maybeC(NPObject * self, SEL _cmd) {
+#line 764 "tests/full_syntax_test.jeti"
     return jeti_stringFromCstr("c");
 }
 
 /* -[FsModes mix_point_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsModes_mix_point_(NPObject * self, SEL _cmd, FsMode m, struct FsPoint p) {
+#line 777 "tests/full_syntax_test.jeti"
     return (((int)m + (p.x * 10)) + p.y);
 }
 
 /* -[FsParser strictParse_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsParser_strictParse_(NPObject * self, SEL _cmd, NPString * s) {
+#line 791 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_71 = ({ NPObject *__jeti_tmp_22 = ((NPObject *)(s)); __jeti_tmp_22 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_22->isa->vtable)->length)(__jeti_tmp_22, __jeti_sel_length) : (size_t){0}; });
     if ((__jeti_eh_tmp_71 > 3)) {
+#line 790 "tests/full_syntax_test.jeti"
         {
             NPObject * __jeti_eh_thrown_72 = (NPObject *)({ NPObject *__jeti_tmp_23 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrLow, __jeti_sel_alloc))); __jeti_tmp_23 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_23->isa->vtable)->init)(__jeti_tmp_23, __jeti_sel_init) : 0; });
+#line 1 "<jeti-generated>"
             __jeti_eh_val = __jeti_eh_thrown_72;
             jeti_retain(__jeti_eh_val);
             jeti_autorelease(__jeti_eh_val);
@@ -6301,9 +6887,11 @@ __attribute__((weak)) int FsParser_strictParse_(NPObject * self, SEL _cmd, NPStr
     }
     if ((__jeti_eh_flag == 0)) {
         {
+#line 792 "tests/full_syntax_test.jeti"
             return ({ NPObject *__jeti_tmp_24 = ((NPObject *)(s)); __jeti_tmp_24 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_24->isa->vtable)->length)(__jeti_tmp_24, __jeti_sel_length) : (size_t){0}; });
         }
     }
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         return 0;
     }
@@ -6311,9 +6899,12 @@ __attribute__((weak)) int FsParser_strictParse_(NPObject * self, SEL _cmd, NPStr
 
 /* -[FsParser looseParse_] */
 __attribute__((weak)) int FsParser_looseParse_(NPObject * self, SEL _cmd, NPString * s) {
+#line 797 "tests/full_syntax_test.jeti"
     if ((s == NULL)) {
+#line 796 "tests/full_syntax_test.jeti"
         {
             NPObject * __jeti_eh_thrown_73 = (NPObject *)({ NPObject *__jeti_tmp_25 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrLow, __jeti_sel_alloc))); __jeti_tmp_25 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_25->isa->vtable)->init)(__jeti_tmp_25, __jeti_sel_init) : 0; });
+#line 1 "<jeti-generated>"
             __jeti_eh_val = __jeti_eh_thrown_73;
             jeti_retain(__jeti_eh_val);
             jeti_autorelease(__jeti_eh_val);
@@ -6323,9 +6914,11 @@ __attribute__((weak)) int FsParser_looseParse_(NPObject * self, SEL _cmd, NPStri
     }
     if ((__jeti_eh_flag == 0)) {
         {
+#line 798 "tests/full_syntax_test.jeti"
             return 0;
         }
     }
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         return 0;
     }
@@ -6333,33 +6926,97 @@ __attribute__((weak)) int FsParser_looseParse_(NPObject * self, SEL _cmd, NPStri
 
 /* -[FsFetcher compute_] */
 __attribute__((weak)) NPTask * FsFetcher_compute_(NPObject * self, SEL _cmd, int n) {
+#line 815 "tests/full_syntax_test.jeti"
     NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_compute_, self, sizeof(struct compute__frame)));
     ((struct compute__frame *)__jeti_task->frame)->n = n;
     return __jeti_task;
 }
 
 /* -[FsFetcher helper_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int FsFetcher_helper_(NPObject * self, SEL _cmd, int n) {
+#line 811 "tests/full_syntax_test.jeti"
     return (n + 1);
 }
 
 /* +[FsFetcher runAll] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPTask * FsFetcher_runAll(NPClass * self, SEL _cmd) {
+#line 820 "tests/full_syntax_test.jeti"
     NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_runAll, self, sizeof(struct runAll_frame)));
     return __jeti_task;
 }
 
+/* -[FsApi load_] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * FsApi_load_(NPObject * self, SEL _cmd, int uid) {
+#line 937 "tests/full_syntax_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_load_, self, sizeof(struct load__frame)));
+    ((struct load__frame *)__jeti_task->frame)->uid = uid;
+    return __jeti_task;
+}
+
+/* -[FsApi box_] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * FsApi_box_(NPObject * self, SEL _cmd, int uid) {
+#line 941 "tests/full_syntax_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_box_, self, sizeof(struct box__frame)));
+    ((struct box__frame *)__jeti_task->frame)->uid = uid;
+    return __jeti_task;
+}
+
+/* -[FsApi decode_] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int FsApi_decode_(NPObject * self, SEL _cmd, int raw) {
+#line 942 "tests/full_syntax_test.jeti"
+    return (raw * 10);
+}
+
+/* -[FsApi wrap_] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int FsApi_wrap_(NPObject * self, SEL _cmd, int v) {
+#line 943 "tests/full_syntax_test.jeti"
+    return (v + 1);
+}
+
+/* -[FsApi value] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int FsApi_value(NPObject * self, SEL _cmd) {
+#line 944 "tests/full_syntax_test.jeti"
+    return 7;
+}
+
+/* -[FsApi asObj] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) FsApi * FsApi_asObj(NPObject * self, SEL _cmd) {
+#line 945 "tests/full_syntax_test.jeti"
+    return (FsApi *)self;
+}
+
+/* +[FsApi runAll10] */
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * FsApi_runAll10(NPClass * self, SEL _cmd) {
+#line 962 "tests/full_syntax_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_runAll10, self, sizeof(struct runAll10_frame)));
+    return __jeti_task;
+}
+
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int jeti_async_state_compute_(NPTask * __jeti_task) {
+#line 815 "tests/full_syntax_test.jeti"
     switch (__jeti_task->state) {
         case 1:
             {
                 struct compute__frame * __jeti_f = (struct compute__frame *)__jeti_task->frame;
+#line 813 "tests/full_syntax_test.jeti"
                 int a = (__jeti_task->state = 2, ({ NPObject *__jeti_tmp_26 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_26 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_26->isa->vtable)->helper_)(__jeti_tmp_26, __jeti_sel_helper_, __jeti_f->n) : (int){0}; }));
+#line 814 "tests/full_syntax_test.jeti"
                 {
-                    __jeti_task->result = (void *)(unsigned)(a * 2);
+                    __jeti_task->result = (void *)(unsigned long)(a * 2);
                     __jeti_task->state = -1;
                     return 1;
                 }
+#line 815 "tests/full_syntax_test.jeti"
                 __jeti_task->state = -1;
                 return 1;
             }
@@ -6373,20 +7030,129 @@ __attribute__((weak)) int jeti_async_state_compute_(NPTask * __jeti_task) {
     return 1;
 }
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
+#line 820 "tests/full_syntax_test.jeti"
     switch (__jeti_task->state) {
         case 1:
             {
                 struct runAll_frame * __jeti_f = (struct runAll_frame *)__jeti_task->frame;
+#line 817 "tests/full_syntax_test.jeti"
                 NPObject *__jeti_tmp_27 = (NPObject_alloc(&JETI_CLASS_$_FsFetcher, __jeti_sel_alloc));
                 FsFetcher * f = (FsFetcher *)(__jeti_tmp_27 ? ((struct jeti_vtable *)__jeti_tmp_27->isa->vtable)->init(__jeti_tmp_27, __jeti_sel_init) : 0);
+#line 818 "tests/full_syntax_test.jeti"
                 int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_28 = ((NPObject *)(f)); __jeti_tmp_28 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_28->isa->vtable)->compute_)(__jeti_tmp_28, __jeti_sel_compute_, 20) : 0; })));
+#line 819 "tests/full_syntax_test.jeti"
                 printf("5.7 async %d\n", x);
+#line 1 "<jeti-generated>"
                 jeti_release(f);
+#line 820 "tests/full_syntax_test.jeti"
                 __jeti_task->state = -1;
                 return 1;
             }
         case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_load_(NPTask * __jeti_task) {
+#line 937 "tests/full_syntax_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct load__frame * __jeti_f = (struct load__frame *)__jeti_task->frame;
+#line 936 "tests/full_syntax_test.jeti"
+                {
+                    __jeti_task->result = (void *)(unsigned long)(__jeti_task->state = 2, ({ NPObject *__jeti_tmp_29 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_29 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_29->isa->vtable)->decode_)(__jeti_tmp_29, __jeti_sel_decode_, __jeti_f->uid) : (int){0}; }));
+                    __jeti_task->state = -1;
+                    return 1;
+                }
+#line 937 "tests/full_syntax_test.jeti"
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_box_(NPTask * __jeti_task) {
+#line 941 "tests/full_syntax_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct box__frame * __jeti_f = (struct box__frame *)__jeti_task->frame;
+#line 939 "tests/full_syntax_test.jeti"
+                (void)__jeti_f->uid;
+#line 940 "tests/full_syntax_test.jeti"
+                {
+                    __jeti_task->result = (void *)(__jeti_task->state = 2, ({ NPObject *__jeti_tmp_30 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_30 ? ((FsApi * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_30->isa->vtable)->asObj)(__jeti_tmp_30, __jeti_sel_asObj) : 0; }));
+                    __jeti_task->state = -1;
+                    return 1;
+                }
+#line 941 "tests/full_syntax_test.jeti"
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_runAll10(NPTask * __jeti_task) {
+#line 962 "tests/full_syntax_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct runAll10_frame * __jeti_f = (struct runAll10_frame *)__jeti_task->frame;
+#line 951 "tests/full_syntax_test.jeti"
+                printf("== §5.10 async throws / msg-await ==\n");
+#line 952 "tests/full_syntax_test.jeti"
+                NPObject *__jeti_tmp_31 = (NPObject_alloc(&JETI_CLASS_$_FsApi, __jeti_sel_alloc));
+                FsApi * api = (FsApi *)(__jeti_tmp_31 ? ((struct jeti_vtable *)__jeti_tmp_31->isa->vtable)->init(__jeti_tmp_31, __jeti_sel_init) : 0);
+#line 957 "tests/full_syntax_test.jeti"
+                printf("5.10 ok %d\n", (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_32 = ((NPObject *)(api)); __jeti_tmp_32 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_32->isa->vtable)->load_)(__jeti_tmp_32, __jeti_sel_load_, 3) : 0; }))));
+#line 1 "<jeti-generated>"
+                if ((__jeti_eh_flag == 0)) {
+                    {
+#line 959 "tests/full_syntax_test.jeti"
+                        __auto_type __jeti_eh_tmp_95 = ({ NPObject *__jeti_tmp_33 = ((NPObject *)(api)); __jeti_tmp_33 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_33->isa->vtable)->wrap_)(__jeti_tmp_33, __jeti_sel_wrap_, ((__jeti_task->state = 3, (long)jeti_task_await(({ NPObject *__jeti_tmp_34 = ((NPObject *)(api)); __jeti_tmp_34 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_34->isa->vtable)->load_)(__jeti_tmp_34, __jeti_sel_load_, 4) : 0; }))))) : (int){0}; });
+                        __auto_type __jeti_eh_tmp_96 = ({ NPObject *__jeti_tmp_35 = ((NPObject *)(((__jeti_task->state = 4, jeti_task_await(({ NPObject *__jeti_tmp_36 = ((NPObject *)(api)); __jeti_tmp_36 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_36->isa->vtable)->box_)(__jeti_tmp_36, __jeti_sel_box_, 2) : 0; })))))); __jeti_tmp_35 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_35->isa->vtable)->value)(__jeti_tmp_35, __jeti_sel_value) : (int){0}; });
+                        printf("5.10b msgawait %d %d\n", __jeti_eh_tmp_95, __jeti_eh_tmp_96);
+                    }
+                }
+#line 1 "<jeti-generated>"
+                if ((__jeti_eh_flag == 1)) {
+                    jeti_release(api);
+                    {
+                        __jeti_task->state = -1;
+                        return 1;
+                    }
+                }
+                jeti_release(api);
+#line 962 "tests/full_syntax_test.jeti"
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 4:
             {
                 __jeti_task->state = -1;
                 return 1;
@@ -6404,126 +7170,211 @@ int fs_asm_add3(int a, int b, int c);
 
 __asm__ (".text\n");
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int fs_double_it(int v) {
+#line 61 "tests/full_syntax_test.jeti"
     return (v * 2);
 }
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int fs_format_fn(const char * fmt, ...) {
+#line 64 "tests/full_syntax_test.jeti"
     va_list ap;
+#line 65 "tests/full_syntax_test.jeti"
     va_start(ap, fmt);
+#line 66 "tests/full_syntax_test.jeti"
     int n = vprintf(fmt, ap);
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 0)) {
         {
+#line 67 "tests/full_syntax_test.jeti"
             va_end(ap);
+#line 68 "tests/full_syntax_test.jeti"
             return n;
         }
     }
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         return 0;
     }
 }
 
 __attribute__((weak)) void sec1_c_superset(void ) {
+#line 72 "tests/full_syntax_test.jeti"
     printf("== §1 C superset ==\n");
+#line 75 "tests/full_syntax_test.jeti"
     int x1 = 10;
     int x2 = 20;
+#line 76 "tests/full_syntax_test.jeti"
     int * pa = &x1;
     int * pb = &x2;
+#line 77 "tests/full_syntax_test.jeti"
     ((*pa))++;
+#line 78 "tests/full_syntax_test.jeti"
     ++*pb;
+#line 79 "tests/full_syntax_test.jeti"
     printf("1.1 ptrs %d %d\n", *pa, *pb);
+#line 82 "tests/full_syntax_test.jeti"
     int (*fp)(int) = fs_double_it;
+#line 83 "tests/full_syntax_test.jeti"
     printf("1.2 fnptr %d\n", fp(21));
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 0)) {
         {
+#line 86 "tests/full_syntax_test.jeti"
             struct FsWidget w;
+#line 87 "tests/full_syntax_test.jeti"
             memset(&w, 0, sizeof(w));
+#line 88 "tests/full_syntax_test.jeti"
             void * vp = &w;
+#line 89 "tests/full_syntax_test.jeti"
             struct FsWidget * wp = (struct FsWidget *)vp;
+#line 90 "tests/full_syntax_test.jeti"
             wp->wid = 7;
+#line 91 "tests/full_syntax_test.jeti"
             printf("1.3 cast %d\n", ((struct FsWidget *)vp)->wid);
+#line 95 "tests/full_syntax_test.jeti"
             w.cb = fs_double_it;
+#line 96 "tests/full_syntax_test.jeti"
             w.cells[0][0] = 1;
             w.cells[0][1] = 2;
             w.cells[1][2] = 5;
+#line 97 "tests/full_syntax_test.jeti"
             w.flags = 5;
+#line 98 "tests/full_syntax_test.jeti"
             w.in = 99;
+#line 99 "tests/full_syntax_test.jeti"
             printf("1.4 widget %d %d %d %d %d\n", w.cb(3), w.cells[1][2], (int)w.flags, w.in, wp->wid);
+#line 1 "<jeti-generated>"
             if ((__jeti_eh_flag == 0)) {
                 {
+#line 102 "tests/full_syntax_test.jeti"
                     FsRow4 row = { 1, 2, 3, 4 };
+#line 103 "tests/full_syntax_test.jeti"
                     printf("1.5 row4 %d\n", (row[0] + row[3]));
+#line 106 "tests/full_syntax_test.jeti"
                     union FsMix m;
+#line 107 "tests/full_syntax_test.jeti"
                     m.i = 1078530011;
+#line 108 "tests/full_syntax_test.jeti"
                     printf("1.6 union %.2f\n", (double)m.f);
+#line 111 "tests/full_syntax_test.jeti"
                     FsMode mode = FS_MODE_HIGH;
+#line 112 "tests/full_syntax_test.jeti"
                     char * ms = "?";
+#line 117 "tests/full_syntax_test.jeti"
                     switch (mode) {
+#line 114 "tests/full_syntax_test.jeti"
                         case FS_MODE_OFF:
                             ms = "off";
                         break;
+#line 115 "tests/full_syntax_test.jeti"
                         case FS_MODE_LOW:
                             ms = "low";
                         break;
+#line 116 "tests/full_syntax_test.jeti"
                         case FS_MODE_HIGH:
                             ms = "high";
                         break;
                     }
+#line 118 "tests/full_syntax_test.jeti"
                     printf("1.7 enum %s(%d)\n", ms, (int)mode);
+#line 121 "tests/full_syntax_test.jeti"
                     struct FsPoint p1 = { .x = 1, .y = 2 };
+#line 122 "tests/full_syntax_test.jeti"
                     struct FsPoint p2 = { .y = 5 };
+#line 123 "tests/full_syntax_test.jeti"
                     struct FsPoint p3 = { .x = 1, 7 };
+#line 124 "tests/full_syntax_test.jeti"
                     FsOuterAlias o = { .i.a = 3, .tag = 9 };
+#line 125 "tests/full_syntax_test.jeti"
                     struct FsPoint pts[3] = { [0].x = 4, [2].y = 6 };
+#line 126 "tests/full_syntax_test.jeti"
                     printf("1.8 desig %d %d %d %d %d\n", (p1.x + p1.y), p2.y, p3.y, (o.tag + o.i.a), pts[2].y);
+#line 129 "tests/full_syntax_test.jeti"
                     struct FsPoint p4 = (struct FsPoint){ .x = 8, .y = 9 };
+#line 130 "tests/full_syntax_test.jeti"
                     printf("1.9 compound %d\n", (p4.x * p4.y));
+#line 133 "tests/full_syntax_test.jeti"
                     struct FsPoint a = { 1, 2 };
     struct FsPoint b = { 1, 2 };
     struct FsPoint c = { 1, 3 };
+#line 134 "tests/full_syntax_test.jeti"
                     FsPointT t1 = { 2, 3 };
     FsPointT t2 = { 2, 3 };
+#line 135 "tests/full_syntax_test.jeti"
                     printf("1.10 eq %d %d %d\n", jeti_struct_eq_FsPoint(a, b), (jeti_struct_eq_FsPoint(a, c) == 0), jeti_struct_eq_FsPoint(t1, t2));
+#line 136 "tests/full_syntax_test.jeti"
                     printf("1.11 ptreq %d\n", ((void *)&a == (void *)&a));
+#line 139 "tests/full_syntax_test.jeti"
                     int hits = 0;
     int pass = 0;
+#line 145 "tests/full_syntax_test.jeti"
                     for (int i = 0;  (i < 3); (i)++) {
+#line 141 "tests/full_syntax_test.jeti"
                         if ((i == 1)) {
                             goto skip;
                         }
+#line 142 "tests/full_syntax_test.jeti"
                         (hits)++;
+#line 143 "tests/full_syntax_test.jeti"
 skip:
+#line 144 "tests/full_syntax_test.jeti"
                         (pass)++;
                     }
+#line 146 "tests/full_syntax_test.jeti"
                     printf("1.12 goto %d %d\n", hits, pass);
+#line 149 "tests/full_syntax_test.jeti"
                     __typeof__(x1) same = 77;
+#line 150 "tests/full_syntax_test.jeti"
                     unsigned ali = __alignof__(int);
+#line 151 "tests/full_syntax_test.jeti"
                     int expect = __builtin_expect((x1 > 5), 1);
+#line 1 "<jeti-generated>"
                     if ((__jeti_eh_flag == 0)) {
                         {
+#line 152 "tests/full_syntax_test.jeti"
                             int compat = __builtin_types_compatible_p(__typeof__(same), int);
+#line 1 "<jeti-generated>"
                             if ((__jeti_eh_flag == 0)) {
                                 {
+#line 153 "tests/full_syntax_test.jeti"
                                     printf("1.13 typeof %d %u %d %d\n", same, ali, expect, compat);
+#line 156 "tests/full_syntax_test.jeti"
                                     printf("1.14 packed %zu\n", sizeof(struct FsPacked));
+#line 159 "tests/full_syntax_test.jeti"
                                     int acc = 0;
+#line 160 "tests/full_syntax_test.jeti"
                                     for (int i = 0, j = 6;  (i < j); ((i)++, (j)--)) {
                                         (acc += (i + j));
                                     }
+#line 161 "tests/full_syntax_test.jeti"
                                     printf("1.15 forcomma %d\n", acc);
+#line 164 "tests/full_syntax_test.jeti"
                                     printf("1.16 macro %d %s\n", (((3) > ((((4) > (2)) ? (4) : (2)))) ? (3) : ((((4) > (2)) ? (4) : (2)))), "full-syntax");
+#line 165 "tests/full_syntax_test.jeti"
                                     fs_format_fn("1.17 vfn %d %d\n", 1, 2);
+#line 1 "<jeti-generated>"
                                     if ((__jeti_eh_flag == 0)) {
                                         {
+#line 168 "tests/full_syntax_test.jeti"
                                             clock_t t0 = clock();
+#line 1 "<jeti-generated>"
                                             if ((__jeti_eh_flag == 0)) {
                                                 {
+#line 169 "tests/full_syntax_test.jeti"
                                                     time_t tt = 0;
+#line 170 "tests/full_syntax_test.jeti"
                                                     printf("1.18 xx_t %d\n", ((int)((t0 >= (clock_t)0)) + (int)((tt == 0))));
+#line 173 "tests/full_syntax_test.jeti"
                                                     printf("1.19 asm %d %d\n", fs_asm_square(9), fs_asm_add3(1, 2, 3));
+#line 176 "tests/full_syntax_test.jeti"
                                                     int in = 5;
+#line 177 "tests/full_syntax_test.jeti"
                                                     struct FsWidget in_w;
+#line 178 "tests/full_syntax_test.jeti"
                                                     in_w.in = (in * 2);
+#line 179 "tests/full_syntax_test.jeti"
                                                     printf("1.20 in %d %d\n", in, in_w.in);
                                                 }
                                             }
@@ -6537,6 +7388,7 @@ skip:
             }
         }
     }
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         return;
     }
@@ -6544,48 +7396,75 @@ skip:
 
 
 __attribute__((weak)) void sec2_objects(void ) {
+#line 321 "tests/full_syntax_test.jeti"
     printf("== §2 objects ==\n");
-    NPObject *__jeti_tmp_29 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
-    FsSprite * sp = (FsSprite *)(__jeti_tmp_29 ? ((struct jeti_vtable *)__jeti_tmp_29->isa->vtable)->initWithId_(__jeti_tmp_29, __jeti_sel_initWithId_, 42) : 0);
-    __auto_type __jeti_eh_tmp_10 = ({ NPObject *__jeti_tmp_30 = ((NPObject *)(sp)); __jeti_tmp_30 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_30->isa->vtable)->render)(__jeti_tmp_30, __jeti_sel_render) : (int){0}; });
-    __auto_type __jeti_eh_tmp_11 = ({ NPObject *__jeti_tmp_31 = ((NPObject *)(sp)); __jeti_tmp_31 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_31->isa->vtable)->color)(__jeti_tmp_31, __jeti_sel_color) : (int){0}; });
+#line 324 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_37 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
+    FsSprite * sp = (FsSprite *)(__jeti_tmp_37 ? ((struct jeti_vtable *)__jeti_tmp_37->isa->vtable)->initWithId_(__jeti_tmp_37, __jeti_sel_initWithId_, 42) : 0);
+#line 325 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_10 = ({ NPObject *__jeti_tmp_38 = ((NPObject *)(sp)); __jeti_tmp_38 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_38->isa->vtable)->render)(__jeti_tmp_38, __jeti_sel_render) : (int){0}; });
+    __auto_type __jeti_eh_tmp_11 = ({ NPObject *__jeti_tmp_39 = ((NPObject *)(sp)); __jeti_tmp_39 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_39->isa->vtable)->color)(__jeti_tmp_39, __jeti_sel_color) : (int){0}; });
     printf("2.1 render %d color %d\n", __jeti_eh_tmp_10, __jeti_eh_tmp_11);
-    ({ NPObject *__jeti_tmp_32 = ((NPObject *)(sp)); __jeti_tmp_32 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_32->isa->vtable)->draw)(__jeti_tmp_32, __jeti_sel_draw) : 0; });
+#line 326 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_40 = ((NPObject *)(sp)); __jeti_tmp_40 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_40->isa->vtable)->draw)(__jeti_tmp_40, __jeti_sel_draw) : 0; });
+#line 329 "tests/full_syntax_test.jeti"
     sp->_label = NULL;
+#line 330 "tests/full_syntax_test.jeti"
     sp->_tag = jeti_stringFromCstr("t");
-    NPObject *__jeti_tmp_33 = (({ NPObject *__jeti_tmp_34 = ((NPObject *)(sp)); __jeti_tmp_34 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_34->isa->vtable)->tag)(__jeti_tmp_34, __jeti_sel_tag) : 0; }));
-    __auto_type __jeti_eh_tmp_12 = __jeti_tmp_33 ? ((struct jeti_vtable *)__jeti_tmp_33->isa->vtable)->UTF8String(__jeti_tmp_33, __jeti_sel_UTF8String) : 0;
-    printf("2.2 prop %s %s\n", ({ NPObject *__jeti_tmp_35 = ((NPObject *)(sp)); __jeti_tmp_35 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_35->isa->vtable)->label)(__jeti_tmp_35, __jeti_sel_label) : 0; }) ? "n" : "nil", __jeti_eh_tmp_12);
+#line 331 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_41 = (({ NPObject *__jeti_tmp_42 = ((NPObject *)(sp)); __jeti_tmp_42 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_42->isa->vtable)->tag)(__jeti_tmp_42, __jeti_sel_tag) : 0; }));
+    __auto_type __jeti_eh_tmp_12 = __jeti_tmp_41 ? ((struct jeti_vtable *)__jeti_tmp_41->isa->vtable)->UTF8String(__jeti_tmp_41, __jeti_sel_UTF8String) : 0;
+    printf("2.2 prop %s %s\n", ({ NPObject *__jeti_tmp_43 = ((NPObject *)(sp)); __jeti_tmp_43 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_43->isa->vtable)->label)(__jeti_tmp_43, __jeti_sel_label) : 0; }) ? "n" : "nil", __jeti_eh_tmp_12);
+#line 334 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_13 = &JETI_CLASS_$_FsSprite;
-    _Bool kind = ({ NPObject *__jeti_tmp_36 = ((NPObject *)(sp)); __jeti_tmp_36 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_36->isa->vtable)->isKindOfClass_)(__jeti_tmp_36, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_13)) : (_Bool){0}; });
+    _Bool kind = ({ NPObject *__jeti_tmp_44 = ((NPObject *)(sp)); __jeti_tmp_44 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_44->isa->vtable)->isKindOfClass_)(__jeti_tmp_44, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_13)) : (_Bool){0}; });
+#line 335 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_14 = &JETI_CLASS_$_FsEngine__FsRenderable;
-    _Bool kindSuper = ({ NPObject *__jeti_tmp_37 = ((NPObject *)(sp)); __jeti_tmp_37 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_37->isa->vtable)->isKindOfClass_)(__jeti_tmp_37, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_14)) : (_Bool){0}; });
+    _Bool kindSuper = ({ NPObject *__jeti_tmp_45 = ((NPObject *)(sp)); __jeti_tmp_45 ? ((_Bool (*)(NPObject *, SEL, NPClass *))((struct jeti_vtable *)__jeti_tmp_45->isa->vtable)->isKindOfClass_)(__jeti_tmp_45, __jeti_sel_isKindOfClass_, (NPClass *)(__jeti_eh_tmp_14)) : (_Bool){0}; });
+#line 336 "tests/full_syntax_test.jeti"
     _Bool resp = jeti_resp_color(sp);
+#line 337 "tests/full_syntax_test.jeti"
     _Bool respMissing = 0;
-    _Bool eqSelf = ({ NPObject *__jeti_tmp_38 = ((NPObject *)(sp)); __jeti_tmp_38 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_38->isa->vtable)->isEqual_)(__jeti_tmp_38, __jeti_sel_isEqual_, (NPObject *)(sp)) : (_Bool){0}; });
-    _Bool eqOther = ({ NPObject *__jeti_tmp_39 = ((NPObject *)(sp)); __jeti_tmp_39 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_39->isa->vtable)->isEqual_)(__jeti_tmp_39, __jeti_sel_isEqual_, (NPObject *)((({ NPObject *__jeti_tmp_40 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc))); __jeti_tmp_40 ? ((FsSprite * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_40->isa->vtable)->initWithId_)(__jeti_tmp_40, __jeti_sel_initWithId_, 42) : 0; })))) : (_Bool){0}; });
+#line 338 "tests/full_syntax_test.jeti"
+    _Bool eqSelf = ({ NPObject *__jeti_tmp_46 = ((NPObject *)(sp)); __jeti_tmp_46 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_46->isa->vtable)->isEqual_)(__jeti_tmp_46, __jeti_sel_isEqual_, (NPObject *)(sp)) : (_Bool){0}; });
+#line 339 "tests/full_syntax_test.jeti"
+    _Bool eqOther = ({ NPObject *__jeti_tmp_47 = ((NPObject *)(sp)); __jeti_tmp_47 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_47->isa->vtable)->isEqual_)(__jeti_tmp_47, __jeti_sel_isEqual_, (NPObject *)((({ NPObject *__jeti_tmp_48 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc))); __jeti_tmp_48 ? ((FsSprite * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_48->isa->vtable)->initWithId_)(__jeti_tmp_48, __jeti_sel_initWithId_, 42) : 0; })))) : (_Bool){0}; });
+#line 340 "tests/full_syntax_test.jeti"
     printf("2.3 dispatch %d %d %d %d %d %d\n", kind, kindSuper, resp, respMissing, eqSelf, eqOther);
-    __auto_type __jeti_eh_tmp_15 = ({ NPObject *__jeti_tmp_41 = ((NPObject *)(sp)); __jeti_tmp_41 ? ((int (*)(NPObject *, SEL, int, ...))((struct jeti_vtable *)__jeti_tmp_41->isa->vtable)->sum_)(__jeti_tmp_41, __jeti_sel_sum_, 1, 2, 3, 0) : (int){0}; });
+#line 343 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_15 = ({ NPObject *__jeti_tmp_49 = ((NPObject *)(sp)); __jeti_tmp_49 ? ((int (*)(NPObject *, SEL, int, ...))((struct jeti_vtable *)__jeti_tmp_49->isa->vtable)->sum_)(__jeti_tmp_49, __jeti_sel_sum_, 1, 2, 3, 0) : (int){0}; });
     __auto_type __jeti_eh_tmp_16 = FsSprite_classSum_(&JETI_CLASS_$_FsSprite, __jeti_sel_classSum_, 10, 20, 0);
     printf("2.4 variadic %d %d\n", __jeti_eh_tmp_15, __jeti_eh_tmp_16);
-    NPObject *__jeti_tmp_42 = (NPObject_alloc(&JETI_CLASS_$_FsEngine__FsRenderable, __jeti_sel_alloc));
-    FsEngine__FsRenderable * r = (FsEngine__FsRenderable *)(__jeti_tmp_42 ? ((struct jeti_vtable *)__jeti_tmp_42->isa->vtable)->init(__jeti_tmp_42, __jeti_sel_init) : 0);
-    __auto_type __jeti_eh_tmp_17 = ({ NPObject *__jeti_tmp_43 = ((NPObject *)(r)); __jeti_tmp_43 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_43->isa->vtable)->render)(__jeti_tmp_43, __jeti_sel_render) : (int){0}; });
+#line 346 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_50 = (NPObject_alloc(&JETI_CLASS_$_FsEngine__FsRenderable, __jeti_sel_alloc));
+    FsEngine__FsRenderable * r = (FsEngine__FsRenderable *)(__jeti_tmp_50 ? ((struct jeti_vtable *)__jeti_tmp_50->isa->vtable)->init(__jeti_tmp_50, __jeti_sel_init) : 0);
+#line 347 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_17 = ({ NPObject *__jeti_tmp_51 = ((NPObject *)(r)); __jeti_tmp_51 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_51->isa->vtable)->render)(__jeti_tmp_51, __jeti_sel_render) : (int){0}; });
     printf("2.5 ns %d\n", __jeti_eh_tmp_17);
-    NPObject *__jeti_tmp_44 = (NPObject_alloc(&JETI_CLASS_$_FsForwardUser, __jeti_sel_alloc));
-    FsForwardUser * fu = (FsForwardUser *)(__jeti_tmp_44 ? ((struct jeti_vtable *)__jeti_tmp_44->isa->vtable)->init(__jeti_tmp_44, __jeti_sel_init) : 0);
-    __auto_type __jeti_eh_tmp_18 = ({ NPObject *__jeti_tmp_45 = ((NPObject *)(fu)); __jeti_tmp_45 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_45->isa->vtable)->poke)(__jeti_tmp_45, __jeti_sel_poke) : (int){0}; });
+#line 350 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_52 = (NPObject_alloc(&JETI_CLASS_$_FsForwardUser, __jeti_sel_alloc));
+    FsForwardUser * fu = (FsForwardUser *)(__jeti_tmp_52 ? ((struct jeti_vtable *)__jeti_tmp_52->isa->vtable)->init(__jeti_tmp_52, __jeti_sel_init) : 0);
+#line 351 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_18 = ({ NPObject *__jeti_tmp_53 = ((NPObject *)(fu)); __jeti_tmp_53 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_53->isa->vtable)->poke)(__jeti_tmp_53, __jeti_sel_poke) : (int){0}; });
     printf("2.5b fwd %d\n", __jeti_eh_tmp_18);
-    NPObject *__jeti_tmp_46 = (NPObject_alloc(&JETI_CLASS_$_FsTypedStore, __jeti_sel_alloc));
-    FsTypedStore * store = (FsTypedStore *)(__jeti_tmp_46 ? ((struct jeti_vtable *)__jeti_tmp_46->isa->vtable)->init(__jeti_tmp_46, __jeti_sel_init) : 0);
-    ({ NPObject *__jeti_tmp_47 = ((NPObject *)(store)); __jeti_tmp_47 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_47->isa->vtable)->run)(__jeti_tmp_47, __jeti_sel_run) : 0; });
+#line 354 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_54 = (NPObject_alloc(&JETI_CLASS_$_FsTypedStore, __jeti_sel_alloc));
+    FsTypedStore * store = (FsTypedStore *)(__jeti_tmp_54 ? ((struct jeti_vtable *)__jeti_tmp_54->isa->vtable)->init(__jeti_tmp_54, __jeti_sel_init) : 0);
+#line 355 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_55 = ((NPObject *)(store)); __jeti_tmp_55 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_55->isa->vtable)->run)(__jeti_tmp_55, __jeti_sel_run) : 0; });
+#line 358 "tests/full_syntax_test.jeti"
     NPObject * asId = (NPObject *)(sp);
+#line 359 "tests/full_syntax_test.jeti"
     FsSprite * back = (FsSprite *)asId;
+#line 360 "tests/full_syntax_test.jeti"
     printf("2.9 id %d\n", back->_id);
+#line 363 "tests/full_syntax_test.jeti"
     FsSprite * nilsp = NULL;
-    __auto_type __jeti_eh_tmp_19 = ({ NPObject *__jeti_tmp_48 = ((NPObject *)(nilsp)); __jeti_tmp_48 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_48->isa->vtable)->render)(__jeti_tmp_48, __jeti_sel_render) : (int){0}; });
+#line 364 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_19 = ({ NPObject *__jeti_tmp_56 = ((NPObject *)(nilsp)); __jeti_tmp_56 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_56->isa->vtable)->render)(__jeti_tmp_56, __jeti_sel_render) : (int){0}; });
     __auto_type __jeti_eh_tmp_20 = jeti_resp_color(nilsp);
     printf("2.10 nilmsg %d %d\n", __jeti_eh_tmp_19, __jeti_eh_tmp_20);
+#line 1 "<jeti-generated>"
     jeti_release(store);
     jeti_release(fu);
     jeti_release(r);
@@ -6593,72 +7472,112 @@ __attribute__((weak)) void sec2_objects(void ) {
 }
 
 __attribute__((weak)) int fs_call_block(FsIntBlock b, int x, int y) {
+#line 374 "tests/full_syntax_test.jeti"
     return b(x, y);
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         return 0;
     }
 }
 
 __attribute__((weak)) void sec3_expressions(void ) {
+#line 377 "tests/full_syntax_test.jeti"
     printf("== §3 expressions ==\n");
-    NPObject *__jeti_tmp_49 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
-    FsSprite * sp = (FsSprite *)(__jeti_tmp_49 ? ((struct jeti_vtable *)__jeti_tmp_49->isa->vtable)->initWithId_(__jeti_tmp_49, __jeti_sel_initWithId_, 3) : 0);
+#line 378 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_57 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
+    FsSprite * sp = (FsSprite *)(__jeti_tmp_57 ? ((struct jeti_vtable *)__jeti_tmp_57->isa->vtable)->initWithId_(__jeti_tmp_57, __jeti_sel_initWithId_, 3) : 0);
+#line 381 "tests/full_syntax_test.jeti"
     NPNumber * ni = (NPNumber *)(NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 42));
+#line 382 "tests/full_syntax_test.jeti"
     NPNumber * nd = (NPNumber *)(NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithDouble_, 1.5f));
+#line 383 "tests/full_syntax_test.jeti"
     NPNumber * nb = (NPNumber *)(NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 1));
+#line 384 "tests/full_syntax_test.jeti"
     NPNumber * nc = (NPNumber *)(NPNumber_numberWithChar_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithChar_, 'A'));
+#line 385 "tests/full_syntax_test.jeti"
     int xv = 20;
+#line 386 "tests/full_syntax_test.jeti"
     NPNumber * ne = (NPNumber *)(NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, ((xv * 2) + 1)));
-    __auto_type __jeti_eh_tmp_21 = ({ NPObject *__jeti_tmp_50 = ((NPObject *)(ni)); __jeti_tmp_50 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_50->isa->vtable)->intValue)(__jeti_tmp_50, __jeti_sel_intValue) : (int){0}; });
-    __auto_type __jeti_eh_tmp_22 = ({ NPObject *__jeti_tmp_51 = ((NPObject *)(nd)); __jeti_tmp_51 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_51->isa->vtable)->doubleValue)(__jeti_tmp_51, __jeti_sel_doubleValue) : (double){0}; });
-    __auto_type __jeti_eh_tmp_23 = ({ NPObject *__jeti_tmp_52 = ((NPObject *)(nb)); __jeti_tmp_52 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_52->isa->vtable)->boolValue)(__jeti_tmp_52, __jeti_sel_boolValue) : (int){0}; });
-    __auto_type __jeti_eh_tmp_24 = ({ NPObject *__jeti_tmp_53 = ((NPObject *)(nc)); __jeti_tmp_53 ? ((char (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_53->isa->vtable)->charValue)(__jeti_tmp_53, __jeti_sel_charValue) : (char){0}; });
-    __auto_type __jeti_eh_tmp_25 = ({ NPObject *__jeti_tmp_54 = ((NPObject *)(ne)); __jeti_tmp_54 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_54->isa->vtable)->intValue)(__jeti_tmp_54, __jeti_sel_intValue) : (int){0}; });
+#line 387 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_21 = ({ NPObject *__jeti_tmp_58 = ((NPObject *)(ni)); __jeti_tmp_58 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_58->isa->vtable)->intValue)(__jeti_tmp_58, __jeti_sel_intValue) : (int){0}; });
+    __auto_type __jeti_eh_tmp_22 = ({ NPObject *__jeti_tmp_59 = ((NPObject *)(nd)); __jeti_tmp_59 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_59->isa->vtable)->doubleValue)(__jeti_tmp_59, __jeti_sel_doubleValue) : (double){0}; });
+    __auto_type __jeti_eh_tmp_23 = ({ NPObject *__jeti_tmp_60 = ((NPObject *)(nb)); __jeti_tmp_60 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_60->isa->vtable)->boolValue)(__jeti_tmp_60, __jeti_sel_boolValue) : (int){0}; });
+    __auto_type __jeti_eh_tmp_24 = ({ NPObject *__jeti_tmp_61 = ((NPObject *)(nc)); __jeti_tmp_61 ? ((char (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_61->isa->vtable)->charValue)(__jeti_tmp_61, __jeti_sel_charValue) : (char){0}; });
+    __auto_type __jeti_eh_tmp_25 = ({ NPObject *__jeti_tmp_62 = ((NPObject *)(ne)); __jeti_tmp_62 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_62->isa->vtable)->intValue)(__jeti_tmp_62, __jeti_sel_intValue) : (int){0}; });
     printf("3.1 box %d %.1f %d %d %d\n", __jeti_eh_tmp_21, __jeti_eh_tmp_22, __jeti_eh_tmp_23, __jeti_eh_tmp_24, __jeti_eh_tmp_25);
+#line 391 "tests/full_syntax_test.jeti"
     NPArray * nums = (NPArray *)(jeti_array_create(3, NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 1), NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 2), NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 3)));
-    __auto_type __jeti_eh_tmp_26 = ({ NPObject *__jeti_tmp_55 = ((NPObject *)(nums)); __jeti_tmp_55 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_55->isa->vtable)->objectAtIndex_)(__jeti_tmp_55, __jeti_sel_objectAtIndex_, 0) : (NPObject *){0}; });
+#line 392 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_26 = ({ NPObject *__jeti_tmp_63 = ((NPObject *)(nums)); __jeti_tmp_63 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_63->isa->vtable)->objectAtIndex_)(__jeti_tmp_63, __jeti_sel_objectAtIndex_, 0) : (NPObject *){0}; });
     NPNumber * head = (NPNumber *)__jeti_eh_tmp_26;
-    __auto_type __jeti_eh_tmp_27 = ({ NPObject *__jeti_tmp_56 = ((NPObject *)(nums)); __jeti_tmp_56 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_56->isa->vtable)->count)(__jeti_tmp_56, __jeti_sel_count) : (size_t){0}; });
-    __auto_type __jeti_eh_tmp_28 = ({ NPObject *__jeti_tmp_57 = ((NPObject *)(head)); __jeti_tmp_57 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_57->isa->vtable)->intValue)(__jeti_tmp_57, __jeti_sel_intValue) : (int){0}; });
+#line 393 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_27 = ({ NPObject *__jeti_tmp_64 = ((NPObject *)(nums)); __jeti_tmp_64 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_64->isa->vtable)->count)(__jeti_tmp_64, __jeti_sel_count) : (size_t){0}; });
+    __auto_type __jeti_eh_tmp_28 = ({ NPObject *__jeti_tmp_65 = ((NPObject *)(head)); __jeti_tmp_65 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_65->isa->vtable)->intValue)(__jeti_tmp_65, __jeti_sel_intValue) : (int){0}; });
     printf("3.2 arr %zu %d\n", __jeti_eh_tmp_27, __jeti_eh_tmp_28);
+#line 396 "tests/full_syntax_test.jeti"
     NPDictionary * d = (NPDictionary *)(jeti_dictionary_create(3, jeti_stringFromCstr("a"), NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 1), jeti_stringFromCstr("b"), NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, xv), jeti_stringFromCstr("c"), jeti_stringFromCstr("cee")));
+#line 397 "tests/full_syntax_test.jeti"
     NPDictionary * empty = (NPDictionary *)(jeti_dictionary_create(0));
-    NPNumber * dv = (NPNumber *)(({ NPObject *__jeti_tmp_58 = ((NPObject *)(d)); __jeti_tmp_58 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_58->isa->vtable)->objectForKey_)(__jeti_tmp_58, __jeti_sel_objectForKey_, jeti_stringFromCstr("b")) : (NPObject *){0}; }));
-    NPString * dc = (NPString *)(({ NPObject *__jeti_tmp_59 = ((NPObject *)(d)); __jeti_tmp_59 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_59->isa->vtable)->objectForKey_)(__jeti_tmp_59, __jeti_sel_objectForKey_, jeti_stringFromCstr("c")) : (NPObject *){0}; }));
-    __auto_type __jeti_eh_tmp_29 = ({ NPObject *__jeti_tmp_60 = ((NPObject *)(d)); __jeti_tmp_60 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_60->isa->vtable)->count)(__jeti_tmp_60, __jeti_sel_count) : (size_t){0}; });
-    __auto_type __jeti_eh_tmp_30 = ({ NPObject *__jeti_tmp_61 = ((NPObject *)(empty)); __jeti_tmp_61 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_61->isa->vtable)->count)(__jeti_tmp_61, __jeti_sel_count) : (size_t){0}; });
-    __auto_type __jeti_eh_tmp_31 = ({ NPObject *__jeti_tmp_62 = ((NPObject *)(dv)); __jeti_tmp_62 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_62->isa->vtable)->intValue)(__jeti_tmp_62, __jeti_sel_intValue) : (int){0}; });
-    __auto_type __jeti_eh_tmp_32 = ({ NPObject *__jeti_tmp_63 = ((NPObject *)(dc)); __jeti_tmp_63 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_63->isa->vtable)->UTF8String)(__jeti_tmp_63, __jeti_sel_UTF8String) : 0; });
+#line 398 "tests/full_syntax_test.jeti"
+    NPNumber * dv = (NPNumber *)(({ NPObject *__jeti_tmp_66 = ((NPObject *)(d)); __jeti_tmp_66 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_66->isa->vtable)->objectForKey_)(__jeti_tmp_66, __jeti_sel_objectForKey_, jeti_stringFromCstr("b")) : (NPObject *){0}; }));
+#line 399 "tests/full_syntax_test.jeti"
+    NPString * dc = (NPString *)(({ NPObject *__jeti_tmp_67 = ((NPObject *)(d)); __jeti_tmp_67 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_67->isa->vtable)->objectForKey_)(__jeti_tmp_67, __jeti_sel_objectForKey_, jeti_stringFromCstr("c")) : (NPObject *){0}; }));
+#line 400 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_29 = ({ NPObject *__jeti_tmp_68 = ((NPObject *)(d)); __jeti_tmp_68 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_68->isa->vtable)->count)(__jeti_tmp_68, __jeti_sel_count) : (size_t){0}; });
+    __auto_type __jeti_eh_tmp_30 = ({ NPObject *__jeti_tmp_69 = ((NPObject *)(empty)); __jeti_tmp_69 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_69->isa->vtable)->count)(__jeti_tmp_69, __jeti_sel_count) : (size_t){0}; });
+    __auto_type __jeti_eh_tmp_31 = ({ NPObject *__jeti_tmp_70 = ((NPObject *)(dv)); __jeti_tmp_70 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_70->isa->vtable)->intValue)(__jeti_tmp_70, __jeti_sel_intValue) : (int){0}; });
+    __auto_type __jeti_eh_tmp_32 = ({ NPObject *__jeti_tmp_71 = ((NPObject *)(dc)); __jeti_tmp_71 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_71->isa->vtable)->UTF8String)(__jeti_tmp_71, __jeti_sel_UTF8String) : 0; });
     printf("3.3 dict %zu %zu %d %s\n", __jeti_eh_tmp_29, __jeti_eh_tmp_30, __jeti_eh_tmp_31, __jeti_eh_tmp_32);
+#line 406 "tests/full_syntax_test.jeti"
     NPMutableArray * ma = (NPMutableArray *)(NPMutableArray_arrayWithCapacity_(&JETI_CLASS_$_NPMutableArray, __jeti_sel_arrayWithCapacity_, 4));
+#line 407 "tests/full_syntax_test.jeti"
     NPString * z = (NPString *)(jeti_stringFromCstr("z"));
-    ({ NPObject *__jeti_tmp_64 = ((NPObject *)(ma)); __jeti_tmp_64 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_64->isa->vtable)->addObject_)(__jeti_tmp_64, __jeti_sel_addObject_, jeti_stringFromCstr("x")) : 0; });
-    ({ NPObject *__jeti_tmp_65 = ((NPObject *)(ma)); __jeti_tmp_65 ? ((void (*)(NPObject *, SEL, NPObject *, size_t))((struct jeti_vtable *)__jeti_tmp_65->isa->vtable)->insertObject_atIndex_)(__jeti_tmp_65, __jeti_sel_insertObject_atIndex_, jeti_stringFromCstr("y"), 0) : 0; });
-    ({ NPObject *__jeti_tmp_66 = ((NPObject *)(ma)); __jeti_tmp_66 ? ((void (*)(NPObject *, SEL, size_t, NPObject *))((struct jeti_vtable *)__jeti_tmp_66->isa->vtable)->replaceObjectAtIndex_withObject_)(__jeti_tmp_66, __jeti_sel_replaceObjectAtIndex_withObject_, 1, z) : 0; });
-    _Bool has = ({ NPObject *__jeti_tmp_67 = ((NPObject *)(ma)); __jeti_tmp_67 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_67->isa->vtable)->containsObject_)(__jeti_tmp_67, __jeti_sel_containsObject_, jeti_stringFromCstr("z")) : (_Bool){0}; });
-    __auto_type __jeti_eh_tmp_33 = ({ NPObject *__jeti_tmp_68 = ((NPObject *)(ma)); __jeti_tmp_68 ? ((size_t (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_68->isa->vtable)->indexOfObject_)(__jeti_tmp_68, __jeti_sel_indexOfObject_, jeti_stringFromCstr("z")) : (size_t){0}; });
+#line 408 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_72 = ((NPObject *)(ma)); __jeti_tmp_72 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_72->isa->vtable)->addObject_)(__jeti_tmp_72, __jeti_sel_addObject_, jeti_stringFromCstr("x")) : 0; });
+#line 409 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_73 = ((NPObject *)(ma)); __jeti_tmp_73 ? ((void (*)(NPObject *, SEL, NPObject *, size_t))((struct jeti_vtable *)__jeti_tmp_73->isa->vtable)->insertObject_atIndex_)(__jeti_tmp_73, __jeti_sel_insertObject_atIndex_, jeti_stringFromCstr("y"), 0) : 0; });
+#line 410 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_74 = ((NPObject *)(ma)); __jeti_tmp_74 ? ((void (*)(NPObject *, SEL, size_t, NPObject *))((struct jeti_vtable *)__jeti_tmp_74->isa->vtable)->replaceObjectAtIndex_withObject_)(__jeti_tmp_74, __jeti_sel_replaceObjectAtIndex_withObject_, 1, z) : 0; });
+#line 411 "tests/full_syntax_test.jeti"
+    _Bool has = ({ NPObject *__jeti_tmp_75 = ((NPObject *)(ma)); __jeti_tmp_75 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_75->isa->vtable)->containsObject_)(__jeti_tmp_75, __jeti_sel_containsObject_, jeti_stringFromCstr("z")) : (_Bool){0}; });
+#line 412 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_33 = ({ NPObject *__jeti_tmp_76 = ((NPObject *)(ma)); __jeti_tmp_76 ? ((size_t (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_76->isa->vtable)->indexOfObject_)(__jeti_tmp_76, __jeti_sel_indexOfObject_, jeti_stringFromCstr("z")) : (size_t){0}; });
     int idx = (int)__jeti_eh_tmp_33;
-    ({ NPObject *__jeti_tmp_69 = ((NPObject *)(ma)); __jeti_tmp_69 ? ((void (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_69->isa->vtable)->removeObjectAtIndex_)(__jeti_tmp_69, __jeti_sel_removeObjectAtIndex_, 0) : 0; });
-    ({ NPObject *__jeti_tmp_70 = ((NPObject *)(ma)); __jeti_tmp_70 ? ((void (*)(NPObject *, SEL, NPObject *, size_t))((struct jeti_vtable *)__jeti_tmp_70->isa->vtable)->setObject_atIndex_)(__jeti_tmp_70, __jeti_sel_setObject_atIndex_, jeti_stringFromCstr("w"), 0) : 0; });
-    NPString * m0 = (NPString *)(({ NPObject *__jeti_tmp_71 = ((NPObject *)(ma)); __jeti_tmp_71 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_71->isa->vtable)->objectAtIndex_)(__jeti_tmp_71, __jeti_sel_objectAtIndex_, 0) : (NPObject *){0}; }));
-    __auto_type __jeti_eh_tmp_34 = ({ NPObject *__jeti_tmp_72 = ((NPObject *)(m0)); __jeti_tmp_72 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_72->isa->vtable)->UTF8String)(__jeti_tmp_72, __jeti_sel_UTF8String) : 0; });
+#line 413 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_77 = ((NPObject *)(ma)); __jeti_tmp_77 ? ((void (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_77->isa->vtable)->removeObjectAtIndex_)(__jeti_tmp_77, __jeti_sel_removeObjectAtIndex_, 0) : 0; });
+#line 414 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_78 = ((NPObject *)(ma)); __jeti_tmp_78 ? ((void (*)(NPObject *, SEL, NPObject *, size_t))((struct jeti_vtable *)__jeti_tmp_78->isa->vtable)->setObject_atIndex_)(__jeti_tmp_78, __jeti_sel_setObject_atIndex_, jeti_stringFromCstr("w"), 0) : 0; });
+#line 415 "tests/full_syntax_test.jeti"
+    NPString * m0 = (NPString *)(({ NPObject *__jeti_tmp_79 = ((NPObject *)(ma)); __jeti_tmp_79 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_79->isa->vtable)->objectAtIndex_)(__jeti_tmp_79, __jeti_sel_objectAtIndex_, 0) : (NPObject *){0}; }));
+#line 416 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_34 = ({ NPObject *__jeti_tmp_80 = ((NPObject *)(m0)); __jeti_tmp_80 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_80->isa->vtable)->UTF8String)(__jeti_tmp_80, __jeti_sel_UTF8String) : 0; });
     printf("3.4 marr %d %d %s\n", has, idx, __jeti_eh_tmp_34);
+#line 419 "tests/full_syntax_test.jeti"
     NPMutableDictionary * md = (NPMutableDictionary *)(NPMutableDictionary_dictionary(&JETI_CLASS_$_NPMutableDictionary, __jeti_sel_dictionary));
+#line 420 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_35 = NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 1);
-    ({ NPObject *__jeti_tmp_73 = ((NPObject *)(md)); __jeti_tmp_73 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_73->isa->vtable)->setObject_forKey_)(__jeti_tmp_73, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_35, jeti_stringFromCstr("k1")) : 0; });
+    ({ NPObject *__jeti_tmp_81 = ((NPObject *)(md)); __jeti_tmp_81 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_81->isa->vtable)->setObject_forKey_)(__jeti_tmp_81, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_35, jeti_stringFromCstr("k1")) : 0; });
+#line 421 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_36 = NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 2);
-    ({ NPObject *__jeti_tmp_74 = ((NPObject *)(md)); __jeti_tmp_74 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_74->isa->vtable)->setObject_forKey_)(__jeti_tmp_74, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_36, jeti_stringFromCstr("k2")) : 0; });
+    ({ NPObject *__jeti_tmp_82 = ((NPObject *)(md)); __jeti_tmp_82 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_82->isa->vtable)->setObject_forKey_)(__jeti_tmp_82, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_36, jeti_stringFromCstr("k2")) : 0; });
+#line 422 "tests/full_syntax_test.jeti"
     __auto_type __jeti_eh_tmp_37 = NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 9);
-    ({ NPObject *__jeti_tmp_75 = ((NPObject *)(md)); __jeti_tmp_75 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_75->isa->vtable)->setObject_forKey_)(__jeti_tmp_75, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_37, jeti_stringFromCstr("k1")) : 0; });
-    NPArray * keys = (NPArray *)(({ NPObject *__jeti_tmp_76 = ((NPObject *)(md)); __jeti_tmp_76 ? ((NPArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_76->isa->vtable)->allKeys)(__jeti_tmp_76, __jeti_sel_allKeys) : 0; }));
-    ({ NPObject *__jeti_tmp_77 = ((NPObject *)(md)); __jeti_tmp_77 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_77->isa->vtable)->removeObjectForKey_)(__jeti_tmp_77, __jeti_sel_removeObjectForKey_, jeti_stringFromCstr("k2")) : 0; });
-    __auto_type __jeti_eh_tmp_38 = ({ NPObject *__jeti_tmp_78 = ((NPObject *)(keys)); __jeti_tmp_78 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_78->isa->vtable)->count)(__jeti_tmp_78, __jeti_sel_count) : (size_t){0}; });
-    __auto_type __jeti_eh_tmp_39 = ({ NPObject *__jeti_tmp_79 = ((NPObject *)(md)); __jeti_tmp_79 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_79->isa->vtable)->count)(__jeti_tmp_79, __jeti_sel_count) : (size_t){0}; });
-    __auto_type __jeti_eh_tmp_40 = ({ NPObject *__jeti_tmp_80 = ((NPObject *)(md)); __jeti_tmp_80 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_80->isa->vtable)->objectForKey_)(__jeti_tmp_80, __jeti_sel_objectForKey_, jeti_stringFromCstr("k1")) : (NPObject *){0}; });
-    __auto_type __jeti_eh_tmp_41 = ({ NPObject *__jeti_tmp_81 = ((NPObject *)(__jeti_eh_tmp_40)); __jeti_tmp_81 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_81->isa->vtable)->intValue)(__jeti_tmp_81, __jeti_sel_intValue) : (int){0}; });
+    ({ NPObject *__jeti_tmp_83 = ((NPObject *)(md)); __jeti_tmp_83 ? ((void (*)(NPObject *, SEL, NPObject *, NPObject *))((struct jeti_vtable *)__jeti_tmp_83->isa->vtable)->setObject_forKey_)(__jeti_tmp_83, __jeti_sel_setObject_forKey_, __jeti_eh_tmp_37, jeti_stringFromCstr("k1")) : 0; });
+#line 423 "tests/full_syntax_test.jeti"
+    NPArray * keys = (NPArray *)(({ NPObject *__jeti_tmp_84 = ((NPObject *)(md)); __jeti_tmp_84 ? ((NPArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_84->isa->vtable)->allKeys)(__jeti_tmp_84, __jeti_sel_allKeys) : 0; }));
+#line 424 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_85 = ((NPObject *)(md)); __jeti_tmp_85 ? ((void (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_85->isa->vtable)->removeObjectForKey_)(__jeti_tmp_85, __jeti_sel_removeObjectForKey_, jeti_stringFromCstr("k2")) : 0; });
+#line 425 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_38 = ({ NPObject *__jeti_tmp_86 = ((NPObject *)(keys)); __jeti_tmp_86 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_86->isa->vtable)->count)(__jeti_tmp_86, __jeti_sel_count) : (size_t){0}; });
+    __auto_type __jeti_eh_tmp_39 = ({ NPObject *__jeti_tmp_87 = ((NPObject *)(md)); __jeti_tmp_87 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_87->isa->vtable)->count)(__jeti_tmp_87, __jeti_sel_count) : (size_t){0}; });
+    __auto_type __jeti_eh_tmp_40 = ({ NPObject *__jeti_tmp_88 = ((NPObject *)(md)); __jeti_tmp_88 ? ((NPObject * (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_88->isa->vtable)->objectForKey_)(__jeti_tmp_88, __jeti_sel_objectForKey_, jeti_stringFromCstr("k1")) : (NPObject *){0}; });
+    __auto_type __jeti_eh_tmp_41 = ({ NPObject *__jeti_tmp_89 = ((NPObject *)(__jeti_eh_tmp_40)); __jeti_tmp_89 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_89->isa->vtable)->intValue)(__jeti_tmp_89, __jeti_sel_intValue) : (int){0}; });
     printf("3.5 mdict %zu %zu %d\n", __jeti_eh_tmp_38, __jeti_eh_tmp_39, __jeti_eh_tmp_41);
+#line 428 "tests/full_syntax_test.jeti"
     FsIntBlock mul = ^int(int a, int b) { return (a * b); };
+#line 429 "tests/full_syntax_test.jeti"
     FsIntBlock add = ^int(int a, int b) { return (a + b); };
+#line 430 "tests/full_syntax_test.jeti"
     struct __jeti_byref_counter {
         void *__isa;
         struct __jeti_byref_counter *__forwarding;
@@ -6670,66 +7589,106 @@ __attribute__((weak)) void sec3_expressions(void ) {
         .__flags = 0,
         .__value = 0,
     };
+#line 431 "tests/full_syntax_test.jeti"
     void (^bump)(void) = ^void() { (counter.__forwarding->__value)++; };
+#line 432 "tests/full_syntax_test.jeti"
     bump();
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 0)) {
         {
+#line 432 "tests/full_syntax_test.jeti"
             bump();
+#line 1 "<jeti-generated>"
             if ((__jeti_eh_flag == 0)) {
                 {
+#line 432 "tests/full_syntax_test.jeti"
                     bump();
+#line 1 "<jeti-generated>"
                     if ((__jeti_eh_flag == 0)) {
                         {
+#line 433 "tests/full_syntax_test.jeti"
                             printf("3.6 block %d %d %d\n", mul(6, 7), add(2, 3), counter.__forwarding->__value);
+#line 1 "<jeti-generated>"
                             if ((__jeti_eh_flag == 0)) {
                                 {
+#line 434 "tests/full_syntax_test.jeti"
                                     printf("3.7 blockarg %d\n", fs_call_block(mul, 5, 6));
+#line 1 "<jeti-generated>"
                                     if ((__jeti_eh_flag == 0)) {
                                         {
+#line 438 "tests/full_syntax_test.jeti"
                                             SEL s1 = __jeti_sel_poke;
+#line 439 "tests/full_syntax_test.jeti"
                                             (void)s1;
+#line 440 "tests/full_syntax_test.jeti"
                                             __auto_type __jeti_eh_tmp_42 = jeti_resp_poke(sp);
                                             __auto_type __jeti_eh_tmp_43 = jeti_resp_color(sp);
                                             printf("3.8 sel %d %d\n", __jeti_eh_tmp_42, __jeti_eh_tmp_43);
+#line 445 "tests/full_syntax_test.jeti"
                                             NPString * base = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "jeti"));
-                                            NPString * joined = (NPString *)(({ NPObject *__jeti_tmp_82 = ((NPObject *)(base)); __jeti_tmp_82 ? ((NPString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_82->isa->vtable)->stringByAppendingString_)(__jeti_tmp_82, __jeti_sel_stringByAppendingString_, (NPString *)(jeti_stringFromCstr("-full"))) : 0; }));
-                                            _Bool eq = ({ NPObject *__jeti_tmp_83 = ((NPObject *)(joined)); __jeti_tmp_83 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_83->isa->vtable)->isEqualToString_)(__jeti_tmp_83, __jeti_sel_isEqualToString_, (NPString *)(jeti_stringFromCstr("jeti-full"))) : (int){0}; });
-                                            NPString * desc = (NPString *)(({ NPObject *__jeti_tmp_84 = ((NPObject *)(joined)); __jeti_tmp_84 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_84->isa->vtable)->description)(__jeti_tmp_84, __jeti_sel_description) : 0; }));
-                                            __auto_type __jeti_eh_tmp_44 = ({ NPObject *__jeti_tmp_85 = ((NPObject *)(joined)); __jeti_tmp_85 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_85->isa->vtable)->UTF8String)(__jeti_tmp_85, __jeti_sel_UTF8String) : 0; });
-                                            __auto_type __jeti_eh_tmp_45 = ({ NPObject *__jeti_tmp_86 = ((NPObject *)(joined)); __jeti_tmp_86 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_86->isa->vtable)->length)(__jeti_tmp_86, __jeti_sel_length) : (size_t){0}; });
-                                            __auto_type __jeti_eh_tmp_46 = ({ NPObject *__jeti_tmp_87 = ((NPObject *)(desc)); __jeti_tmp_87 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_87->isa->vtable)->UTF8String)(__jeti_tmp_87, __jeti_sel_UTF8String) : 0; });
+#line 446 "tests/full_syntax_test.jeti"
+                                            NPString * joined = (NPString *)(({ NPObject *__jeti_tmp_90 = ((NPObject *)(base)); __jeti_tmp_90 ? ((NPString * (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_90->isa->vtable)->stringByAppendingString_)(__jeti_tmp_90, __jeti_sel_stringByAppendingString_, (NPString *)(jeti_stringFromCstr("-full"))) : 0; }));
+#line 447 "tests/full_syntax_test.jeti"
+                                            _Bool eq = ({ NPObject *__jeti_tmp_91 = ((NPObject *)(joined)); __jeti_tmp_91 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_91->isa->vtable)->isEqualToString_)(__jeti_tmp_91, __jeti_sel_isEqualToString_, (NPString *)(jeti_stringFromCstr("jeti-full"))) : (int){0}; });
+#line 448 "tests/full_syntax_test.jeti"
+                                            NPString * desc = (NPString *)(({ NPObject *__jeti_tmp_92 = ((NPObject *)(joined)); __jeti_tmp_92 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_92->isa->vtable)->description)(__jeti_tmp_92, __jeti_sel_description) : 0; }));
+#line 449 "tests/full_syntax_test.jeti"
+                                            __auto_type __jeti_eh_tmp_44 = ({ NPObject *__jeti_tmp_93 = ((NPObject *)(joined)); __jeti_tmp_93 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_93->isa->vtable)->UTF8String)(__jeti_tmp_93, __jeti_sel_UTF8String) : 0; });
+                                            __auto_type __jeti_eh_tmp_45 = ({ NPObject *__jeti_tmp_94 = ((NPObject *)(joined)); __jeti_tmp_94 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_94->isa->vtable)->length)(__jeti_tmp_94, __jeti_sel_length) : (size_t){0}; });
+                                            __auto_type __jeti_eh_tmp_46 = ({ NPObject *__jeti_tmp_95 = ((NPObject *)(desc)); __jeti_tmp_95 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_95->isa->vtable)->UTF8String)(__jeti_tmp_95, __jeti_sel_UTF8String) : 0; });
                                             printf("3.9 str %s %d %zu %s\n", __jeti_eh_tmp_44, eq, __jeti_eh_tmp_45, __jeti_eh_tmp_46);
+#line 452 "tests/full_syntax_test.jeti"
                                             NPMutableString * mstr = (NPMutableString *)(NPMutableString_stringWithUTF8String_(&JETI_CLASS_$_NPMutableString, __jeti_sel_stringWithUTF8String_, "a"));
-                                            ({ NPObject *__jeti_tmp_88 = ((NPObject *)(mstr)); __jeti_tmp_88 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_88->isa->vtable)->appendString_)(__jeti_tmp_88, __jeti_sel_appendString_, (NPString *)(jeti_stringFromCstr("b"))) : 0; });
-                                            ({ NPObject *__jeti_tmp_89 = ((NPObject *)(mstr)); __jeti_tmp_89 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_89->isa->vtable)->appendString_)(__jeti_tmp_89, __jeti_sel_appendString_, (NPString *)(jeti_stringFromCstr("c"))) : 0; });
-                                            __auto_type __jeti_eh_tmp_47 = ({ NPObject *__jeti_tmp_90 = ((NPObject *)(mstr)); __jeti_tmp_90 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_90->isa->vtable)->UTF8String)(__jeti_tmp_90, __jeti_sel_UTF8String) : 0; });
-                                            __auto_type __jeti_eh_tmp_48 = ({ NPObject *__jeti_tmp_91 = ((NPObject *)(mstr)); __jeti_tmp_91 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_91->isa->vtable)->length)(__jeti_tmp_91, __jeti_sel_length) : (size_t){0}; });
+#line 453 "tests/full_syntax_test.jeti"
+                                            ({ NPObject *__jeti_tmp_96 = ((NPObject *)(mstr)); __jeti_tmp_96 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_96->isa->vtable)->appendString_)(__jeti_tmp_96, __jeti_sel_appendString_, (NPString *)(jeti_stringFromCstr("b"))) : 0; });
+#line 454 "tests/full_syntax_test.jeti"
+                                            ({ NPObject *__jeti_tmp_97 = ((NPObject *)(mstr)); __jeti_tmp_97 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_97->isa->vtable)->appendString_)(__jeti_tmp_97, __jeti_sel_appendString_, (NPString *)(jeti_stringFromCstr("c"))) : 0; });
+#line 455 "tests/full_syntax_test.jeti"
+                                            __auto_type __jeti_eh_tmp_47 = ({ NPObject *__jeti_tmp_98 = ((NPObject *)(mstr)); __jeti_tmp_98 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_98->isa->vtable)->UTF8String)(__jeti_tmp_98, __jeti_sel_UTF8String) : 0; });
+                                            __auto_type __jeti_eh_tmp_48 = ({ NPObject *__jeti_tmp_99 = ((NPObject *)(mstr)); __jeti_tmp_99 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_99->isa->vtable)->length)(__jeti_tmp_99, __jeti_sel_length) : (size_t){0}; });
                                             printf("3.10 mstr %s %zu\n", __jeti_eh_tmp_47, __jeti_eh_tmp_48);
-                                            __auto_type __jeti_eh_tmp_49 = ({ NPObject *__jeti_tmp_92 = ((NPObject *)(sp)); __jeti_tmp_92 ? ((int (*)(NPObject *, SEL, int, ...))((struct jeti_vtable *)__jeti_tmp_92->isa->vtable)->sum_)(__jeti_tmp_92, __jeti_sel_sum_, 1, 2, 0) : (int){0}; });
-                                            __auto_type __jeti_eh_tmp_50 = ({ NPObject *__jeti_tmp_93 = ((NPObject *)(sp)); __jeti_tmp_93 ? ((int (*)(NPObject *, SEL, int, ...))((struct jeti_vtable *)__jeti_tmp_93->isa->vtable)->sum_)(__jeti_tmp_93, __jeti_sel_sum_, __jeti_eh_tmp_49, 10, 0) : (int){0}; });
+#line 458 "tests/full_syntax_test.jeti"
+                                            __auto_type __jeti_eh_tmp_49 = ({ NPObject *__jeti_tmp_100 = ((NPObject *)(sp)); __jeti_tmp_100 ? ((int (*)(NPObject *, SEL, int, ...))((struct jeti_vtable *)__jeti_tmp_100->isa->vtable)->sum_)(__jeti_tmp_100, __jeti_sel_sum_, 1, 2, 0) : (int){0}; });
+                                            __auto_type __jeti_eh_tmp_50 = ({ NPObject *__jeti_tmp_101 = ((NPObject *)(sp)); __jeti_tmp_101 ? ((int (*)(NPObject *, SEL, int, ...))((struct jeti_vtable *)__jeti_tmp_101->isa->vtable)->sum_)(__jeti_tmp_101, __jeti_sel_sum_, __jeti_eh_tmp_49, 10, 0) : (int){0}; });
                                             printf("3.11 nested %d\n", __jeti_eh_tmp_50);
+#line 461 "tests/full_syntax_test.jeti"
                                             int bits = 240;
+#line 462 "tests/full_syntax_test.jeti"
                                             (bits |= 15);
                                             (bits &= 60);
                                             (bits ^= 255);
                                             (bits <<= 2);
                                             (bits >>= 1);
+#line 463 "tests/full_syntax_test.jeti"
                                             int zero = 0;
+#line 464 "tests/full_syntax_test.jeti"
                                             int shortcir = (((zero != 0)) && (((10 / zero) > 0)));
+#line 465 "tests/full_syntax_test.jeti"
                                             int tern = ((bits > 100)) ? bits : -bits;
+#line 466 "tests/full_syntax_test.jeti"
                                             int comma = ((zero = 3, (zero * 2)));
+#line 467 "tests/full_syntax_test.jeti"
                                             printf("3.12 ops %d %d %d %d %zu\n", bits, shortcir, tern, comma, sizeof(struct FsPoint));
+#line 470 "tests/full_syntax_test.jeti"
                                             int post = 5;
+#line 471 "tests/full_syntax_test.jeti"
                                             int po = (post)++;
+#line 472 "tests/full_syntax_test.jeti"
                                             int pr = --post;
+#line 473 "tests/full_syntax_test.jeti"
                                             int * pip = &post;
+#line 474 "tests/full_syntax_test.jeti"
                                             ((*pip))--;
+#line 475 "tests/full_syntax_test.jeti"
                                             printf("3.13 incdec %d %d %d\n", po, pr, post);
+#line 478 "tests/full_syntax_test.jeti"
                                             NPClass * cls = (NPClass *)(&JETI_CLASS_$_FsSprite);
+#line 479 "tests/full_syntax_test.jeti"
                                             __auto_type __jeti_eh_tmp_51 = &JETI_CLASS_$_FsSprite;
                                             __auto_type __jeti_eh_tmp_52 = (NPClass *)((jeti_root *)sp)->isa;
                                             printf("3.14 class %d %d\n", (cls == __jeti_eh_tmp_51), (__jeti_eh_tmp_52 == cls));
-                                            NPLog((NPString *)jeti_stringFromCstr("3.15 nplog %s %d"), joined ? ({ NPObject *__jeti_tmp_94 = ((NPObject *)(({ NPObject *__jeti_tmp_95 = ((NPObject *)(joined)); __jeti_tmp_95 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_95->isa->vtable)->description)(__jeti_tmp_95, __jeti_sel_description) : 0; }))); __jeti_tmp_94 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_94->isa->vtable)->UTF8String)(__jeti_tmp_94, __jeti_sel_UTF8String) : 0; }) : "(null)", 7);
+#line 482 "tests/full_syntax_test.jeti"
+                                            NPLog((NPString *)jeti_stringFromCstr("3.15 nplog %s %d"), joined ? ({ NPObject *__jeti_tmp_102 = ((NPObject *)(({ NPObject *__jeti_tmp_103 = ((NPObject *)(joined)); __jeti_tmp_103 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_103->isa->vtable)->description)(__jeti_tmp_103, __jeti_sel_description) : 0; }))); __jeti_tmp_102 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_102->isa->vtable)->UTF8String)(__jeti_tmp_102, __jeti_sel_UTF8String) : 0; }) : "(null)", 7);
                                         }
                                     }
                                 }
@@ -6740,6 +7699,7 @@ __attribute__((weak)) void sec3_expressions(void ) {
             }
         }
     }
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         jeti_release(sp);
         return;
@@ -6748,69 +7708,98 @@ __attribute__((weak)) void sec3_expressions(void ) {
 }
 
 __attribute__((weak)) void sec4_control_runtime(void ) {
+#line 502 "tests/full_syntax_test.jeti"
     printf("== §4 control/runtime ==\n");
+#line 505 "tests/full_syntax_test.jeti"
     NPArray * arr = (NPArray *)(jeti_array_create(3, jeti_stringFromCstr("aa"), jeti_stringFromCstr("bb"), jeti_stringFromCstr("cc")));
+#line 506 "tests/full_syntax_test.jeti"
     int seen = 0;
+#line 507 "tests/full_syntax_test.jeti"
     NPString * last = NULL;
+#line 508 "tests/full_syntax_test.jeti"
     {
         NPObject * __jeti_fi = (NPObject *)(arr);
-        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_96 = ((NPObject *)(__jeti_fi)); __jeti_tmp_96 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_96->isa->vtable)->count)(__jeti_tmp_96, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
-            NPString * item = (NPString *)(({ NPObject *__jeti_tmp_97 = ((NPObject *)(__jeti_fi)); __jeti_tmp_97 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_97->isa->vtable)->objectAtIndex_)(__jeti_tmp_97, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
+        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_104 = ((NPObject *)(__jeti_fi)); __jeti_tmp_104 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_104->isa->vtable)->count)(__jeti_tmp_104, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
+            NPString * item = (NPString *)(({ NPObject *__jeti_tmp_105 = ((NPObject *)(__jeti_fi)); __jeti_tmp_105 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_105->isa->vtable)->objectAtIndex_)(__jeti_tmp_105, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
+#line 509 "tests/full_syntax_test.jeti"
             (seen)++;
+#line 510 "tests/full_syntax_test.jeti"
             last = item;
         }
     }
-    __auto_type __jeti_eh_tmp_53 = ({ NPObject *__jeti_tmp_98 = ((NPObject *)(last)); __jeti_tmp_98 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_98->isa->vtable)->UTF8String)(__jeti_tmp_98, __jeti_sel_UTF8String) : 0; });
+#line 512 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_53 = ({ NPObject *__jeti_tmp_106 = ((NPObject *)(last)); __jeti_tmp_106 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_106->isa->vtable)->UTF8String)(__jeti_tmp_106, __jeti_sel_UTF8String) : 0; });
     printf("4.1 forin %d %s\n", seen, __jeti_eh_tmp_53);
+#line 515 "tests/full_syntax_test.jeti"
     NPArray * outer = (NPArray *)(jeti_array_create(2, NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 1), NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 2)));
+#line 516 "tests/full_syntax_test.jeti"
     int pairs = 0;
+#line 517 "tests/full_syntax_test.jeti"
     {
         NPObject * __jeti_fi = (NPObject *)(outer);
-        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_99 = ((NPObject *)(__jeti_fi)); __jeti_tmp_99 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_99->isa->vtable)->count)(__jeti_tmp_99, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
-            NPNumber * o = (NPNumber *)(({ NPObject *__jeti_tmp_100 = ((NPObject *)(__jeti_fi)); __jeti_tmp_100 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_100->isa->vtable)->objectAtIndex_)(__jeti_tmp_100, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
+        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_107 = ((NPObject *)(__jeti_fi)); __jeti_tmp_107 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_107->isa->vtable)->count)(__jeti_tmp_107, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
+            NPNumber * o = (NPNumber *)(({ NPObject *__jeti_tmp_108 = ((NPObject *)(__jeti_fi)); __jeti_tmp_108 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_108->isa->vtable)->objectAtIndex_)(__jeti_tmp_108, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
+#line 518 "tests/full_syntax_test.jeti"
             {
                 NPObject * __jeti_fi = (NPObject *)(arr);
-                for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_101 = ((NPObject *)(__jeti_fi)); __jeti_tmp_101 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_101->isa->vtable)->count)(__jeti_tmp_101, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
-                    NPString * i = (NPString *)(({ NPObject *__jeti_tmp_102 = ((NPObject *)(__jeti_fi)); __jeti_tmp_102 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_102->isa->vtable)->objectAtIndex_)(__jeti_tmp_102, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
+                for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_109 = ((NPObject *)(__jeti_fi)); __jeti_tmp_109 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_109->isa->vtable)->count)(__jeti_tmp_109, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
+                    NPString * i = (NPString *)(({ NPObject *__jeti_tmp_110 = ((NPObject *)(__jeti_fi)); __jeti_tmp_110 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_110->isa->vtable)->objectAtIndex_)(__jeti_tmp_110, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
                     (pairs)++;
                 }
             }
         }
     }
+#line 520 "tests/full_syntax_test.jeti"
     NPArray * empty = (NPArray *)(jeti_array_create(0));
+#line 521 "tests/full_syntax_test.jeti"
     int empt = 0;
+#line 522 "tests/full_syntax_test.jeti"
     {
         NPObject * __jeti_fi = (NPObject *)(empty);
-        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_103 = ((NPObject *)(__jeti_fi)); __jeti_tmp_103 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_103->isa->vtable)->count)(__jeti_tmp_103, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
-            NPString * i = (NPString *)(({ NPObject *__jeti_tmp_104 = ((NPObject *)(__jeti_fi)); __jeti_tmp_104 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_104->isa->vtable)->objectAtIndex_)(__jeti_tmp_104, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
+        for (unsigned long __jeti_fi_i = 0;  (__jeti_fi_i < ({ NPObject *__jeti_tmp_111 = ((NPObject *)(__jeti_fi)); __jeti_tmp_111 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_111->isa->vtable)->count)(__jeti_tmp_111, __jeti_sel_count) : (size_t){0}; })); (__jeti_fi_i)++) {
+            NPString * i = (NPString *)(({ NPObject *__jeti_tmp_112 = ((NPObject *)(__jeti_fi)); __jeti_tmp_112 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_112->isa->vtable)->objectAtIndex_)(__jeti_tmp_112, __jeti_sel_objectAtIndex_, __jeti_fi_i) : (NPObject *){0}; }));
             (empt)++;
         }
     }
+#line 523 "tests/full_syntax_test.jeti"
     printf("4.2 nest %d %d\n", pairs, empt);
+#line 526 "tests/full_syntax_test.jeti"
     int w = 0;
     int dw = 0;
     int cont = 0;
+#line 527 "tests/full_syntax_test.jeti"
     while ((w < 3)) {
         (w)++;
     }
+#line 528 "tests/full_syntax_test.jeti"
     do {
         (dw)++;
     }
     while ((dw < 4));
+#line 532 "tests/full_syntax_test.jeti"
     for (int i = 0;  (i < 6); (i)++) {
+#line 530 "tests/full_syntax_test.jeti"
         if (((i % 2) == 0)) {
             continue;
         }
+#line 531 "tests/full_syntax_test.jeti"
         (cont += i);
     }
+#line 533 "tests/full_syntax_test.jeti"
     printf("4.3 loops %d %d %d\n", w, dw, cont);
-    NPObject *__jeti_tmp_105 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
-    NPObject * subj = __jeti_tmp_105 ? ((struct jeti_vtable *)__jeti_tmp_105->isa->vtable)->initWithId_(__jeti_tmp_105, __jeti_sel_initWithId_, 5) : 0;
+#line 536 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_113 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
+    NPObject * subj = __jeti_tmp_113 ? ((struct jeti_vtable *)__jeti_tmp_113->isa->vtable)->initWithId_(__jeti_tmp_113, __jeti_sel_initWithId_, 5) : 0;
+#line 537 "tests/full_syntax_test.jeti"
     int t1 = 0;
+#line 548 "tests/full_syntax_test.jeti"
     {
         NPObject * __jeti_sw = (NPObject *)subj;
+#line 540 "tests/full_syntax_test.jeti"
         FsErrHigh * e = (FsErrHigh *)(NPObject *)__jeti_sw;
+#line 543 "tests/full_syntax_test.jeti"
         FsSprite * s = (FsSprite *)(NPObject *)__jeti_sw;
+#line 548 "tests/full_syntax_test.jeti"
         if (jeti_isKindOfClass((NPObject *)__jeti_sw, &JETI_CLASS_$_FsErrHigh)) {
             goto __jeti_case_0_0;
         }
@@ -6818,75 +7807,101 @@ __attribute__((weak)) void sec4_control_runtime(void ) {
             goto __jeti_case_0_1;
         }
         goto __jeti_case_0_d;
+#line 540 "tests/full_syntax_test.jeti"
         {
 __jeti_case_0_0:
             {
                 t1 = 1;
+#line 541 "tests/full_syntax_test.jeti"
                 goto __jeti_sw0_end;
             }
         }
+#line 543 "tests/full_syntax_test.jeti"
         {
 __jeti_case_0_1:
             {
                 t1 = 2;
+#line 544 "tests/full_syntax_test.jeti"
                 goto __jeti_sw0_end;
             }
         }
+#line 548 "tests/full_syntax_test.jeti"
         {
 __jeti_case_0_d:
+#line 546 "tests/full_syntax_test.jeti"
             {
                 t1 = 9;
+#line 547 "tests/full_syntax_test.jeti"
                 goto __jeti_sw0_end;
             }
         }
+#line 548 "tests/full_syntax_test.jeti"
         {
 __jeti_sw0_end:
+#line 1 "<jeti-generated>"
             {
             }
         }
     }
+#line 549 "tests/full_syntax_test.jeti"
     printf("4.4 pat-bind %d\n", t1);
+#line 552 "tests/full_syntax_test.jeti"
     NPString * sv = (NPString *)(jeti_stringFromCstr("hit"));
+#line 553 "tests/full_syntax_test.jeti"
     int t2 = 0;
+#line 564 "tests/full_syntax_test.jeti"
     {
         NPObject * __jeti_sw = (NPObject *)sv;
-        if (({ NPObject *__jeti_tmp_106 = ((NPObject *)(__jeti_sw)); __jeti_tmp_106 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_106->isa->vtable)->isEqual_)(__jeti_tmp_106, __jeti_sel_isEqual_, (NPObject *)(jeti_stringFromCstr("no"))) : (_Bool){0}; })) {
+        if (({ NPObject *__jeti_tmp_114 = ((NPObject *)(__jeti_sw)); __jeti_tmp_114 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_114->isa->vtable)->isEqual_)(__jeti_tmp_114, __jeti_sel_isEqual_, (NPObject *)(jeti_stringFromCstr("no"))) : (_Bool){0}; })) {
             goto __jeti_case_1_0;
         }
-        if (({ NPObject *__jeti_tmp_107 = ((NPObject *)(__jeti_sw)); __jeti_tmp_107 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_107->isa->vtable)->isEqual_)(__jeti_tmp_107, __jeti_sel_isEqual_, (NPObject *)(jeti_stringFromCstr("hit"))) : (_Bool){0}; })) {
+        if (({ NPObject *__jeti_tmp_115 = ((NPObject *)(__jeti_sw)); __jeti_tmp_115 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_115->isa->vtable)->isEqual_)(__jeti_tmp_115, __jeti_sel_isEqual_, (NPObject *)(jeti_stringFromCstr("hit"))) : (_Bool){0}; })) {
             goto __jeti_case_1_1;
         }
         goto __jeti_case_1_d;
+#line 556 "tests/full_syntax_test.jeti"
         {
 __jeti_case_1_0:
             {
                 t2 = 1;
+#line 557 "tests/full_syntax_test.jeti"
                 goto __jeti_sw1_end;
             }
         }
+#line 559 "tests/full_syntax_test.jeti"
         {
 __jeti_case_1_1:
             {
                 t2 = 2;
+#line 560 "tests/full_syntax_test.jeti"
                 goto __jeti_sw1_end;
             }
         }
+#line 564 "tests/full_syntax_test.jeti"
         {
 __jeti_case_1_d:
+#line 562 "tests/full_syntax_test.jeti"
             {
                 t2 = 9;
+#line 563 "tests/full_syntax_test.jeti"
                 goto __jeti_sw1_end;
             }
         }
+#line 564 "tests/full_syntax_test.jeti"
         {
 __jeti_sw1_end:
+#line 1 "<jeti-generated>"
             {
             }
         }
     }
+#line 565 "tests/full_syntax_test.jeti"
     printf("4.5 pat-lit %d\n", t2);
+#line 568 "tests/full_syntax_test.jeti"
     int n = 42;
+#line 569 "tests/full_syntax_test.jeti"
     int t3 = 0;
+#line 579 "tests/full_syntax_test.jeti"
     {
         __auto_type __jeti_sw = n;
         if ((__jeti_sw > 100)) {
@@ -6896,48 +7911,67 @@ __jeti_sw1_end:
             goto __jeti_case_2_1;
         }
         goto __jeti_case_2_d;
+#line 572 "tests/full_syntax_test.jeti"
         {
 __jeti_case_2_0:
             {
                 t3 = 1;
+#line 573 "tests/full_syntax_test.jeti"
                 goto __jeti_sw2_end;
             }
         }
+#line 575 "tests/full_syntax_test.jeti"
         {
 __jeti_case_2_1:
             {
                 t3 = 2;
+#line 576 "tests/full_syntax_test.jeti"
                 goto __jeti_sw2_end;
             }
         }
+#line 579 "tests/full_syntax_test.jeti"
         {
 __jeti_case_2_d:
+#line 578 "tests/full_syntax_test.jeti"
             t3 = 3;
         }
+#line 579 "tests/full_syntax_test.jeti"
         {
 __jeti_sw2_end:
+#line 1 "<jeti-generated>"
             {
             }
         }
     }
+#line 580 "tests/full_syntax_test.jeti"
     int t4 = 0;
+#line 590 "tests/full_syntax_test.jeti"
     switch (n) {
+#line 583 "tests/full_syntax_test.jeti"
         case 7:
             t4 = 1;
+#line 584 "tests/full_syntax_test.jeti"
         break;
+#line 586 "tests/full_syntax_test.jeti"
         case 41:
             case 42:
                 case 43:
                     case 40:
                         t4 = 2;
+#line 587 "tests/full_syntax_test.jeti"
         break;
+#line 589 "tests/full_syntax_test.jeti"
         default:
             t4 = 3;
     }
+#line 591 "tests/full_syntax_test.jeti"
     int t5 = 0;
+#line 602 "tests/full_syntax_test.jeti"
     {
         NPObject * __jeti_sw = (NPObject *)subj;
+#line 594 "tests/full_syntax_test.jeti"
         FsSprite * s = (FsSprite *)(NPObject *)__jeti_sw;
+#line 602 "tests/full_syntax_test.jeti"
         if ((jeti_isKindOfClass((NPObject *)__jeti_sw, &JETI_CLASS_$_FsSprite) && (s->_id == 999))) {
             goto __jeti_case_3_0;
         }
@@ -6945,75 +7979,105 @@ __jeti_sw2_end:
             goto __jeti_case_3_1;
         }
         goto __jeti_case_3_d;
+#line 594 "tests/full_syntax_test.jeti"
         {
 __jeti_case_3_0:
             {
                 t5 = 1;
+#line 595 "tests/full_syntax_test.jeti"
                 goto __jeti_sw3_end;
             }
         }
+#line 597 "tests/full_syntax_test.jeti"
         {
 __jeti_case_3_1:
             {
                 FsSprite * s = (FsSprite *)(NPObject *)__jeti_sw;
                 t5 = 2;
+#line 598 "tests/full_syntax_test.jeti"
                 goto __jeti_sw3_end;
             }
         }
+#line 602 "tests/full_syntax_test.jeti"
         {
 __jeti_case_3_d:
+#line 600 "tests/full_syntax_test.jeti"
             {
                 t5 = 9;
+#line 601 "tests/full_syntax_test.jeti"
                 goto __jeti_sw3_end;
             }
         }
+#line 602 "tests/full_syntax_test.jeti"
         {
 __jeti_sw3_end:
+#line 1 "<jeti-generated>"
             {
             }
         }
     }
+#line 603 "tests/full_syntax_test.jeti"
     printf("4.6 pat-cond %d %d %d\n", t3, t4, t5);
+#line 606 "tests/full_syntax_test.jeti"
     int t6 = 0;
+#line 617 "tests/full_syntax_test.jeti"
     {
         __auto_type __jeti_sw = n;
         if ((__jeti_sw > 0)) {
             goto __jeti_case_4_0;
         }
         goto __jeti_case_4_d;
+#line 612 "tests/full_syntax_test.jeti"
         {
 __jeti_case_4_0:
             {
                 for (int i = 0;  (i < 5); (i)++) {
+#line 610 "tests/full_syntax_test.jeti"
                     if ((i == 3)) {
                         break;
                     }
+#line 611 "tests/full_syntax_test.jeti"
                     (t6)++;
                 }
+#line 613 "tests/full_syntax_test.jeti"
                 (t6 += 100);
+#line 614 "tests/full_syntax_test.jeti"
                 goto __jeti_sw4_end;
             }
         }
+#line 617 "tests/full_syntax_test.jeti"
         {
 __jeti_case_4_d:
+#line 616 "tests/full_syntax_test.jeti"
             t6 = -1;
         }
+#line 617 "tests/full_syntax_test.jeti"
         {
 __jeti_sw4_end:
+#line 1 "<jeti-generated>"
             {
             }
         }
     }
+#line 618 "tests/full_syntax_test.jeti"
     printf("4.7 pat-loopbreak %d\n", t6);
+#line 623 "tests/full_syntax_test.jeti"
     int order = 0;
+#line 637 "tests/full_syntax_test.jeti"
     {
         int __jeti_eh_saved_54 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
         __jeti_eh_flag = 0;
+#line 637 "tests/full_syntax_test.jeti"
         int __jeti_eh_done_54 = 0;
+#line 628 "tests/full_syntax_test.jeti"
         {
+#line 625 "tests/full_syntax_test.jeti"
             (order += 1);
+#line 626 "tests/full_syntax_test.jeti"
             {
-                NPObject * __jeti_eh_thrown_55 = (NPObject *)({ NPObject *__jeti_tmp_108 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrHigh, __jeti_sel_alloc))); __jeti_tmp_108 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_108->isa->vtable)->init)(__jeti_tmp_108, __jeti_sel_init) : 0; });
+                NPObject * __jeti_eh_thrown_55 = (NPObject *)({ NPObject *__jeti_tmp_116 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrHigh, __jeti_sel_alloc))); __jeti_tmp_116 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_116->isa->vtable)->init)(__jeti_tmp_116, __jeti_sel_init) : 0; });
+#line 1 "<jeti-generated>"
                 __jeti_eh_val = __jeti_eh_thrown_55;
                 jeti_retain(__jeti_eh_val);
                 jeti_autorelease(__jeti_eh_val);
@@ -7022,55 +8086,82 @@ __jeti_sw4_end:
             }
             if ((__jeti_eh_flag == 0)) {
                 {
+#line 627 "tests/full_syntax_test.jeti"
                     (order += 100);
                 }
             }
         }
+#line 637 "tests/full_syntax_test.jeti"
         if (((__jeti_eh_flag == 1) && (__jeti_eh_done_54 == 0))) {
             if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                 __jeti_eh_done_54 = 1;
                 __jeti_eh_flag = 0;
+#line 637 "tests/full_syntax_test.jeti"
                 FsErrLow * e;
+#line 631 "tests/full_syntax_test.jeti"
                 {
+#line 630 "tests/full_syntax_test.jeti"
                     (order += 10);
                 }
             }
         }
+#line 637 "tests/full_syntax_test.jeti"
         if (((__jeti_eh_flag == 1) && (__jeti_eh_done_54 == 0))) {
             if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrHigh)) {
+#line 1 "<jeti-generated>"
                 __jeti_eh_done_54 = 1;
                 __jeti_eh_flag = 0;
+#line 637 "tests/full_syntax_test.jeti"
                 FsErrHigh * e;
+#line 634 "tests/full_syntax_test.jeti"
                 {
+#line 633 "tests/full_syntax_test.jeti"
                     (order += 20);
                 }
             }
         }
+#line 637 "tests/full_syntax_test.jeti"
         {
             int __jeti_eh_saved_56 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
             __jeti_eh_flag = 0;
+#line 637 "tests/full_syntax_test.jeti"
             {
+#line 636 "tests/full_syntax_test.jeti"
                 (order += 200);
             }
+#line 1 "<jeti-generated>"
             __jeti_eh_flag = (__jeti_eh_saved_56 || __jeti_eh_flag);
         }
         __jeti_eh_flag = (__jeti_eh_saved_54 || __jeti_eh_flag);
     }
     if ((__jeti_eh_flag == 0)) {
         {
+#line 638 "tests/full_syntax_test.jeti"
             printf("4.8 try %d\n", order);
+#line 641 "tests/full_syntax_test.jeti"
             int trace = 0;
+#line 652 "tests/full_syntax_test.jeti"
             {
                 int __jeti_eh_saved_57 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                 __jeti_eh_flag = 0;
+#line 652 "tests/full_syntax_test.jeti"
                 int __jeti_eh_done_57 = 0;
+#line 649 "tests/full_syntax_test.jeti"
                 {
+#line 648 "tests/full_syntax_test.jeti"
                     {
                         int __jeti_eh_saved_58 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                         __jeti_eh_flag = 0;
+#line 645 "tests/full_syntax_test.jeti"
                         {
+#line 644 "tests/full_syntax_test.jeti"
                             {
-                                NPObject * __jeti_eh_thrown_59 = (NPObject *)({ NPObject *__jeti_tmp_109 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrLow, __jeti_sel_alloc))); __jeti_tmp_109 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_109->isa->vtable)->init)(__jeti_tmp_109, __jeti_sel_init) : 0; });
+                                NPObject * __jeti_eh_thrown_59 = (NPObject *)({ NPObject *__jeti_tmp_117 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrLow, __jeti_sel_alloc))); __jeti_tmp_117 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_117->isa->vtable)->init)(__jeti_tmp_117, __jeti_sel_init) : 0; });
+#line 1 "<jeti-generated>"
                                 __jeti_eh_val = __jeti_eh_thrown_59;
                                 jeti_retain(__jeti_eh_val);
                                 jeti_autorelease(__jeti_eh_val);
@@ -7078,45 +8169,67 @@ __jeti_sw4_end:
                                 jeti_release(__jeti_eh_thrown_59);
                             }
                         }
+#line 648 "tests/full_syntax_test.jeti"
                         {
                             int __jeti_eh_saved_60 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                             __jeti_eh_flag = 0;
+#line 648 "tests/full_syntax_test.jeti"
                             {
+#line 647 "tests/full_syntax_test.jeti"
                                 (trace += 1);
                             }
+#line 1 "<jeti-generated>"
                             __jeti_eh_flag = (__jeti_eh_saved_60 || __jeti_eh_flag);
                         }
                         __jeti_eh_flag = (__jeti_eh_saved_58 || __jeti_eh_flag);
                     }
                 }
+#line 652 "tests/full_syntax_test.jeti"
                 if (((__jeti_eh_flag == 1) && (__jeti_eh_done_57 == 0))) {
                     if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                         __jeti_eh_done_57 = 1;
                         __jeti_eh_flag = 0;
+#line 652 "tests/full_syntax_test.jeti"
                         FsErrLow * e;
                         {
+#line 651 "tests/full_syntax_test.jeti"
                             (trace += 10);
                         }
                     }
                 }
+#line 1 "<jeti-generated>"
                 __jeti_eh_flag = (__jeti_eh_saved_57 || __jeti_eh_flag);
             }
             if ((__jeti_eh_flag == 0)) {
                 {
+#line 653 "tests/full_syntax_test.jeti"
                     printf("4.9 nest %d\n", trace);
+#line 656 "tests/full_syntax_test.jeti"
                     int rethrown = 0;
+#line 668 "tests/full_syntax_test.jeti"
                     {
                         int __jeti_eh_saved_61 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                         __jeti_eh_flag = 0;
+#line 668 "tests/full_syntax_test.jeti"
                         int __jeti_eh_done_61 = 0;
+#line 665 "tests/full_syntax_test.jeti"
                         {
+#line 664 "tests/full_syntax_test.jeti"
                             {
                                 int __jeti_eh_saved_62 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                                 __jeti_eh_flag = 0;
+#line 664 "tests/full_syntax_test.jeti"
                                 int __jeti_eh_done_62 = 0;
+#line 660 "tests/full_syntax_test.jeti"
                                 {
+#line 659 "tests/full_syntax_test.jeti"
                                     {
-                                        NPObject * __jeti_eh_thrown_63 = (NPObject *)({ NPObject *__jeti_tmp_110 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrLow, __jeti_sel_alloc))); __jeti_tmp_110 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_110->isa->vtable)->init)(__jeti_tmp_110, __jeti_sel_init) : 0; });
+                                        NPObject * __jeti_eh_thrown_63 = (NPObject *)({ NPObject *__jeti_tmp_118 = ((NPObject *)(NPObject_alloc(&JETI_CLASS_$_FsErrLow, __jeti_sel_alloc))); __jeti_tmp_118 ? ((NPMutableArray * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_118->isa->vtable)->init)(__jeti_tmp_118, __jeti_sel_init) : 0; });
+#line 1 "<jeti-generated>"
                                         __jeti_eh_val = __jeti_eh_thrown_63;
                                         jeti_retain(__jeti_eh_val);
                                         jeti_autorelease(__jeti_eh_val);
@@ -7124,15 +8237,21 @@ __jeti_sw4_end:
                                         jeti_release(__jeti_eh_thrown_63);
                                     }
                                 }
+#line 664 "tests/full_syntax_test.jeti"
                                 if (((__jeti_eh_flag == 1) && (__jeti_eh_done_62 == 0))) {
                                     if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                                         __jeti_eh_done_62 = 1;
                                         __jeti_eh_flag = 0;
+#line 664 "tests/full_syntax_test.jeti"
                                         FsErrLow * e = (FsErrLow *)__jeti_eh_val;
                                         {
+#line 662 "tests/full_syntax_test.jeti"
                                             rethrown = 1;
+#line 663 "tests/full_syntax_test.jeti"
                                             {
                                                 NPObject * __jeti_eh_thrown_64 = (NPObject *)e;
+#line 1 "<jeti-generated>"
                                                 __jeti_eh_val = __jeti_eh_thrown_64;
                                                 jeti_retain(__jeti_eh_val);
                                                 jeti_autorelease(__jeti_eh_val);
@@ -7144,87 +8263,135 @@ __jeti_sw4_end:
                                 __jeti_eh_flag = (__jeti_eh_saved_62 || __jeti_eh_flag);
                             }
                         }
+#line 668 "tests/full_syntax_test.jeti"
                         if (((__jeti_eh_flag == 1) && (__jeti_eh_done_61 == 0))) {
                             if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                                 __jeti_eh_done_61 = 1;
                                 __jeti_eh_flag = 0;
+#line 668 "tests/full_syntax_test.jeti"
                                 FsErrLow * e;
                                 {
+#line 667 "tests/full_syntax_test.jeti"
                                     (rethrown += 10);
                                 }
                             }
                         }
+#line 1 "<jeti-generated>"
                         __jeti_eh_flag = (__jeti_eh_saved_61 || __jeti_eh_flag);
                     }
                     if ((__jeti_eh_flag == 0)) {
                         {
+#line 669 "tests/full_syntax_test.jeti"
                             printf("4.10 rethrow %d\n", rethrown);
-                            NPObject *__jeti_tmp_111 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
-                            FsSprite * lock = (FsSprite *)(__jeti_tmp_111 ? ((struct jeti_vtable *)__jeti_tmp_111->isa->vtable)->initWithId_(__jeti_tmp_111, __jeti_sel_initWithId_, 1) : 0);
+#line 672 "tests/full_syntax_test.jeti"
+                            NPObject *__jeti_tmp_119 = (NPObject_alloc(&JETI_CLASS_$_FsSprite, __jeti_sel_alloc));
+                            FsSprite * lock = (FsSprite *)(__jeti_tmp_119 ? ((struct jeti_vtable *)__jeti_tmp_119->isa->vtable)->initWithId_(__jeti_tmp_119, __jeti_sel_initWithId_, 1) : 0);
+#line 673 "tests/full_syntax_test.jeti"
                             int guarded = 0;
+#line 676 "tests/full_syntax_test.jeti"
                             {
                                 __attribute__((cleanup(jeti_syncAutoCleanup)))                                 long __jeti_sync_3 = jeti_syncLock((void *)lock);
+#line 675 "tests/full_syntax_test.jeti"
                                 (guarded += 5);
                             }
+#line 677 "tests/full_syntax_test.jeti"
                             printf("4.11 sync %d\n", guarded);
+#line 680 "tests/full_syntax_test.jeti"
                             int pooled = 0;
+#line 688 "tests/full_syntax_test.jeti"
                             {
+#line 1 "<jeti-generated>"
                                 jeti_autoreleasepool_t * __jeti_pool = jeti_autoreleasepoolPush();
+#line 682 "tests/full_syntax_test.jeti"
                                 NPString * p1 = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "pool1"));
+#line 686 "tests/full_syntax_test.jeti"
                                 {
+#line 1 "<jeti-generated>"
                                     jeti_autoreleasepool_t * __jeti_pool = jeti_autoreleasepoolPush();
+#line 684 "tests/full_syntax_test.jeti"
                                     NPString * p2 = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "pool2"));
-                                    __auto_type __jeti_eh_tmp_65 = ({ NPObject *__jeti_tmp_112 = ((NPObject *)(p2)); __jeti_tmp_112 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_112->isa->vtable)->length)(__jeti_tmp_112, __jeti_sel_length) : (size_t){0}; });
+#line 685 "tests/full_syntax_test.jeti"
+                                    __auto_type __jeti_eh_tmp_65 = ({ NPObject *__jeti_tmp_120 = ((NPObject *)(p2)); __jeti_tmp_120 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_120->isa->vtable)->length)(__jeti_tmp_120, __jeti_sel_length) : (size_t){0}; });
                                     (pooled += __jeti_eh_tmp_65);
+#line 1 "<jeti-generated>"
                                     jeti_autoreleasepoolPop(__jeti_pool);
                                 }
-                                __auto_type __jeti_eh_tmp_66 = ({ NPObject *__jeti_tmp_113 = ((NPObject *)(p1)); __jeti_tmp_113 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_113->isa->vtable)->length)(__jeti_tmp_113, __jeti_sel_length) : (size_t){0}; });
+#line 687 "tests/full_syntax_test.jeti"
+                                __auto_type __jeti_eh_tmp_66 = ({ NPObject *__jeti_tmp_121 = ((NPObject *)(p1)); __jeti_tmp_121 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_121->isa->vtable)->length)(__jeti_tmp_121, __jeti_sel_length) : (size_t){0}; });
                                 (pooled += __jeti_eh_tmp_66);
+#line 1 "<jeti-generated>"
                                 jeti_autoreleasepoolPop(__jeti_pool);
                             }
+#line 689 "tests/full_syntax_test.jeti"
                             printf("4.12 pool %d\n", pooled);
+#line 692 "tests/full_syntax_test.jeti"
                             int defer_log = 0;
+#line 697 "tests/full_syntax_test.jeti"
                             {
+#line 696 "tests/full_syntax_test.jeti"
                                 (defer_log += 100);
+#line 695 "tests/full_syntax_test.jeti"
                                 {
                                     (defer_log += 10);
                                 }
+#line 694 "tests/full_syntax_test.jeti"
                                 {
                                     (defer_log += 1);
                                 }
                             }
+#line 698 "tests/full_syntax_test.jeti"
                             printf("4.13 defer %d\n", defer_log);
+#line 700 "tests/full_syntax_test.jeti"
                             int defer_loop = 0;
+#line 704 "tests/full_syntax_test.jeti"
                             for (int i = 0;  (i < 3); (i)++) {
+#line 703 "tests/full_syntax_test.jeti"
                                 (defer_loop += 10);
+#line 702 "tests/full_syntax_test.jeti"
                                 {
                                     (defer_loop += 1);
                                 }
                             }
+#line 705 "tests/full_syntax_test.jeti"
                             printf("4.14 deferloop %d\n", defer_loop);
+#line 713 "tests/full_syntax_test.jeti"
                             {
-                                NPObject *__jeti_tmp_114 = (NPObject_alloc(&JETI_CLASS_$_NPObject, __jeti_sel_alloc));
-                                NPObject * owned = __jeti_tmp_114 ? ((struct jeti_vtable *)__jeti_tmp_114->isa->vtable)->init(__jeti_tmp_114, __jeti_sel_init) : 0;
-                                ({ NPObject *__jeti_tmp_115 = ((NPObject *)(owned)); __jeti_tmp_115 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_115->isa->vtable)->retain)(__jeti_tmp_115, __jeti_sel_retain) : 0; });
-                                ({ NPObject *__jeti_tmp_116 = ((NPObject *)(owned)); __jeti_tmp_116 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_116->isa->vtable)->release)(__jeti_tmp_116, __jeti_sel_release) : 0; });
-                                ({ NPObject *__jeti_tmp_117 = ((NPObject *)(owned)); __jeti_tmp_117 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_117->isa->vtable)->release)(__jeti_tmp_117, __jeti_sel_release) : 0; });
+#line 709 "tests/full_syntax_test.jeti"
+                                NPObject *__jeti_tmp_122 = (NPObject_alloc(&JETI_CLASS_$_NPObject, __jeti_sel_alloc));
+                                NPObject * owned = __jeti_tmp_122 ? ((struct jeti_vtable *)__jeti_tmp_122->isa->vtable)->init(__jeti_tmp_122, __jeti_sel_init) : 0;
+#line 710 "tests/full_syntax_test.jeti"
+                                ({ NPObject *__jeti_tmp_123 = ((NPObject *)(owned)); __jeti_tmp_123 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_123->isa->vtable)->retain)(__jeti_tmp_123, __jeti_sel_retain) : 0; });
+#line 711 "tests/full_syntax_test.jeti"
+                                ({ NPObject *__jeti_tmp_124 = ((NPObject *)(owned)); __jeti_tmp_124 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_124->isa->vtable)->release)(__jeti_tmp_124, __jeti_sel_release) : 0; });
+#line 712 "tests/full_syntax_test.jeti"
+                                ({ NPObject *__jeti_tmp_125 = ((NPObject *)(owned)); __jeti_tmp_125 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_125->isa->vtable)->release)(__jeti_tmp_125, __jeti_sel_release) : 0; });
                             }
+#line 714 "tests/full_syntax_test.jeti"
                             printf("4.15 noarc ok\n");
+#line 720 "tests/full_syntax_test.jeti"
                             __block NPString * __attribute__((cleanup(jeti_weakAutoCleanup))) weakref = NULL;
                             jeti_weakRegister((NPObject **)&weakref, (NPObject *)NULL);
+#line 725 "tests/full_syntax_test.jeti"
                             {
-                                NPObject *__jeti_tmp_118 = (NPObject_alloc(&JETI_CLASS_$_NPString, __jeti_sel_alloc));
-                                NPString * strong = (NPString *)(__jeti_tmp_118 ? ((struct jeti_vtable *)__jeti_tmp_118->isa->vtable)->initWithUTF8String_(__jeti_tmp_118, __jeti_sel_initWithUTF8String_, "weak-target") : 0);
+#line 722 "tests/full_syntax_test.jeti"
+                                NPObject *__jeti_tmp_126 = (NPObject_alloc(&JETI_CLASS_$_NPString, __jeti_sel_alloc));
+                                NPString * strong = (NPString *)(__jeti_tmp_126 ? ((struct jeti_vtable *)__jeti_tmp_126->isa->vtable)->initWithUTF8String_(__jeti_tmp_126, __jeti_sel_initWithUTF8String_, "weak-target") : 0);
+#line 723 "tests/full_syntax_test.jeti"
                                 {
                                     __auto_type __jeti_weak_val_4 = strong;
                                     jeti_weakUnregister((NPObject **)&weakref);
                                     weakref = __jeti_weak_val_4;
                                     jeti_weakRegister((NPObject **)&weakref, (NPObject *)__jeti_weak_val_4);
                                 }
+#line 724 "tests/full_syntax_test.jeti"
                                 printf("4.16 weak %d\n", (weakref != NULL));
+#line 1 "<jeti-generated>"
                                 jeti_release(strong);
                             }
+#line 726 "tests/full_syntax_test.jeti"
                             printf("4.17 weakzero %d\n", (weakref == NULL));
+#line 1 "<jeti-generated>"
                             jeti_release(lock);
                         }
                     }
@@ -7240,151 +8407,228 @@ __jeti_sw4_end:
 }
 
 __attribute__((weak)) NPString * fs_maybe_fn(void ) {
+#line 768 "tests/full_syntax_test.jeti"
     return NULL;
 }
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void fs_take_fn(NPString * s) {
-    __auto_type __jeti_eh_tmp_70 = ({ NPObject *__jeti_tmp_119 = ((NPObject *)(s)); __jeti_tmp_119 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_119->isa->vtable)->UTF8String)(__jeti_tmp_119, __jeti_sel_UTF8String) : 0; });
+#line 769 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_70 = ({ NPObject *__jeti_tmp_127 = ((NPObject *)(s)); __jeti_tmp_127 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_127->isa->vtable)->UTF8String)(__jeti_tmp_127, __jeti_sel_UTF8String) : 0; });
     printf("5.4 fn %s\n", __jeti_eh_tmp_70);
 }
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void sec5_misc(void ) {
+#line 824 "tests/full_syntax_test.jeti"
     printf("== §5 nullability/throws/async/asm ==\n");
-    NPObject *__jeti_tmp_120 = (NPObject_alloc(&JETI_CLASS_$_FsGuarded, __jeti_sel_alloc));
-    FsGuarded * g = (FsGuarded *)(__jeti_tmp_120 ? ((struct jeti_vtable *)__jeti_tmp_120->isa->vtable)->init(__jeti_tmp_120, __jeti_sel_init) : 0);
-    ({ NPObject *__jeti_tmp_121 = ((NPObject *)(g)); __jeti_tmp_121 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_121->isa->vtable)->take_)(__jeti_tmp_121, __jeti_sel_take_, (NPString *)(jeti_stringFromCstr("region"))) : 0; });
-    ({ NPObject *__jeti_tmp_122 = ((NPObject *)(g)); __jeti_tmp_122 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_122->isa->vtable)->optOut_)(__jeti_tmp_122, __jeti_sel_optOut_, (NPString *)(NULL)) : 0; });
-    __auto_type __jeti_eh_tmp_74 = ({ NPObject *__jeti_tmp_123 = ((NPObject *)(g)); __jeti_tmp_123 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_123->isa->vtable)->produce)(__jeti_tmp_123, __jeti_sel_produce) : 0; });
-    __auto_type __jeti_eh_tmp_75 = ({ NPObject *__jeti_tmp_124 = ((NPObject *)(__jeti_eh_tmp_74)); __jeti_tmp_124 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_124->isa->vtable)->UTF8String)(__jeti_tmp_124, __jeti_sel_UTF8String) : 0; });
+#line 827 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_128 = (NPObject_alloc(&JETI_CLASS_$_FsGuarded, __jeti_sel_alloc));
+    FsGuarded * g = (FsGuarded *)(__jeti_tmp_128 ? ((struct jeti_vtable *)__jeti_tmp_128->isa->vtable)->init(__jeti_tmp_128, __jeti_sel_init) : 0);
+#line 828 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_129 = ((NPObject *)(g)); __jeti_tmp_129 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_129->isa->vtable)->take_)(__jeti_tmp_129, __jeti_sel_take_, (NPString *)(jeti_stringFromCstr("region"))) : 0; });
+#line 829 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_130 = ((NPObject *)(g)); __jeti_tmp_130 ? ((void (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_130->isa->vtable)->optOut_)(__jeti_tmp_130, __jeti_sel_optOut_, (NPString *)(NULL)) : 0; });
+#line 830 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_74 = ({ NPObject *__jeti_tmp_131 = ((NPObject *)(g)); __jeti_tmp_131 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_131->isa->vtable)->produce)(__jeti_tmp_131, __jeti_sel_produce) : 0; });
+    __auto_type __jeti_eh_tmp_75 = ({ NPObject *__jeti_tmp_132 = ((NPObject *)(__jeti_eh_tmp_74)); __jeti_tmp_132 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_132->isa->vtable)->UTF8String)(__jeti_tmp_132, __jeti_sel_UTF8String) : 0; });
     printf("5.2b produce %s\n", __jeti_eh_tmp_75);
+#line 831 "tests/full_syntax_test.jeti"
     g->inRegion = (NPString *)(jeti_stringFromCstr("ivar"));
+#line 832 "tests/full_syntax_test.jeti"
     g->optIvar = NULL;
-    __auto_type __jeti_eh_tmp_76 = ({ NPObject *__jeti_tmp_125 = ((NPObject *)(g->inRegion)); __jeti_tmp_125 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_125->isa->vtable)->UTF8String)(__jeti_tmp_125, __jeti_sel_UTF8String) : 0; });
+#line 833 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_76 = ({ NPObject *__jeti_tmp_133 = ((NPObject *)(g->inRegion)); __jeti_tmp_133 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_133->isa->vtable)->UTF8String)(__jeti_tmp_133, __jeti_sel_UTF8String) : 0; });
     printf("5.2c ivar %s %d\n", __jeti_eh_tmp_76, (g->optIvar == NULL));
-    NPObject *__jeti_tmp_126 = (NPObject_alloc(&JETI_CLASS_$_FsAnnotated, __jeti_sel_alloc));
-    FsAnnotated * a = (FsAnnotated *)(__jeti_tmp_126 ? ((struct jeti_vtable *)__jeti_tmp_126->isa->vtable)->init(__jeti_tmp_126, __jeti_sel_init) : 0);
-    ({ NPObject *__jeti_tmp_127 = ((NPObject *)(a)); __jeti_tmp_127 ? ((void (*)(NPObject *, SEL, NPString *, NPString *))((struct jeti_vtable *)__jeti_tmp_127->isa->vtable)->pre_post_)(__jeti_tmp_127, __jeti_sel_pre_post_, (NPString *)(jeti_stringFromCstr("x")), (NPString *)(jeti_stringFromCstr("y"))) : 0; });
-    __auto_type __jeti_eh_tmp_77 = ({ NPObject *__jeti_tmp_128 = ((NPObject *)(a)); __jeti_tmp_128 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_128->isa->vtable)->maybe)(__jeti_tmp_128, __jeti_sel_maybe) : 0; });
-    __auto_type __jeti_eh_tmp_78 = ({ NPObject *__jeti_tmp_129 = ((NPObject *)(a)); __jeti_tmp_129 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_129->isa->vtable)->maybeC)(__jeti_tmp_129, __jeti_sel_maybeC) : 0; });
-    __auto_type __jeti_eh_tmp_79 = ({ NPObject *__jeti_tmp_130 = ((NPObject *)(__jeti_eh_tmp_78)); __jeti_tmp_130 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_130->isa->vtable)->UTF8String)(__jeti_tmp_130, __jeti_sel_UTF8String) : 0; });
+#line 836 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_134 = (NPObject_alloc(&JETI_CLASS_$_FsAnnotated, __jeti_sel_alloc));
+    FsAnnotated * a = (FsAnnotated *)(__jeti_tmp_134 ? ((struct jeti_vtable *)__jeti_tmp_134->isa->vtable)->init(__jeti_tmp_134, __jeti_sel_init) : 0);
+#line 837 "tests/full_syntax_test.jeti"
+    ({ NPObject *__jeti_tmp_135 = ((NPObject *)(a)); __jeti_tmp_135 ? ((void (*)(NPObject *, SEL, NPString *, NPString *))((struct jeti_vtable *)__jeti_tmp_135->isa->vtable)->pre_post_)(__jeti_tmp_135, __jeti_sel_pre_post_, (NPString *)(jeti_stringFromCstr("x")), (NPString *)(jeti_stringFromCstr("y"))) : 0; });
+#line 838 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_77 = ({ NPObject *__jeti_tmp_136 = ((NPObject *)(a)); __jeti_tmp_136 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_136->isa->vtable)->maybe)(__jeti_tmp_136, __jeti_sel_maybe) : 0; });
+    __auto_type __jeti_eh_tmp_78 = ({ NPObject *__jeti_tmp_137 = ((NPObject *)(a)); __jeti_tmp_137 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_137->isa->vtable)->maybeC)(__jeti_tmp_137, __jeti_sel_maybeC) : 0; });
+    __auto_type __jeti_eh_tmp_79 = ({ NPObject *__jeti_tmp_138 = ((NPObject *)(__jeti_eh_tmp_78)); __jeti_tmp_138 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_138->isa->vtable)->UTF8String)(__jeti_tmp_138, __jeti_sel_UTF8String) : 0; });
     printf("5.4b fns %d %s\n", (__jeti_eh_tmp_77 == NULL), __jeti_eh_tmp_79);
+#line 839 "tests/full_syntax_test.jeti"
     fs_take_fn(jeti_stringFromCstr("fnarg"));
+#line 840 "tests/full_syntax_test.jeti"
     printf("5.4c fnret %d\n", (fs_maybe_fn() == NULL));
-    NPObject *__jeti_tmp_131 = (NPObject_alloc(&JETI_CLASS_$_FsModes, __jeti_sel_alloc));
-    FsModes * mo = (FsModes *)(__jeti_tmp_131 ? ((struct jeti_vtable *)__jeti_tmp_131->isa->vtable)->init(__jeti_tmp_131, __jeti_sel_init) : 0);
+#line 843 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_139 = (NPObject_alloc(&JETI_CLASS_$_FsModes, __jeti_sel_alloc));
+    FsModes * mo = (FsModes *)(__jeti_tmp_139 ? ((struct jeti_vtable *)__jeti_tmp_139->isa->vtable)->init(__jeti_tmp_139, __jeti_sel_init) : 0);
+#line 844 "tests/full_syntax_test.jeti"
     struct FsPoint pp = { 1, 2 };
-    __auto_type __jeti_eh_tmp_80 = ({ NPObject *__jeti_tmp_132 = ((NPObject *)(mo)); __jeti_tmp_132 ? ((int (*)(NPObject *, SEL, FsMode, struct FsPoint))((struct jeti_vtable *)__jeti_tmp_132->isa->vtable)->mix_point_)(__jeti_tmp_132, __jeti_sel_mix_point_, FS_MODE_LOW, pp) : (int){0}; });
+#line 845 "tests/full_syntax_test.jeti"
+    __auto_type __jeti_eh_tmp_80 = ({ NPObject *__jeti_tmp_140 = ((NPObject *)(mo)); __jeti_tmp_140 ? ((int (*)(NPObject *, SEL, FsMode, struct FsPoint))((struct jeti_vtable *)__jeti_tmp_140->isa->vtable)->mix_point_)(__jeti_tmp_140, __jeti_sel_mix_point_, FS_MODE_LOW, pp) : (int){0}; });
     printf("5.5 mix %d\n", __jeti_eh_tmp_80);
-    NPObject *__jeti_tmp_133 = (NPObject_alloc(&JETI_CLASS_$_FsParser, __jeti_sel_alloc));
-    FsParser * ps = (FsParser *)(__jeti_tmp_133 ? ((struct jeti_vtable *)__jeti_tmp_133->isa->vtable)->init(__jeti_tmp_133, __jeti_sel_init) : 0);
+#line 848 "tests/full_syntax_test.jeti"
+    NPObject *__jeti_tmp_141 = (NPObject_alloc(&JETI_CLASS_$_FsParser, __jeti_sel_alloc));
+    FsParser * ps = (FsParser *)(__jeti_tmp_141 ? ((struct jeti_vtable *)__jeti_tmp_141->isa->vtable)->init(__jeti_tmp_141, __jeti_sel_init) : 0);
+#line 849 "tests/full_syntax_test.jeti"
     int caught = 0;
+#line 853 "tests/full_syntax_test.jeti"
     {
         int __jeti_eh_saved_81 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
         __jeti_eh_flag = 0;
+#line 853 "tests/full_syntax_test.jeti"
         int __jeti_eh_done_81 = 0;
+#line 852 "tests/full_syntax_test.jeti"
         {
-            ({ NPObject *__jeti_tmp_134 = ((NPObject *)(ps)); __jeti_tmp_134 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_134->isa->vtable)->strictParse_)(__jeti_tmp_134, __jeti_sel_strictParse_, (NPString *)(jeti_stringFromCstr("toolong"))) : (int){0}; });
+#line 851 "tests/full_syntax_test.jeti"
+            ({ NPObject *__jeti_tmp_142 = ((NPObject *)(ps)); __jeti_tmp_142 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_142->isa->vtable)->strictParse_)(__jeti_tmp_142, __jeti_sel_strictParse_, (NPString *)(jeti_stringFromCstr("toolong"))) : (int){0}; });
         }
+#line 853 "tests/full_syntax_test.jeti"
         if (((__jeti_eh_flag == 1) && (__jeti_eh_done_81 == 0))) {
             if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                 __jeti_eh_done_81 = 1;
                 __jeti_eh_flag = 0;
+#line 853 "tests/full_syntax_test.jeti"
                 FsErrLow * e;
                 {
                     (caught += 1);
                 }
             }
         }
+#line 1 "<jeti-generated>"
         __jeti_eh_flag = (__jeti_eh_saved_81 || __jeti_eh_flag);
     }
     if ((__jeti_eh_flag == 0)) {
         {
+#line 857 "tests/full_syntax_test.jeti"
             {
                 int __jeti_eh_saved_82 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                 __jeti_eh_flag = 0;
+#line 857 "tests/full_syntax_test.jeti"
                 int __jeti_eh_done_82 = 0;
+#line 856 "tests/full_syntax_test.jeti"
                 {
-                    ({ NPObject *__jeti_tmp_135 = ((NPObject *)(ps)); __jeti_tmp_135 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_135->isa->vtable)->looseParse_)(__jeti_tmp_135, __jeti_sel_looseParse_, (NPString *)(NULL)) : (int){0}; });
+#line 855 "tests/full_syntax_test.jeti"
+                    ({ NPObject *__jeti_tmp_143 = ((NPObject *)(ps)); __jeti_tmp_143 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_143->isa->vtable)->looseParse_)(__jeti_tmp_143, __jeti_sel_looseParse_, (NPString *)(NULL)) : (int){0}; });
                 }
+#line 857 "tests/full_syntax_test.jeti"
                 if (((__jeti_eh_flag == 1) && (__jeti_eh_done_82 == 0))) {
                     if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                         __jeti_eh_done_82 = 1;
                         __jeti_eh_flag = 0;
+#line 857 "tests/full_syntax_test.jeti"
                         FsErrLow * e;
                         {
                             (caught += 10);
                         }
                     }
                 }
+#line 1 "<jeti-generated>"
                 __jeti_eh_flag = (__jeti_eh_saved_82 || __jeti_eh_flag);
             }
             if ((__jeti_eh_flag == 0)) {
                 {
+#line 862 "tests/full_syntax_test.jeti"
                     {
                         int __jeti_eh_saved_83 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
                         __jeti_eh_flag = 0;
+#line 862 "tests/full_syntax_test.jeti"
                         int __jeti_eh_done_83 = 0;
+#line 861 "tests/full_syntax_test.jeti"
                         {
-                            ({ NPObject *__jeti_tmp_136 = ((NPObject *)(ps)); __jeti_tmp_136 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_136->isa->vtable)->looseParse_)(__jeti_tmp_136, __jeti_sel_looseParse_, (NPString *)(jeti_stringFromCstr("ok"))) : (int){0}; });
+#line 859 "tests/full_syntax_test.jeti"
+                            ({ NPObject *__jeti_tmp_144 = ((NPObject *)(ps)); __jeti_tmp_144 ? ((int (*)(NPObject *, SEL, NPString *))((struct jeti_vtable *)__jeti_tmp_144->isa->vtable)->looseParse_)(__jeti_tmp_144, __jeti_sel_looseParse_, (NPString *)(jeti_stringFromCstr("ok"))) : (int){0}; });
+#line 1 "<jeti-generated>"
                             if ((__jeti_eh_flag == 0)) {
                                 {
+#line 860 "tests/full_syntax_test.jeti"
                                     (caught += 100);
                                 }
                             }
                         }
+#line 862 "tests/full_syntax_test.jeti"
                         if (((__jeti_eh_flag == 1) && (__jeti_eh_done_83 == 0))) {
                             if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_FsErrLow)) {
+#line 1 "<jeti-generated>"
                                 __jeti_eh_done_83 = 1;
                                 __jeti_eh_flag = 0;
+#line 862 "tests/full_syntax_test.jeti"
                                 FsErrLow * e;
                                 {
                                     (caught += 1000);
                                 }
                             }
                         }
+#line 1 "<jeti-generated>"
                         __jeti_eh_flag = (__jeti_eh_saved_83 || __jeti_eh_flag);
                     }
                     if ((__jeti_eh_flag == 0)) {
                         {
+#line 863 "tests/full_syntax_test.jeti"
                             printf("5.6 throws %d\n", caught);
+#line 866 "tests/full_syntax_test.jeti"
                             jeti_task_await(FsFetcher_runAll(&JETI_CLASS_$_FsFetcher, __jeti_sel_runAll));
+#line 869 "tests/full_syntax_test.jeti"
                             __asm__ ("nop");
+#line 870 "tests/full_syntax_test.jeti"
                             int ao = 0;
     int aa = 10;
     int ab = 20;
+#line 871 "tests/full_syntax_test.jeti"
                             __asm__ __volatile__ ("add %w0, %w1, %w2\n\tsub %w0, %w0, #1" : "=r"(ao) : "r"(aa), "r"(ab) : "cc");
+#line 873 "tests/full_syntax_test.jeti"
                             int sh = 0;
     int v = 7;
+#line 874 "tests/full_syntax_test.jeti"
                             __asm__ ("mov %w[res], %w[val]\n\tlsl %w[res], %w[res], #2" : [res] "=r"(sh) : [val] "r"(v) : "cc");
+#line 876 "tests/full_syntax_test.jeti"
                             int rw = 3;
+#line 877 "tests/full_syntax_test.jeti"
                             __asm__ ("lsl %w0, %w0, #2" : "+r"(rw) :  : );
+#line 878 "tests/full_syntax_test.jeti"
                             int ag = 0;
+#line 879 "tests/full_syntax_test.jeti"
                             __asm__ goto ("cmp %w0, #0\n\tb.eq %l[z]" :  : "r"(ag) : "cc" : z);
+#line 880 "tests/full_syntax_test.jeti"
                             goto after;
+#line 881 "tests/full_syntax_test.jeti"
 z:
+#line 882 "tests/full_syntax_test.jeti"
                             printf("5.8 asmgoto hit\n");
+#line 883 "tests/full_syntax_test.jeti"
 after:
+#line 884 "tests/full_syntax_test.jeti"
                             printf("5.8 asm %d %d %d\n", ao, sh, rw);
+#line 887 "tests/full_syntax_test.jeti"
                             NPNumber * n1 = (NPNumber *)(NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 7));
+#line 888 "tests/full_syntax_test.jeti"
                             NPNumber * n2 = (NPNumber *)(NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 7));
-                            __auto_type __jeti_eh_tmp_84 = ({ NPObject *__jeti_tmp_137 = ((NPObject *)(n1)); __jeti_tmp_137 ? ((long long (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_137->isa->vtable)->longLongValue)(__jeti_tmp_137, __jeti_sel_longLongValue) : (long long){0}; });
+#line 889 "tests/full_syntax_test.jeti"
+                            __auto_type __jeti_eh_tmp_84 = ({ NPObject *__jeti_tmp_145 = ((NPObject *)(n1)); __jeti_tmp_145 ? ((long long (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_145->isa->vtable)->longLongValue)(__jeti_tmp_145, __jeti_sel_longLongValue) : (long long){0}; });
                             __auto_type __jeti_eh_tmp_85 = NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithDouble_, 2.5f);
-                            __auto_type __jeti_eh_tmp_86 = ({ NPObject *__jeti_tmp_138 = ((NPObject *)(__jeti_eh_tmp_85)); __jeti_tmp_138 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_138->isa->vtable)->doubleValue)(__jeti_tmp_138, __jeti_sel_doubleValue) : (double){0}; });
-                            __auto_type __jeti_eh_tmp_87 = ({ NPObject *__jeti_tmp_139 = ((NPObject *)(n1)); __jeti_tmp_139 ? ((int (*)(NPObject *, SEL, NPNumber *))((struct jeti_vtable *)__jeti_tmp_139->isa->vtable)->isEqualToNumber_)(__jeti_tmp_139, __jeti_sel_isEqualToNumber_, (NPNumber *)(n2)) : (int){0}; });
+                            __auto_type __jeti_eh_tmp_86 = ({ NPObject *__jeti_tmp_146 = ((NPObject *)(__jeti_eh_tmp_85)); __jeti_tmp_146 ? ((double (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_146->isa->vtable)->doubleValue)(__jeti_tmp_146, __jeti_sel_doubleValue) : (double){0}; });
+                            __auto_type __jeti_eh_tmp_87 = ({ NPObject *__jeti_tmp_147 = ((NPObject *)(n1)); __jeti_tmp_147 ? ((int (*)(NPObject *, SEL, NPNumber *))((struct jeti_vtable *)__jeti_tmp_147->isa->vtable)->isEqualToNumber_)(__jeti_tmp_147, __jeti_sel_isEqualToNumber_, (NPNumber *)(n2)) : (int){0}; });
                             __auto_type __jeti_eh_tmp_88 = NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, __jeti_sel_numberWithInt_, 1);
-                            __auto_type __jeti_eh_tmp_89 = ({ NPObject *__jeti_tmp_140 = ((NPObject *)(__jeti_eh_tmp_88)); __jeti_tmp_140 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_140->isa->vtable)->boolValue)(__jeti_tmp_140, __jeti_sel_boolValue) : (int){0}; });
+                            __auto_type __jeti_eh_tmp_89 = ({ NPObject *__jeti_tmp_148 = ((NPObject *)(__jeti_eh_tmp_88)); __jeti_tmp_148 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_148->isa->vtable)->boolValue)(__jeti_tmp_148, __jeti_sel_boolValue) : (int){0}; });
                             printf("5.9 num %lld %.2f %d %d\n", __jeti_eh_tmp_84, __jeti_eh_tmp_86, __jeti_eh_tmp_87, __jeti_eh_tmp_89);
+#line 893 "tests/full_syntax_test.jeti"
                             NPString * orig = (NPString *)(NPString_stringWithUTF8String_(&JETI_CLASS_$_NPString, __jeti_sel_stringWithUTF8String_, "cp"));
-                            NPString * cp = (NPString *)(({ NPObject *__jeti_tmp_141 = ((NPObject *)(orig)); __jeti_tmp_141 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_141->isa->vtable)->copy)(__jeti_tmp_141, __jeti_sel_copy) : 0; }));
-                            __auto_type __jeti_eh_tmp_90 = ({ NPObject *__jeti_tmp_142 = ((NPObject *)(cp)); __jeti_tmp_142 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_142->isa->vtable)->UTF8String)(__jeti_tmp_142, __jeti_sel_UTF8String) : 0; });
-                            __auto_type __jeti_eh_tmp_91 = ({ NPObject *__jeti_tmp_143 = ((NPObject *)(orig)); __jeti_tmp_143 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_143->isa->vtable)->isEqual_)(__jeti_tmp_143, __jeti_sel_isEqual_, (NPObject *)(cp)) : (_Bool){0}; });
+#line 894 "tests/full_syntax_test.jeti"
+                            NPString * cp = (NPString *)(({ NPObject *__jeti_tmp_149 = ((NPObject *)(orig)); __jeti_tmp_149 ? ((NPString * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_149->isa->vtable)->copy)(__jeti_tmp_149, __jeti_sel_copy) : 0; }));
+#line 895 "tests/full_syntax_test.jeti"
+                            __auto_type __jeti_eh_tmp_90 = ({ NPObject *__jeti_tmp_150 = ((NPObject *)(cp)); __jeti_tmp_150 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_150->isa->vtable)->UTF8String)(__jeti_tmp_150, __jeti_sel_UTF8String) : 0; });
+                            __auto_type __jeti_eh_tmp_91 = ({ NPObject *__jeti_tmp_151 = ((NPObject *)(orig)); __jeti_tmp_151 ? ((_Bool (*)(NPObject *, SEL, NPObject *))((struct jeti_vtable *)__jeti_tmp_151->isa->vtable)->isEqual_)(__jeti_tmp_151, __jeti_sel_isEqual_, (NPObject *)(cp)) : (_Bool){0}; });
                             printf("5.9b strcopy %s %d\n", __jeti_eh_tmp_90, (__jeti_eh_tmp_91 == 0));
+#line 897 "tests/full_syntax_test.jeti"
                             NPArray * src = (NPArray *)(jeti_array_create(2, jeti_stringFromCstr("p"), jeti_stringFromCstr("q")));
-                            NPArray * arrcp = (NPArray *)(({ NPObject *__jeti_tmp_144 = ((NPObject *)(src)); __jeti_tmp_144 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_144->isa->vtable)->copy)(__jeti_tmp_144, __jeti_sel_copy) : 0; }));
-                            __auto_type __jeti_eh_tmp_92 = ({ NPObject *__jeti_tmp_145 = ((NPObject *)(arrcp)); __jeti_tmp_145 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_145->isa->vtable)->count)(__jeti_tmp_145, __jeti_sel_count) : (size_t){0}; });
-                            __auto_type __jeti_eh_tmp_93 = ({ NPObject *__jeti_tmp_146 = ((NPObject *)(arrcp)); __jeti_tmp_146 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_146->isa->vtable)->objectAtIndex_)(__jeti_tmp_146, __jeti_sel_objectAtIndex_, 1) : (NPObject *){0}; });
-                            __auto_type __jeti_eh_tmp_94 = ({ NPObject *__jeti_tmp_147 = ((NPObject *)(__jeti_eh_tmp_93)); __jeti_tmp_147 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_147->isa->vtable)->UTF8String)(__jeti_tmp_147, __jeti_sel_UTF8String) : 0; });
+#line 898 "tests/full_syntax_test.jeti"
+                            NPArray * arrcp = (NPArray *)(({ NPObject *__jeti_tmp_152 = ((NPObject *)(src)); __jeti_tmp_152 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_152->isa->vtable)->copy)(__jeti_tmp_152, __jeti_sel_copy) : 0; }));
+#line 899 "tests/full_syntax_test.jeti"
+                            __auto_type __jeti_eh_tmp_92 = ({ NPObject *__jeti_tmp_153 = ((NPObject *)(arrcp)); __jeti_tmp_153 ? ((size_t (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_153->isa->vtable)->count)(__jeti_tmp_153, __jeti_sel_count) : (size_t){0}; });
+                            __auto_type __jeti_eh_tmp_93 = ({ NPObject *__jeti_tmp_154 = ((NPObject *)(arrcp)); __jeti_tmp_154 ? ((NPObject * (*)(NPObject *, SEL, size_t))((struct jeti_vtable *)__jeti_tmp_154->isa->vtable)->objectAtIndex_)(__jeti_tmp_154, __jeti_sel_objectAtIndex_, 1) : (NPObject *){0}; });
+                            __auto_type __jeti_eh_tmp_94 = ({ NPObject *__jeti_tmp_155 = ((NPObject *)(__jeti_eh_tmp_93)); __jeti_tmp_155 ? ((const char * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_155->isa->vtable)->UTF8String)(__jeti_tmp_155, __jeti_sel_UTF8String) : 0; });
                             printf("5.9c arrcopy %zu %s\n", __jeti_eh_tmp_92, __jeti_eh_tmp_94);
+#line 1 "<jeti-generated>"
                             jeti_release(arrcp);
                             jeti_release(cp);
                         }
@@ -7408,20 +8652,33 @@ after:
 
 __attribute__((weak)) int main(void ) {
     jeti_metaInit();
+#line 967 "tests/full_syntax_test.jeti"
     sec1_c_superset();
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 0)) {
         {
+#line 968 "tests/full_syntax_test.jeti"
             sec2_objects();
+#line 969 "tests/full_syntax_test.jeti"
             sec3_expressions();
+#line 1 "<jeti-generated>"
             if ((__jeti_eh_flag == 0)) {
                 {
+#line 970 "tests/full_syntax_test.jeti"
                     sec4_control_runtime();
+#line 1 "<jeti-generated>"
                     if ((__jeti_eh_flag == 0)) {
                         {
+#line 971 "tests/full_syntax_test.jeti"
                             sec5_misc();
+#line 1 "<jeti-generated>"
                             if ((__jeti_eh_flag == 0)) {
                                 {
+#line 972 "tests/full_syntax_test.jeti"
+                                    jeti_task_await(FsApi_runAll10(&JETI_CLASS_$_FsApi, __jeti_sel_runAll10));
+#line 973 "tests/full_syntax_test.jeti"
                                     printf("ALL SECTIONS DONE\n");
+#line 974 "tests/full_syntax_test.jeti"
                                     return 0;
                                 }
                             }
@@ -7431,6 +8688,7 @@ __attribute__((weak)) int main(void ) {
             }
         }
     }
+#line 1 "<jeti-generated>"
     if ((__jeti_eh_flag == 1)) {
         jeti_eh_uncaught();
     }
@@ -7495,20 +8753,27 @@ void NPMutableArray_NPString_ptr_filterUsingPredicate_(NPObject * self, SEL _cmd
 
 /* -[FsBox<NPMutableString *> initWith_] */
 __attribute__((weak)) FsBox * FsBox_NPMutableString_ptr_initWith_(NPObject * self, SEL _cmd, NPMutableString * v) {
+#line 222 "tests/full_syntax_test.jeti"
     self = (&JETI_VTABLE_$_NPObject)->init(self, __jeti_sel_init);
+#line 223 "tests/full_syntax_test.jeti"
     if (self) {
         ((struct FsBox_NPMutableString_ptr *)self)->_value = v;
     }
+#line 224 "tests/full_syntax_test.jeti"
     return (FsBox *)self;
 }
 
 /* -[FsBox<NPMutableString *> value] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPMutableString * FsBox_NPMutableString_ptr_value(NPObject * self, SEL _cmd) {
+#line 226 "tests/full_syntax_test.jeti"
     return ((struct FsBox_NPMutableString_ptr *)self)->_value;
 }
 
 /* -[FsBox<NPMutableString *> setValue_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void FsBox_NPMutableString_ptr_setValue_(NPObject * self, SEL _cmd, NPMutableString * v) {
+#line 227 "tests/full_syntax_test.jeti"
     ((struct FsBox_NPMutableString_ptr *)self)->_value = v;
 }
 

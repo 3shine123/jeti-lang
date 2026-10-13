@@ -1,5 +1,5 @@
 // Probe 2 (B′ form, plan §9.3): a statement-position async block IIFE that
-// takes parameters, awaits two `@throws`-annotated async methods with plain
+// takes parameters, awaits two `throws`-annotated async methods with plain
 // `await`, and calls back into `self` (captured by the block). The second
 // awaited method returns a monomorphized generic `NPArray<NPString *> *`
 // (async × generic, §5.2).
@@ -33,12 +33,12 @@
 @end
 
 @interface UserService : NPObject
-- (async User *)fetchUser:(NPString *)userID @throws(NPString *);
-- (async NPArray<NPString *> *)fetchFriends:(NPString *)userID @throws(NPString *);
+- (async User *)fetchUser:(NPString *)userID throws(NPString *);
+- (async NPArray<NPString *> *)fetchFriends:(NPString *)userID throws(NPString *);
 @end
 
 @implementation UserService
-- (async User *)fetchUser:(NPString *)userID @throws(NPString *) {
+- (async User *)fetchUser:(NPString *)userID throws(NPString *) {
     // Suspension point (an awaited async block IIFE that captures nothing).
     await (async int ^(void) { return 1; }());
     User *u = [[User alloc] init];
@@ -46,7 +46,7 @@
     u.name = userID;
     return u;
 }
-- (async NPArray<NPString *> *)fetchFriends:(NPString *)userID @throws(NPString *) {
+- (async NPArray<NPString *> *)fetchFriends:(NPString *)userID throws(NPString *) {
     await (async int ^(void) { return 1; }());
     return @[ @"ann", @"bob" ];
 }

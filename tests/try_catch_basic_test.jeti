@@ -2,11 +2,11 @@
 #import <Foundation/Foundation.hje>
 
 @interface ExceptionThrower : NPObject
-- (void)throwIfNegative:(int)val @throws;
+- (void)throwIfNegative:(int)val throws;
 @end
 
 @implementation ExceptionThrower
-- (void)throwIfNegative:(int)val @throws {
+- (void)throwIfNegative:(int)val throws {
     printf("  checking %d...\n", val);
     if (val < 0) {
         printf("  throwing!\n");

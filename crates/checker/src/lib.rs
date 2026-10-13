@@ -129,16 +129,16 @@ pub struct Checker {
     /// variable's type node carries, so the exhaustiveness check resolves
     /// `Alias` through this map to the member table keyed by the tag.
     pub enum_alias_tags: HashMap<String, String>,
-    /// `@throws` annotation of the declaration whose body is being checked.
-    /// `None` = not annotated; `Some(None)` = bare `@throws` ("declares it
-    /// throws, type unstated"); `Some(Some(T))` = `@throws(T)`. Saved and
+    /// `throws` annotation of the declaration whose body is being checked.
+    /// `None` = not annotated; `Some(None)` = bare `throws` ("declares it
+    /// throws, type unstated"); `Some(Some(T))` = `throws(T)`. Saved and
     /// restored around each body, like `shadowed_locals`.
     throws_ann: Option<Option<AstType>>,
     /// Every `@throw` executed by the body being checked: position plus a
     /// best-effort static type (`None` = cannot say).
     thrown: Vec<(usize, usize, Option<AstType>)>,
     /// Positions of `@throw`s that leave the body without a local `@try`
-    /// catching them — only those need a `@throws` annotation.
+    /// catching them — only those need a `throws` annotation.
     uncaught_throws: Vec<(usize, usize)>,
     /// Nesting depth of local `@try` blocks that have a `@catch`.
     try_depth: usize,
@@ -510,10 +510,10 @@ impl Checker {
         s
     }
 
-    // ─── `@throws` reconciliation ────────────────────────────────────────
+    // ─── `throws` reconciliation ────────────────────────────────────────
 
     /// Map a declaration's `throws` field onto the three-state reconciliation
-    /// input. The parser encodes a bare `@throws` ("declared to throw, type
+    /// input. The parser encodes a bare `throws` ("declared to throw, type
     /// unstated") as a void-typed annotation, so `void` means "bare" here.
     fn throws_state(t: Option<&AstType>) -> Option<Option<AstType>> {
         match t {
@@ -722,7 +722,7 @@ impl Checker {
         t.class_ref.clone().or_else(|| t.name.clone())
     }
 
-    /// Is a `@throw` of `actual` covered by a declared `@throws(declared)`?
+    /// Is a `@throw` of `actual` covered by a declared `throws(declared)`?
     /// Subclasses are accepted; `id` on either side is accepted (an object of
     /// unstated class). Anything not *provably* a mismatch is accepted: this
     /// is a reconciliation aid, and a false error here costs more than a
@@ -771,7 +771,7 @@ impl Checker {
         false
     }
 
-    /// Human-readable type spelling for `@throws` diagnostics.
+    /// Human-readable type spelling for `throws` diagnostics.
     fn type_desc(t: &AstType) -> String {
         let named = t.name.clone();
         let base = match t.prim {
@@ -803,9 +803,9 @@ impl Checker {
     }
 
     /// Reconcile the body's `@throw` statements with the declaration's
-    /// `@throws` annotation, mirroring Java's checked exceptions:
-    /// `@throws(T)` must cover every `@throw` in the body (subclasses allowed);
-    /// a bare `@throws` must be telling the truth; an unannotated declaration
+    /// `throws` annotation, mirroring Java's checked exceptions:
+    /// `throws(T)` must cover every `@throw` in the body (subclasses allowed);
+    /// a bare `throws` must be telling the truth; an unannotated declaration
     /// may only throw where a local `@catch` handles it.
     fn reconcile_throws(&mut self, name: Option<&str>, line: usize, col: usize) {
         let who = match name {
@@ -819,8 +819,8 @@ impl Checker {
                         l,
                         c,
                         &format!(
-                            "'@throw' escapes {} without a '@throws' annotation; declare it with \
-                             '@throws(<type>)' or handle it with a local '@try'",
+                            "'@throw' escapes {} without a 'throws' annotation; declare it with \
+                             'throws(<type>)' or handle it with a local '@try'",
                             who
                         ),
                     );
@@ -834,7 +834,7 @@ impl Checker {
                         line,
                         col,
                         &format!(
-                            "{} is marked '@throws' but its body never executes '@throw'",
+                            "{} is marked 'throws' but its body never executes '@throw'",
                             who
                         ),
                     );
@@ -849,7 +849,7 @@ impl Checker {
                                 c,
                                 &format!(
                                     "'@throw' of type '{}' does not match the declared \
-                                     '@throws({})'",
+                                     'throws({})'",
                                     Self::type_desc(&actual),
                                     Self::type_desc(&declared)
                                 ),

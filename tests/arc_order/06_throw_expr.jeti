@@ -18,7 +18,7 @@
 - (NPString *)reason { return [NPString stringWithUTF8String:"bad"]; }
 @end
 
-void ao06_boom(void) @throws(NPString *) {
+void ao06_boom(void) throws(NPString *) {
     AO06Holder *h = [[AO06Holder alloc] init];
     @throw [[h reason] description];
 }

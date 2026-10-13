@@ -9,11 +9,11 @@
 // async chain itself is untouched by -eh: it is a separate lowering pass.
 
 @interface EhBoom : NPObject
-- (void)fire @throws;
+- (void)fire throws;
 @end
 
 @implementation EhBoom
-- (void)fire @throws {
+- (void)fire throws {
     @throw @"boom";
 }
 @end

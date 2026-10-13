@@ -45,6 +45,17 @@ pub struct Parser<'a> {
     /// Maps inlined-buffer lines back to (file, source line), so the region can
     /// be scoped to one file. Injected by the pipeline (`pre.source_map`).
     source_map: Option<jeti_cst::SourceMap>,
+    /// Bracket depth of the token stream, maintained by advance(). Used by the
+    /// in-message bare-`await` ban: a message's `[` records the depth just
+    /// inside it, and an `await` at that same depth sits unparenthesized in a
+    /// receiver/argument slot.
+    expr_paren_depth: usize,
+    /// Open message sends: (bracket depth just inside the message's `[`,
+    /// already-reported flag). Popped when the depth falls below the recorded
+    /// value. Entries survive block `{`: a block body is one level deeper, so
+    /// awaits inside it never match, and the enclosing message's ban must
+    /// still cover arguments that follow a block argument.
+    msg_await_stack: Vec<(usize, bool)>,
 }
 
 impl<'a> Parser<'a> {
@@ -97,6 +108,8 @@ impl<'a> Parser<'a> {
             nonnull_region: false,
             region_file: None,
             source_map: None,
+            expr_paren_depth: 0,
+            msg_await_stack: Vec::new(),
         }
     }
 
@@ -177,6 +190,34 @@ impl<'a> Parser<'a> {
         let mut next = self.lexer.next_token();
         Self::remap_token_col(&self.source_map, &mut next);
         self.previous = std::mem::replace(&mut self.current, next);
+        // Bracket-depth bookkeeping for the in-message bare-`await` ban (see
+        // msg_await_stack). Counted inside advance() so every consume path
+        // stays balanced; the parser's speculative lookaheads never cross a
+        // bracket token without rewinding, so the count cannot skew. Blocks
+        // (`{`) are deliberately NOT special: a block body sits one level
+        // deeper than the enclosing message's interior, so statement-position
+        // `await` inside it never matches the recorded depth (no false
+        // positive), while the enclosing message's ban survives to cover
+        // arguments that follow a block argument —
+        // `[self run:^{ ... } then:await [x y]]` must still be rejected.
+        match self.current.kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
+                self.expr_paren_depth += 1;
+            }
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                self.expr_paren_depth = self.expr_paren_depth.saturating_sub(1);
+                // Falling below a message's interior depth closes it (its own
+                // `]`, or an enclosing closer on an error-recovery path).
+                while self
+                    .msg_await_stack
+                    .last()
+                    .map_or(false, |&(d, _)| self.expr_paren_depth < d)
+                {
+                    self.msg_await_stack.pop();
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Translate a token's column from the expanded buffer back to the source.
@@ -1307,6 +1348,28 @@ else if self.match_keyword(KeywordKind::Typeof) {
         // (at_await_operator judgment table §3.4); otherwise plain C
         // identifier. Replaces the removed `@await` machinery token.
         if self.at_await_operator() {
+            // In-message bare-`await` ban (2026-10-13 decision): inside a
+            // message send, `await` must be parenthesized — a receiver is
+            // `[(await [x y]) foo]`, an argument is `[self fetch:(await [x y])]`.
+            // Unparenthesized, `await [x y] foo` reads like Swift's
+            // await-over-the-whole-chain, so we ban it outright instead of
+            // inventing a precedence. `(await …)` sits one paren deeper and
+            // never trips this; `await` in SELECTOR position (`[task await]`)
+            // is eaten by the selector loop and never reaches this arm; C
+            // superset holds because this fires only when the operator
+            // judgment table (§3.4) already classified the token as the
+            // await operator — a plain `await` identifier elsewhere is
+            // untouched. Reported once per message to avoid repeat noise.
+            let mut bare_in_msg = false;
+            if let Some(top) = self.msg_await_stack.last_mut() {
+                if top.0 == self.expr_paren_depth && !top.1 {
+                    top.1 = true;
+                    bare_in_msg = true;
+                }
+            }
+            if bare_in_msg {
+                self.error("bare 'await' inside a message send must be parenthesized: write [(await [x y]) foo] for a receiver or [self fetch:(await [x y])] for an argument");
+            }
             self.advance(); // consume `await`
             let inner = self.parse_unary()?;
             return Some(CstExpr {
@@ -1705,7 +1768,18 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 data: CstExprData::ArrayLit(elements),
             });
         }
-        if self.match_token(TokenKind::LBracket) {
+        if self.check(TokenKind::LBracket) {
+            // In-message bare-`await` ban: record the depth at this message's
+            // `[` — the bracket itself is already counted while current, and
+            // nothing after it is. MUST be captured BEFORE advance(): the token
+            // after `[` may itself be an opener (`[(await …) recv]`), and
+            // capturing after advance() would record that opener's depth and
+            // mis-flag the parenthesized await as bare. A later `await` at
+            // exactly this depth sits unparenthesized in a receiver or
+            // argument slot and is rejected in parse_primary.
+            let inside_depth = self.expr_paren_depth;
+            self.msg_await_stack.push((inside_depth, false));
+            self.advance(); // consume `[` (counts the next token if an opener)
             // The receiver may be a generic-instantiated type expression like
             // `VectorBuffer<RenderPoint2D*>` in `[[VectorBuffer<RenderPoint2D*> alloc] init]`.
             // parse_expression() would treat `<` as a comparison operator, so try
@@ -1716,6 +1790,15 @@ else if self.match_keyword(KeywordKind::Typeof) {
             let mut receiver = None;
             let saved_lex = self.lexer.save_pos();
             let saved_tok = self.current.clone();
+            // The speculative parse below consumes tokens through advance(),
+            // which maintains the bracket-depth counters; a rewind must undo
+            // that too, or a bracket that only became current during the
+            // speculation stays counted (observed: `[await [x y] foo]` — the
+            // type try ate `await`, made `[` current (+1 depth), then rewound
+            // the token stream but not the counter, desynchronizing the
+            // in-message bare-await ban).
+            let saved_depth = self.expr_paren_depth;
+            let saved_stack = self.msg_await_stack.clone();
             if self.current.kind == TokenKind::Identifier {
                 if let Some(t) = self.parse_type_full() {
                     if (!t.type_args.is_empty() || !t.protocols.is_empty())
@@ -1739,6 +1822,8 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     // Rewind lexer + current token to the saved position.
                     self.lexer.restore_pos(saved_lex);
                     self.current = saved_tok;
+                    self.expr_paren_depth = saved_depth;
+                    self.msg_await_stack = saved_stack;
                 }
             }
             if receiver.is_none() {
@@ -2957,15 +3042,17 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 data: CstStmtData::Throw(expr.map(Box::new)),
             });
         }
-        // `@throws` in statement position is a misuse — it is a declaration
-        // annotation (`- (void)f @throws(...);`), not a statement. Point the
-        // user at `@throw` for raising. (See AGENTS.md @throw/@throws section.)
-        if self.match_keyword(KeywordKind::AtThrows) {
-            self.error("@throws is a declaration annotation (write it before ';' or '{' in a method/function declaration), not a statement; use '@throw <expr>' to raise an exception");
+        // `@throws` in statement position is a misuse — the exception
+        // annotation is a declaration tail (`- (void)f throws(...);`), not a
+        // statement (and the @ spelling itself was removed). Point the user
+        // at `@throw` for raising and at the bare annotation spelling.
+        if self.check_keyword(KeywordKind::AtThrows) {
+            self.error("'@throws' was removed and is not a statement anyway — annotate a declaration with bare 'throws' or 'throws(<type>)' before ';' or '{'; use '@throw <expr>' to raise an exception");
             // Consume the annotation for error recovery.
+            self.advance();
             if self.match_token(TokenKind::LParen) {
                 let _ = self.parse_type_full();
-                self.consume(TokenKind::RParen, "expected ')' after @throws(...)");
+                self.consume(TokenKind::RParen, "expected ')' after throws(...)");
             }
             return None;
         }
@@ -3807,27 +3894,34 @@ else if self.match_keyword(KeywordKind::Typeof) {
         let mut trailing_attrs = self.parse_attributes();
         trailing_attrs.splice(0..0, prefix_attrs);
 
-        // Trailing declaration annotation: `@throws` / `@throws(T)` before
-        // `;` or `{`. Compile-time only — carried in CST, never emitted to C.
-        // `@throw` here is a misuse (it is a statement) — point the user at
-        // `@throws` instead.
+        // Trailing declaration annotation: bare `throws` / `throws(T *)` before
+        // `;` or `{` — same soft keyword as the method tail (2026-10-13: the
+        // @-prefix was dropped). `@throws` here gets the removal diagnostic.
         let mut throws: Option<Box<CstType>> = None;
-        if self.match_keyword(KeywordKind::AtThrows) {
+        if self.check_keyword(KeywordKind::AtThrows) {
+            self.error("'@throws' was removed — spell the exception annotation bare: 'throws' or 'throws(<type>)', e.g. 'int f(int) throws(MathError *);'");
+            self.advance(); // consume the token for error recovery
+            if self.match_token(TokenKind::LParen) {
+                let _ = self.parse_type_full();
+                self.consume(TokenKind::RParen, "expected ')' after throws(...)");
+            }
+        } else if self.current.kind == TokenKind::Identifier
+            && self.current_text() == "throws"
+        {
+            self.advance(); // consume the soft keyword
             if self.match_token(TokenKind::LParen) {
                 throws = self.parse_type_full().map(Box::new);
-                self.consume(TokenKind::RParen, "expected ')' after @throws(...)");
+                self.consume(TokenKind::RParen, "expected ')' after throws(...)");
             } else {
-                // Bare `@throws` — "declared to throw, type unstated". Encoded
-                // as a void-typed annotation so it stays distinguishable from
-                // "not annotated" (`None`); the checker then only requires the
-                // body to really contain a `@throw` and does not check types.
+                // Bare `throws` — "declared to throw, type unstated" (void
+                // encoding, see the method tail for the rationale).
                 throws = Some(Box::new(CstType::new(TypePrim::Void)));
             }
             if !self.check(TokenKind::LBrace) && !self.check(TokenKind::Semicolon) {
-                self.error("expected '('type')' or ';' after @throws");
+                self.error("expected '('type')' or ';' after throws");
             }
         } else if self.match_keyword(KeywordKind::AtThrow) {
-            self.error("@throw is a statement (it raises an exception inside a body); use '@throws' or '@throws(<type>)' to annotate this declaration");
+            self.error("@throw is a statement (it raises an exception inside a body); use 'throws' or 'throws(<type>)' to annotate this declaration");
         }
 
         let body = if self.check(TokenKind::LBrace) {
@@ -5652,33 +5746,50 @@ if self.current.kind == TokenKind::Identifier {
             self.consume(TokenKind::RParen, "expected ')' after params");
         }
 
-        // Trailing declaration annotation: `@throws` / `@throws(T)` before
-        // `;` or `{`. Compile-time only — carried in CST, never emitted to C.
-        // `@throw` here is a misuse (it is a statement) — point the user at
-        // `@throws` instead.
+        // Trailing declaration annotation: bare `throws` / `throws(T *)` before
+        // `;` or `{` — the SAME soft-keyword spelling on methods and functions
+        // (2026-10-13 decision: the @-prefix was dropped from the annotation).
+        // Compile-time only — carried in CST, never emitted to C. Position
+        // disambiguation for the soft keyword (C superset: `throws` stays a
+        // valid identifier everywhere else):
+        //   * `throws:` in the selector area was consumed by the selector loop
+        //     above as a selector segment (`throws:` param, `[t throws:1]`
+        //     call sites), because that loop only continues on a following
+        //     colon;
+        //   * `- (int)throws;` names the METHOD `throws` — the name is the
+        //     first identifier after the return type, so this tail is only
+        //     reached with `throws` AFTER the parameter list, where it can
+        //     only be the annotation;
+        //   * anything else after `)` that is not `throws`/`@throws` leaves
+        //     `throws = None` (unannotated declaration).
         let mut throws: Option<Box<CstType>> = None;
-        if self.match_keyword(KeywordKind::AtThrows) {
+        if self.check_keyword(KeywordKind::AtThrows) {
+            self.error("'@throws' was removed — spell the exception annotation bare: 'throws' or 'throws(<type>)', e.g. '- (void)f throws(NPString *);'");
+            self.advance(); // consume the token for error recovery
+            if self.match_token(TokenKind::LParen) {
+                let _ = self.parse_type_full();
+                self.consume(TokenKind::RParen, "expected ')' after throws(...)");
+            }
+        } else if self.current.kind == TokenKind::Identifier
+            && self.current_text() == "throws"
+        {
+            self.advance(); // consume the soft keyword
             if self.match_token(TokenKind::LParen) {
                 throws = self.parse_type_full().map(Box::new);
-                self.consume(TokenKind::RParen, "expected ')' after @throws(...)");
+                self.consume(TokenKind::RParen, "expected ')' after throws(...)");
             } else {
-                // Bare `@throws` — "declared to throw, type unstated". Encoded
+                // Bare `throws` — "declared to throw, type unstated". Encoded
                 // as a void-typed annotation so it stays distinguishable from
                 // "not annotated" (`None`); the checker then only requires the
                 // body to really contain a `@throw` and does not check types.
                 throws = Some(Box::new(CstType::new(TypePrim::Void)));
             }
             if !self.check(TokenKind::LBrace) && !self.check(TokenKind::Semicolon) {
-                self.error("expected '('type')' or ';' after @throws");
+                self.error("expected '('type')' or ';' after throws");
             }
         } else if self.match_keyword(KeywordKind::AtThrow) {
-            self.error("@throw is a statement (it raises an exception inside a body); use '@throws' or '@throws(<type>)' to annotate this declaration");
+            self.error("@throw is a statement (it raises an exception inside a body); use 'throws' or 'throws(<type>)' to annotate this declaration");
         }
-
-        // Trailing bare `throws` on an async method was removed with the
-        // second-batch design (plan §9.5): the failable declaration is the
-        // unified `@throws(ErrType *)` annotation parsed above, same as the
-        // sync side. A bare `throws` here is now a plain syntax error.
 
         // Body
         let body = if self.check(TokenKind::LBrace) {

@@ -890,7 +890,7 @@ impl Elaborator {
                         p = param.next.as_mut().map(|n| &mut **n);
                     }
                 }
-                // Same FQN resolution for the @throws type (e.g. NPError inside
+                // Same FQN resolution for the throws annotation type (e.g. NPError inside
                 // a namespace must resolve to its FQN like any named type).
                 let mut resolved_throws = throws.clone();
                 if !self.ns_prefix.is_empty() {

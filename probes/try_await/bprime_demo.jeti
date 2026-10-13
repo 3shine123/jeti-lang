@@ -1,4 +1,4 @@
-// B′ 统一语法示例(plan §9.3):一个标记 @throws(ErrType *),同步/异步通用;
+// B′ 统一语法示例(plan §9.3):一个标记 throws(ErrType *),同步/异步通用;
 // 调用点零新关键字——处理 = 普通 @try/@catch,不处理 = 失败向上传播
 // (无人接 = 顶层 abort,与同步 @throw 同构)。
 // Expected output:
@@ -19,20 +19,20 @@
 @implementation ApiError
 @end
 
-// ── 同步函数:既有约定(tests/golden/15 原样),@throws 带错误类型 ──
-static int divide(int a, int b) @throws(MathError *) {
+// ── 同步函数:既有约定(tests/golden/15 原样),throws 带错误类型 ──
+static int divide(int a, int b) throws(MathError *) {
     if (b == 0) { @throw [[MathError alloc] init]; }
     return a / b;
 }
 
 // ── 异步方法:同一个标记(B′ 统一后的形态)──
 @interface Svc : NPObject
-- (async int)fetchScore:(int)uid @throws(ApiError *);
+- (async int)fetchScore:(int)uid throws(ApiError *);
 - (async void)run;
 @end
 
 @implementation Svc
-- (async int)fetchScore:(int)uid @throws(ApiError *) {
+- (async int)fetchScore:(int)uid throws(ApiError *) {
     if (uid < 0) { @throw [[ApiError alloc] init]; }
     return await uid;
 }

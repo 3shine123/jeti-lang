@@ -307,7 +307,7 @@ async void ^(void) {
 - **async × 泛型(用户示例定案)**:`async NPArray<NPString *> *` 合法——
   async 后跟任意合法返回类型,含单态化泛型实例;句柄
   `NPTask<NPArray<NPString *> *> *`。
-- **可失败标注**:async 方法可用 `@throws(ErrType *)` 尾随注解声明可失败
+- **可失败标注**:async 方法可用 `throws(ErrType *)` 尾随注解声明可失败
   (B′ 统一拼写,文档性,见 §9)。
 
 ### 5.3 await 约束(采纳提案 §7)
@@ -368,7 +368,7 @@ async void ^(void) {
   语义模型已定,拼写未定稿)。
 - ③ 错误传播:**已定案(2026-10-12 第三批修订 B′)**——`try await` 强制层
   删除,异步失败与同步异常完全同构(`@try/@catch` 处理、无人接顶层
-  abort),拼写统一为 `@throws(ErrType *)`(文档性,同步/异步同一标记),
+  abort),拼写统一为 `throws(ErrType *)`(文档性,同步/异步同一标记),
   见 §9;第二批强制设计由 §9.5 清算作废。
 - ④ `__sig` 对 async 业务类型的编码格式。
 
@@ -376,18 +376,18 @@ async void ^(void) {
 
 > **本节整体取代第二批 `try await` 强制设计**。用户 2026-10-12 拍板"那就
 > B":异步失败处理与同步异常完全同构,不引入任何强制级编译期检查。动因是
-> 三探针实证:(a)同步 `@throws` 本就是文档性标注——Jeti 从未有编译期错误
+> 三探针实证:(a)同步 `throws` 本就是文档性标注——Jeti 从未有编译期错误
 > 强制,异步单侧强制制造不对称;(b)纯 `@try/@catch` 的运行时语义当时已
-> 完整成立;(c)"两套 throws"拼写怪异(裸 `throws` vs `@throws`)。
+> 完整成立;(c)"两套 throws"拼写怪异(裸 `throws` vs `throws`)。
 
 ### 9.1 定案内容
 
 - **`try` 软关键字与强制规则删除**:解析器不再定义 `try await` 组合;async
   pass 删除旧 §9.2 检查(可失败须 try、failable_sels、iface_throws 对账、
   failable-await 位点收集)。
-- **拼写统一为一个标记 `@throws(ErrType *)`**:同步函数与异步方法同一写法、
+- **拼写统一为一个标记 `throws(ErrType *)`**:同步函数与异步方法同一写法、
   同一尾随位置(既有注解解析已兼容方法位,无需新语法位);裸 `throws` 拼写
-  废除。`@throws` 回归**文档性**——记录失败类型,与同步侧一致,无调用点
+  废除。`throws` 回归**文档性**——记录失败类型,与同步侧一致,无调用点
   强制。
 - **运行时零改动**:失败通道(`failed` flag、flag 重武装、错误值走 `result`
   槽)对标记完全无感,全部保留;`__jeti_try_await_propagate`/passthrough 宏
@@ -401,19 +401,19 @@ async void ^(void) {
 |---|---|---|
 | hole.jeti | throws-less 方法裸 `@throw`,无 try 无 @try 地 await | 编译零拦截;运行时 abort(类名正确,无静默垃圾) |
 | hole2.jeti | **无 try 关键字**,纯 `@try` 包 await | `@catch` 接住——运行时标记无关成立 |
-| sync_throws.jeti | 同步 `@throws` 函数无 `@try` 调用 | 编译零拦截——同步侧本就无强制 |
+| sync_throws.jeti | 同步 `throws` 函数无 `@try` 调用 | 编译零拦截——同步侧本就无强制 |
 
 ### 9.3 统一语法(定稿形态,已运行验证)
 
 ```objc
 // ── 同步函数:既有约定(golden 15 原样,一字未动)──
-static int divide(int a, int b) @throws(MathError *) {
+static int divide(int a, int b) throws(MathError *) {
     if (b == 0) { @throw [[MathError alloc] init]; }
     return a / b;
 }
 
 // ── 异步方法:同一个标记,同一个位置语义 ──
-- (async int)fetchScore:(int)uid @throws(ApiError *);
+- (async int)fetchScore:(int)uid throws(ApiError *);
 ```
 
 调用点三模式(全合法,零新关键字):
@@ -448,4 +448,4 @@ static int divide(int a, int b) @throws(MathError *) {
   异步失败传播已在 checked 后端完整实证,sjlj 后端仍不在本轮范围。
 - 历史清算链:旧遗留 ③"不引入 try await"作废(第二批)→ 第二批强制设计
   作废(B′)——等价于以更彻底的方式回到最初立场,但**保留**了第二批的
-  runtime 遗产(失败通道/传播)与 `@throws` 文档性标注。
+  runtime 遗产(失败通道/传播)与 `throws` 文档性标注。

@@ -205,20 +205,20 @@ static void check_struct_eq(void) {
 // C functions receiving jeti objects
 static int poke_speak(id<Stress::Speaker> s) { [s speak]; return 1; }
 
-// ── @throws 声明标注：typed / bare / 本地 @try 豁免（编译期对账） ──
+// ── throws 声明标注：typed / bare / 本地 @try 豁免（编译期对账） ──
 @interface Thrower : NPObject
-- (int) risky:(int)n @throws(NPString *);   // typed
-- (int) bare:(int)n @throws;                // bare
+- (int) risky:(int)n throws(NPString *);   // typed
+- (int) bare:(int)n throws;                // bare
 @end
 
 @implementation Thrower
-- (int) risky:(int)n @throws(NPString *) {
+- (int) risky:(int)n throws(NPString *) {
     if (n < 0) {
         @throw @"risky-fail";
     }
     return n * 2;
 }
-- (int) bare:(int)n @throws {
+- (int) bare:(int)n throws {
     if (n < 0) {
         @throw @"bare-fail";
     }
@@ -375,9 +375,9 @@ int main() {
         printf("[E2] outer finally\n");
     }
 
-    // ── 8b. @throws 声明标注：typed / bare / 本地 @try 豁免 ──
+    // ── 8b. throws 声明标注：typed / bare / 本地 @try 豁免 ──
     Thrower *t8 = [[Thrower alloc] init];
-    printf("[E3] @throws ok=%d/%d local=%d\n",
+    printf("[E3] throws ok=%d/%d local=%d\n",
            [t8 risky:21], [t8 bare:41], local_throw_catch(7));
     @try {
         [t8 risky:-1];                     // 抛出路径

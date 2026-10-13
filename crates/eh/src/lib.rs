@@ -613,10 +613,10 @@ fn rewrite_stmts(stmts: &mut Vec<AstStmt>, zero_ret: &AstStmt, fx: &EffectTable)
 //
 // Stage-3 rule set: only calls that can actually arm the error flag get
 // guards. Sources of truth:
-//   - `@throws(T)` annotation  → MayThrow (call sites guard after it)
-//   - naked `@throws`          → AlwaysThrows (returns zero with the flag
+//   - `throws(T)` annotation  → MayThrow (call sites guard after it)
+//   - naked `throws`          → AlwaysThrows (returns zero with the flag
 //     armed — the guard is LIVE: it either propagates or falls to a catch arm)
-//   - everything else          → NoThrow (the checker's `@throws` escape rule
+//   - everything else          → NoThrow (the checker's `throws` escape rule
 //     forces every escaping throw to be declared, so an absent annotation is
 //     a real promise; a body that still contains a bare `@throw` upgrades its
 //     own entry to MayThrow for `-fno-checker` builds)
@@ -642,7 +642,7 @@ struct EffectTable {
     functions: std::collections::HashMap<String, Effect>,
 }
 
-/// M1 encoding of the bare `@throws` form: `Some(Void)` non-pointer.
+/// M1 encoding of the bare `throws` form: `Some(Void)` non-pointer.
 fn throw_effect(th: &AstType) -> Effect {
     if th.prim == TypePrim::Void && !th.is_pointer {
         Effect::AlwaysThrows

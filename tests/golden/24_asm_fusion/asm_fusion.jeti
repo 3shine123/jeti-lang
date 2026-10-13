@@ -46,7 +46,7 @@ typedef struct {
     - (void)absorbBytes:(const unsigned char*)buf length:(int)len;
     - (unsigned)leadingZerosOf:(unsigned)value;
     - (int)isEvenViaAsmGoto:(unsigned)value;
-    - (void)corruptAndThrow @throws;
+    - (void)corruptAndThrow throws;
     @end
 
     @implementation BlockHasher
@@ -113,7 +113,7 @@ typedef struct {
         return 1;
     }
 
-    - (void)corruptAndThrow @throws {
+    - (void)corruptAndThrow throws {
         printf("    [%s] 检测到管线损坏，准备抛异常...\n", _label);
         @throw [NPObject alloc];
     }

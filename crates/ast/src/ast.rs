@@ -392,9 +392,9 @@ pub struct AstDecl {
          params: Option<Box<CstParam>>,
          has_variadic: bool,
          body: Option<Box<AstStmt>>,
-         /// Trailing `@throws` / `@throws(T)` annotation from the declaration.
-         /// `None` = not annotated; `Some(T)` = `@throws(T)`; `Some(void)` = bare
-         /// `@throws` ("declared to throw, type unstated"). Compile-time only
+         /// Trailing `throws` / `throws(T)` annotation from the declaration.
+         /// `None` = not annotated; `Some(T)` = `throws(T)`; `Some(void)` = bare
+         /// `throws` ("declared to throw, type unstated"). Compile-time only
          /// (checker reconciles it against `@throw` stmts) — never emitted to C.
          throws: Option<Box<AstType>>,
          /// `async` return-type modifier (doc/async_nptask_plan.md): set when
@@ -425,9 +425,9 @@ pub struct AstDecl {
         params: Option<Box<CstParam>>,
         body: Option<Box<AstStmt>>,
         has_variadic: bool,
-        /// Trailing `@throws` / `@throws(T)` annotation from the declaration.
-        /// `None` = not annotated; `Some(T)` = `@throws(T)`; `Some(void)` = bare
-        /// `@throws` ("declared to throw, type unstated"). Compile-time only —
+        /// Trailing `throws` / `throws(T)` annotation from the declaration.
+        /// `None` = not annotated; `Some(T)` = `throws(T)`; `Some(void)` = bare
+        /// `throws` ("declared to throw, type unstated"). Compile-time only —
         /// never emitted to C.
         throws: Option<Box<AstType>>,
         /// `async` return-type modifier: the signature keeps the real

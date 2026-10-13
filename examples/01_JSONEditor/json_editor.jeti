@@ -392,7 +392,7 @@ static int read_line(char *buf, int size) {
 
     static id json_parse_value(const char **p);
 
-    static void THROW(const char *msg) @throws(Error *) {
+    static void THROW(const char *msg) throws(Error *) {
         Error *e = [[Error alloc] initWithMessage:msg];
         @throw e;
     }

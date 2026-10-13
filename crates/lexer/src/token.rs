@@ -109,8 +109,8 @@ pub enum KeywordKind {
     AtCatch,
     AtFinally,
     AtThrow,
-    /// `@throws` — trailing declaration annotation ("this method may throw"),
-    /// distinct from the `@throw` statement. See AGENTS.md `@throws` section.
+    /// `throws` — trailing declaration annotation ("this method may throw"),
+    /// distinct from the `@throw` statement. See AGENTS.md `throws` section.
     AtThrows,
     AtSynchronized,
     AtAutoreleasepool,

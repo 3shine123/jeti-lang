@@ -2191,7 +2191,7 @@ __attribute__((weak)) int main(void) {
             if ((__jeti_eh_flag == 0)) {
                 {
 #line 481 "baremetal_test.jeti"
-                    kputs("[N7b] @throws local=");
+                    kputs("[N7b] throws local=");
 #line 482 "baremetal_test.jeti"
                     kputdec(local_catch(7, e));
 #line 1 "<jeti-generated>"

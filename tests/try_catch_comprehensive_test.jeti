@@ -2,11 +2,11 @@
 #import <Foundation/Foundation.hje>
 
 @interface MathUtils : NPObject
-+ (int)divide:(int)a by:(int)b @throws;
++ (int)divide:(int)a by:(int)b throws;
 @end
 
 @implementation MathUtils
-+ (int)divide:(int)a by:(int)b @throws {
++ (int)divide:(int)a by:(int)b throws {
     if (b == 0) {
         @throw [NPObject alloc];
     }

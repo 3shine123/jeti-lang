@@ -21,7 +21,7 @@
 - (void)dealloc { if (_msg) free(_msg); [super dealloc]; }
 @end
 
-static int divide(int a, int b) @throws(MathError *) {
+static int divide(int a, int b) throws(MathError *) {
     if (b == 0) {
         MathError *e = [[MathError alloc] initWithMessage:"division by zero"];
         @throw e;

@@ -52,7 +52,7 @@ JETIC=target/release/jetic ./tests/eh_matrix/gen_quality.sh
 | 15 | `await` + 异常 | `samples/async_eh.jeti` | `@try` 不跨挂起点（语言规则） |
 | 16 | Blocks + 异常 | `tests/eh_diff/06_block_throw.jeti` | block 体独立函数 + 旗标跨 invoke 边界 |
 | 17 | 零异常程序（守卫密度运行侧） | `samples/no_throw_plain.jeti` | 静态侧见 `gen_quality.sh` 硬门 |
-| 18 | 全语法总检 | `tests/full_syntax_test.jeti`（+ `-asm full_syntax_test.s`） | C 超集 + Foundation + 内联 asm + `@throws` + `await` 同居 |
+| 18 | 全语法总检 | `tests/full_syntax_test.jeti`（+ `-asm full_syntax_test.s`） | C 超集 + Foundation + 内联 asm + `throws` + `await` 同居 |
 
 结果（Apple clang 21, arm64-darwin）：**18 场景 x 3 模式全部 PASS**，
 `default` 与显式 `-eh checked` 在每个场景上逐字节一致（`06_cross_frame`
@@ -94,7 +94,7 @@ JETIC=target/release/jetic ./tests/eh_matrix/gen_quality.sh
 1. **`06_cross_frame`：sjlj 后端不支持**（`default`/`legacy` rc=1，`checked` PASS）。
    原因有两层：(a) sjlj 的 `longjmp` 跳过中间帧的 scope-end `jeti_release`（README
    已记录的 sjlj 经典限制）；(b) 该用例为 checked 编写，其 `@throw` 未标注
-   `@throws`，而**只有 sjlj 模式**的 checker 会执行 `@throws` 逃逸检查并拒绝它。
+   `throws`，而**只有 sjlj 模式**的 checker 会执行 `throws` 逃逸检查并拒绝它。
    两条都是**既有行为**，`default` 与 `legacy` 在此完全一致 → 回退仍然保真。
    `checked` 通过 = 本次翻转带来的改进，不是回归。
 

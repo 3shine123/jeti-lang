@@ -2,7 +2,7 @@
 //
 // 覆盖：C 超集基础 / 类·继承·协议·命名空间·泛型·容器·variadic / 表达式全家
 //       控制流（for-in·switch 模式） / 运行时块（try·synchronized·pool·defer·noarc·weak）
-//       nullability 全位 / @throws / await / 内联 asm / Foundation 走查
+//       nullability 全位 / throws(裸拼写)·async throws / 消息内括号 await / 内联 asm / Foundation 走查
 //
 // 配套 tests/full_syntax_test.s（ARM64 外部汇编，test_all 自动链接同名 .s）。
 // 预期：exit=0，输出确定（无地址/无时序依赖）。
@@ -727,7 +727,7 @@ static void sec4_control_runtime(void) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// §5  nullability 全位 / @throws / await / 内联 asm / Foundation 走查
+// §5  nullability 全位 / throws / await / 内联 asm / Foundation 走查
 // ═══════════════════════════════════════════════════════════════════
 
 // NP_ASSUME_NONNULL 区域：真语法非宏；未标注指针 → nonnull，nullable 显式退出
@@ -778,20 +778,20 @@ static void fs_take_fn(nonnull NPString *s) { printf("5.4 fn %s\n", [s UTF8Strin
 }
 @end
 
-// @throws：声明标注（尾置、`;`/`{` 之前）——语句位是 @throw
+// throws：声明标注（尾置、`;`/`{` 之前）——语句位是 @throw
 @interface FsParser : NPObject
-- (int)strictParse:(NPString *)s @throws(FsErrLow *);   // 带类型
-- (int)looseParse:(NPString *)s @throws;                 // 裸标注（体内必须真抛）
+- (int)strictParse:(NPString *)s throws(FsErrLow *);   // 带类型
+- (int)looseParse:(NPString *)s throws;                 // 裸标注（体内必须真抛）
 @end
 
 @implementation FsParser
-- (int)strictParse:(NPString *)s @throws(FsErrLow *) {
+- (int)strictParse:(NPString *)s throws(FsErrLow *) {
     if ([s length] > 3) {
         @throw [[FsErrLow alloc] init];                  // 类型与声明一致
     }
     return [s length];
 }
-- (int)looseParse:(NPString *)s @throws {
+- (int)looseParse:(NPString *)s throws {
     if (s == nil) {
         @throw [[FsErrLow alloc] init];
     }
@@ -844,7 +844,7 @@ static void sec5_misc(void) {
     struct FsPoint pp = { 1, 2 };
     printf("5.5 mix %d\n", [mo mix:FS_MODE_LOW point:pp]);
 
-    // 5.6 @throws 声明对账：两形态都真抛 + 调用方捕获
+    // 5.6 throws 声明对账：两形态都真抛 + 调用方捕获
     FsParser *ps = [[FsParser alloc] init];
     int caught = 0;
     @try {
@@ -899,6 +899,69 @@ after:
     printf("5.9c arrcopy %zu %s\n", [arrcp count], [[arrcp objectAtIndex:1] UTF8String]);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// §5.10  async × throws × 消息内 await（2026-10-13 定案）
+// ═══════════════════════════════════════════════════════════════════
+//
+// throws 注解 = 裸软关键字 throws / throws(T *)：同步与异步同一拼写，
+// 在声明尾（`;`/`{` 之前）解析；`@throws` 已废除（报迁移诊断），
+// `@throw` 语句保留 @。位置消歧规则：`throws:`（尾随冒号）是选择子
+// 分段；`- (int)throws` 是名叫 throws 的方法（返回类型后首个 token
+// 即方法名）；只有参数表之后、`;`/`{` 之前的 throws 才是注解。
+//
+// 消息发送内的 await 必须加小括号：实参 `[a m:(await [a n])]`、
+// 接收者 `[(await [a n]) m]`。这不是优先级规则而是禁令——裸写
+// `[a m:await [a n]]` 会被读成 await 盖住整条消息链（Swift 语义），
+// parser 直接拒绝。await 外层的 cast/分组括号不受影响：
+// `(int)(await …)` 先驱动后转换；cast 包住任务句柄（`await (int)[…]`）
+// 是用户错误，由 C 编译器硬错误兜底。
+
+@interface FsNetErr : NPObject @end
+
+@interface FsApi : NPObject
+- (async int)load:(int)uid throws(FsNetErr *);           // async + 带类型注解
+- (async FsApi *)box:(int)uid;                           // async 对象结果（接收者位用）
+- (int)decode:(int)raw;
+- (int)wrap:(int)v;
+- (int)value;
+- (FsApi *)asObj;
++ (async void)runAll10;                                  // §5.10 入口（同步调 async void → blocking wrapper）
+@end
+
+@implementation FsApi
+// 注意：本文件是三后端汇测，async 方法体内不放裸 @throw——legacy 模式下
+// throws 注解不随降级传入 jeti_async_state_* 合成函数，checker 对账会报
+// escapes（checked 下 EH 改写先行所以无此问题）。真抛+传播钉在 golden/48。
+- (async int)load:(int)uid throws(FsNetErr *) {
+    return await [self decode:uid];
+}
+- (async FsApi *)box:(int)uid {
+    (void)uid;
+    return await [self asObj];
+}
+- (int)decode:(int)raw { return raw * 10; }
+- (int)wrap:(int)v { return v + 1; }
+- (int)value { return 7; }
+- (FsApi *)asObj { return self; }
+
+// 入口走类方法 async void（与 5.7 同型、已验证路径；顶层 async 函数路径
+// 的两个既有缺口——static 修饰符不被认作 async、await 同步调用误驱动——
+// 不在本文件钉住范围）
++ (async void)runAll10 {
+    printf("== §5.10 async throws / msg-await ==\n");
+    FsApi *api = [[FsApi alloc] init];
+    // 注解拼写（throws/throws(T)）在此钉住；失败 await 的传播语义不在
+    // full_syntax 重复——@try 跨 await 与 async 体内裸 @throw 都只有
+    // checked 后端支持（legacy sjlj 的 jmp_buf 活不过挂起点，且 throws
+    // 注解不随降级传入状态机函数），golden/48 已在默认模式钉住。
+    printf("5.10 ok %d\n", await [api load:3]);          // 30
+    // 消息实参位与接收者位的强制括号形态
+    printf("5.10b msgawait %d %d\n",
+           [api wrap:(await [api load:4])],              // 实参位 → 41
+           [(await [api box:2]) value]);                 // 接收者位 → 7
+}
+@end
+
 // ─── main ─────────────────────────────────────────────────────────
 int main(void) {
     sec1_c_superset();
@@ -906,6 +969,7 @@ int main(void) {
     sec3_expressions();
     sec4_control_runtime();
     sec5_misc();
+    [FsApi runAll10];
     printf("ALL SECTIONS DONE\n");
     return 0;
 }

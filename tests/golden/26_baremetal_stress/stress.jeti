@@ -140,13 +140,13 @@ unsigned rotl(unsigned x, unsigned n) {
     return (x << n) | (x >> (32 - n));
 }
 
-// ============ @throws 声明标注（typed / bare / 本地 try 豁免） ============
+// ============ throws 声明标注（typed / bare / 本地 try 豁免） ============
 
-static void rethrow_token(DebugToken *t) @throws(DebugToken *) {
+static void rethrow_token(DebugToken *t) throws(DebugToken *) {
     @throw t;                            // typed：抛出类型与声明一致
 }
 
-static void bare_rethrow_token(DebugToken *t) @throws {
+static void bare_rethrow_token(DebugToken *t) throws {
     @throw t;                            // bare：只声明"会抛"
 }
 
@@ -276,21 +276,21 @@ int main() {
     kputs("[14] ARC auto-release (check runtime)\n");
     passed++;
 
-    // ── 15. @throws 声明标注（typed / bare / 本地 try 豁免） ──
+    // ── 15. throws 声明标注（typed / bare / 本地 try 豁免） ──
     total++;
     int lc15 = local_catch_token(7, tok);          // 未标注 + 本地 @try（豁免）
     int hit15 = 0;
     @try {
-        rethrow_token(tok);                        // typed @throws(DebugToken *)
+        rethrow_token(tok);                        // typed throws(DebugToken *)
     } @catch (DebugToken *c15) {
         hit15 = hit15 + [c15 code];
     }
     @try {
-        bare_rethrow_token(tok);                   // bare @throws
+        bare_rethrow_token(tok);                   // bare throws
     } @catch (DebugToken *c15b) {
         hit15 = hit15 + [c15b code];
     }
-    kputs("[15] @throws local="); kputdec(lc15);
+    kputs("[15] throws local="); kputdec(lc15);
     kputs(" caught="); kputdec(hit15);
     kputs(" (expect 21/84)\n");
     if (lc15 == 21 && hit15 == 84) passed++;

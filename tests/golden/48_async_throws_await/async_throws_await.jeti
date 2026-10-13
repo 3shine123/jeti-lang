@@ -1,0 +1,82 @@
+// golden/48 — 2026-10-13 spellings, pinned as implemented:
+//   * bare soft keyword `throws` / `throws(ErrType *)` on async declarations
+//     (same spelling as the sync side; @-prefixed form was removed)
+//   * `await` inside a message send must be parenthesized:
+//       argument:  [self wrap:(await [self load:4])]
+//       receiver:  [(await [self box:2]) value]
+//   * failed await arms the error flag, the EH call-site guard propagates,
+//     the await expression yields 0 and the enclosing @catch handles it.
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+@interface NetErr : NPObject @end
+
+@interface Api : NPObject
+- (async int)load:(int)uid throws(NetErr *);
+- (async int)probe:(int)uid throws;
+- (async Api *)box:(int)uid;
+- (int)decode:(int)raw;
+- (int)wrap:(int)v;
+- (int)value;
+- (async void)run;
+@end
+
+@implementation Api
+- (async int)load:(int)uid throws(NetErr *) {
+    if (uid < 0) { @throw [[NetErr alloc] init]; }
+    return await [self decode:uid];
+}
+
+- (async int)probe:(int)uid throws {
+    if (uid == 99) { @throw [[NetErr alloc] init]; }
+    return await [self wrap:uid];
+}
+
+- (async Api *)box:(int)uid {
+    (void)uid;
+    return await [self asObj];
+}
+
+- (Api *)asObj { return self; }
+
+- (int)decode:(int)raw { return raw * 10; }
+
+- (int)wrap:(int)v { return v + 1; }
+
+- (int)value { return 7; }
+
+- (async void)run {
+    @try {
+        printf("ok=%d\n", await [self load:3]);
+    }
+    @catch (NetErr *e) {
+        printf("caught\n");
+    }
+    @try {
+        printf("fail=%d\n", await [self load:-1]);
+    }
+    @catch (NetErr *e) {
+        printf("caught-neg\n");
+    }
+    printf("msgarg=%d\n", [self wrap:(await [self load:4])]);
+    printf("msgrecv=%d\n", [(await [self box:2]) value]);
+    @try {
+        printf("probe=%d\n", await [self probe:1]);
+    }
+    @catch (NetErr *e) {
+        printf("nope\n");
+    }
+    @try {
+        printf("fail99=%d\n", await [self probe:99]);
+    }
+    @catch (NetErr *e) {
+        printf("caught-99\n");
+    }
+}
+@end
+
+int main(void) {
+    Api *api = [[Api alloc] init];
+    [api run];
+    return 0;
+}

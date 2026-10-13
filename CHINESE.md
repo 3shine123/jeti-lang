@@ -573,7 +573,8 @@ int main() {
 - **`async` 直接修饰业务类型**——`async int` / `async void` / `async NPString *`。旧的 `(async NPTask<T>)` 拼写已废除（报迁移 error）；裸 `- (NPTask<int>)load` 是**普通同步方法**，只返回一个任务对象。
 - **签名声明、checker 强制**——会挂起的方法**必须**声明修饰符（体内从不挂起 → error；有 `await` 不标 → error）。任务句柄是一等值：裸调用 async 方法只*创建*任务（`NPTask<int> *`），由 `await t` 或语句位 `[t start]` 驱动；同一任务可多次 `await`（结果缓存）。**语句位**的裸调用（`[f run];`）与语句位 `[t start];` 就是 async 入口：hosted 下在调用点就地驱动到完成（降为 `jeti_task_await`），`-ffreestanding` 永不驱动、泵留给裸机 `main`；`main` 退出处刻意不兜底泵（ARC 先释放接收者）。
 - **`await` 降级为状态机**——方法体在挂起点被拆进 `switch(task->state)` 驱动的堆上 `NPTask`；活过挂起点的局部变量提升进每方法一个的 frame 结构体。
-- **错误处理走普通 ObjC 式 EH**——可失败的 async 方法用 `@throws(ErrType *)` 标注（文档性，与同步侧同一拼写）；调用方用普通 `@try/@catch` 处理失败；无人接则顶层 loud abort。单纯的挂起不触发 `@finally`，失败的 await 才触发。（checked EH 后端，默认。）
+- **消息发送内的 `await` 必须加小括号**——实参写 `[self wrap:(await [self load:4])]`，接收者写 `[(await [self box:2]) value]`；裸写 `[self wrap:await [self load:4]]` 是解析错误（带修正提示）：不加括号会被读成 await 盖住整条消息链（Swift 语义），Jeti 刻意不为它定义优先级。选择子位（`[task await]`）与名为 `await` 的 C 标识符不受影响；cast/分组括号合法——`(int)(await [self load:3])` 先驱动任务再转换。
+- **错误处理走普通 ObjC 式 EH**——可失败的 async 方法用 `throws(ErrType *)` 标注（文档性，与同步侧同一拼写）；调用方用普通 `@try/@catch` 处理失败；无人接则顶层 loud abort。单纯的挂起不触发 `@finally`，失败的 await 才触发。（checked EH 后端，默认。）
 - 协作式单线程调度器（`jeti_sched_run`）与 I/O 集成是下一个里程碑。
 
 ### `switch` 模式匹配（`case` 模式）
@@ -722,26 +723,26 @@ int main() {
 
 **`-eh checked` 已是默认后端**——直接 `jetic run` 就用它。`-eh legacy`（别名 `-eh sjlj`）切回旧的零开销 setjmp 后端，是一条完整的回退路径；该后端有经典限制：跨函数抛出会跳过中间帧的清理（见下方已知限制）。
 
-### `@throws` —— 声明式异常
+### `throws` —— 声明式异常
 
-`@throw` 与 `@throws` 只差一个字母，语义却完全不同——对应 Java 里 `throw`（语句）与 `throws`（声明子句）的分工。
+`@throw` 与 `throws` 只差一个字母，语义却完全不同——对应 Java 里 `throw`（语句）与 `throws`（声明子句）的分工。
 
-| | `@throw` | `@throws` |
+| | `@throw` | `throws` |
 |--|----------|-----------|
 | 是什么 | **语句** —— 运行时抛出异常 | **声明标注** —— 编译期元数据 |
 | 写在哪 | 函数/方法体内 | 声明尾部，`;` 或 `{` 之前 |
-| 形态 | `@throw expr;` | `@throws(T *)` 或裸 `@throws` |
+| 形态 | `@throw expr;` | `throws(T *)` 或裸 `throws` |
 | 进生成的 C 吗 | 进（setjmp/旗标机制） | **永不** —— 无代码、不占 vtable 槽位 |
 
 ```jeti
 @interface Repo : NPObject
-- (NPString *)fetch:(const char *)url @throws(NPError *);   // 会抛 NPError *
-- (int)parse:(const char *)s @throws;                       // 会抛，类型不注明
+- (NPString *)fetch:(const char *)url throws(NPError *);   // 会抛 NPError *
+- (int)parse:(const char *)s throws;                       // 会抛，类型不注明
 - (int)count;                                              // 从不抛
 @end
 
 @implementation Repo
-- (NPString *)fetch:(const char *)url @throws(NPError *) {
+- (NPString *)fetch:(const char *)url throws(NPError *) {
     if (!url) {
         @throw [[NPError alloc] init];   // 语句：抛出
     }
@@ -754,12 +755,12 @@ int main() {
 
 **checker 强制什么**
 
-- `@throws(T *)` —— 逃逸出本声明的每个 `@throw`，其静态类型必须与 `T` 相容（允许子类）：
-  `error: '@throw' of type 'AppError *' does not match the declared '@throws(NPString *)'`
-- 裸 `@throws` —— 体内必须确有逃逸的 `@throw`：
-  `error: 'liar' is marked '@throws' but its body never executes '@throw'`
+- `throws(T *)` —— 逃逸出本声明的每个 `@throw`，其静态类型必须与 `T` 相容（允许子类）：
+  `error: '@throw' of type 'AppError *' does not match the declared 'throws(NPString *)'`
+- 裸 `throws` —— 体内必须确有逃逸的 `@throw`：
+  `error: 'liar' is marked 'throws' but its body never executes '@throw'`
 - 不写 —— 逃逸的 `@throw` 报 error：
-  `error: '@throw' escapes 'bad' without a '@throws' annotation; declare it with '@throws(<type>)' or handle it with a local '@try'`
+  `error: '@throw' escapes 'bad' without a 'throws' annotation; declare it with 'throws(<type>)' or handle it with a local '@try'`
 
 被**同一体内** `@try` 捕获的 `@throw` 不算逃逸，因此 `main`、以及自己就地兜住的 helper 都不需要标注：
 
@@ -770,7 +771,7 @@ static void bad(int n) {                        // error：逃逸出 'bad'
     }
 }
 
-static void good(int n) @throws(AppError *) {   // 已声明 —— 通过
+static void good(int n) throws(AppError *) {   // 已声明 —— 通过
     if (n < 0) {
         @throw [[AppError alloc] init];
     }
@@ -787,7 +788,7 @@ static void guarded(int n) {                    // 通过 —— 就地捕获
 }
 ```
 
-类型判定刻意保守：`@"..."` 字面量、裸 C 字符串、Cast 目标类型、已知类型的变量会被判定；**消息发送不判**（只有 selector 的注册表无从得知其类），因此它对任意声明类型都放行。标注纯编译期——增删 `@throws` 不改变生成的 C、程序输出与 ARC 行为。两个关键词互相写错位置本身也是 error：体内写 `@throws`、声明上写 `@throw(...)`，各会收到一条指明正确关键词的诊断。
+类型判定刻意保守：`@"..."` 字面量、裸 C 字符串、Cast 目标类型、已知类型的变量会被判定；**消息发送不判**（只有 selector 的注册表无从得知其类），因此它对任意声明类型都放行。标注纯编译期——增删 `throws` 不改变生成的 C、程序输出与 ARC 行为。两个关键词互相写错位置本身也是 error：体内写 `throws`、声明上写 `@throw(...)`，各会收到一条指明正确关键词的诊断。
 
 #### 隐式根类（jeti_root）
 

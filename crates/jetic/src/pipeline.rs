@@ -407,7 +407,7 @@ impl Pipeline {
             checker.no_arc = self.no_arc;
             checker.source_map = Some(pre.source_map.clone());
             // `-eh checked` rewrites `@throw` before the checker runs, so the
-            // bare `@throws` "must really throw" rule cannot see the
+            // bare `throws` "must really throw" rule cannot see the
             // statements it is meant to reconcile.
             checker.eh_checked = self.eh_checked;
             if checker.check(&mut ast) != 0 {

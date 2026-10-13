@@ -49,11 +49,13 @@
 44_designated_init/ C99 指定初始化器六形态
 45_nullability/     nullability 注解（nonnull/nullable 透传 + checker）
 46_generic_bounds/  泛型协议约束 T : Proto（实例化检查 + 继承重申/弱化）
+47_async_blocks/    async 块字面量（IIFE + 三元混合；负例 async_block_ternary_mix-F）
+48_async_throws_await/ 裸 `throws`/`throws(T)`（同步+异步同一拼写）+ 消息内括号 await（实参位/接收者位）
 ```
 
 > 每个目录的 `README.md` 记录该特性的**实现要点、判据表、M1 限制与踩过的坑**——排查问题时先看它，比读 `.jeti` 快得多。
 >
-> 故意失败的样本**不放在 golden 目录**（否则被当普通 FAIL 计数），统一在 `tests/negative/`，已在 `test_all.py` 的 glob 排除；需要"必须编译失败且报错清晰"的用例（如协议缺必需方法、`@(obj)` 非法装箱、`@throws` 撒谎）都在那里。
+> 故意失败的样本**不放在 golden 目录**（否则被当普通 FAIL 计数），统一在 `tests/negative/`，已在 `test_all.py` 的 glob 排除；需要"必须编译失败且报错清晰"的用例（如协议缺必需方法、`@(obj)` 非法装箱、`throws` 撒谎）都在那里。
 >
 > `25_freestanding/` 与 `26_baremetal_stress/` 各有专属 `build.sh`（需要 `-freestanding` 与裸机 assembler），**不在默认测试套件**，用它们自己的 runner 跑。
 

@@ -56,6 +56,11 @@ pub fn expr_contains_await(e: &AstExpr) -> bool {
             expr_contains_await(target) || expr_contains_await(value)
         }
         AstExprData::Cast { expr, .. } => expr_contains_await(expr),
+        // Parenthesized — `(await [x y])` as a message argument (the mandated
+        // in-message spelling) or any grouped subexpression. Missing this arm
+        // made the whole shape invisible: no suspension point, no M2 rewrite,
+        // and the raw NPTask* leaked into a scalar parameter.
+        AstExprData::Paren(inner) => expr_contains_await(inner),
         AstExprData::Ternary { cond, then, else_ } => {
             expr_contains_await(cond)
                 || expr_contains_await(then)
@@ -574,7 +579,7 @@ fn check_async_nptask_spelling(rt: &AstType, line: usize, col: usize, diags: &mu
 /// signature, so a lying signature is an error in BOTH directions:
 ///   marked + await     → ok
 ///   marked, no await   → error — the modifier must not lie (same philosophy
-///                        as bare `@throws` requiring a real throw)
+///                        as a bare `throws` requiring a real throw)
 ///   await, unmarked    → error — the signature is lying: a suspending method
 ///                        MUST be declared `(async T)`
 ///   unmarked, no await → ok

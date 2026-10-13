@@ -761,7 +761,7 @@ __attribute__((weak)) int main(void) {
         memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
         if ((__jeti_state == 1))         longjmp(__jeti_exception_buf, 1);
     }
-    kputs("[15] @throws local=");
+    kputs("[15] throws local=");
     kputdec(lc15);
     kputs(" caught=");
     kputdec(hit15);

@@ -74,7 +74,7 @@ error: 'NPNumber' does not conform to protocol 'Greetable' required by
        use a conforming type argument
 ```
 
-一次性报齐所有违约实参（收集后统一报，不首错即停——与 `@throws` 调和的
+一次性报齐所有违约实参（收集后统一报，不首错即停——与 `throws` 调和的
 多错收集习惯一致）。`-fno-checker` 关闭（bound 是 checker 功能，不进 codegen，
 关闭后生成 C 与无 bound 完全一致——这就是"零 codegen"的另一面：关掉检查
 不会留下半成品）。

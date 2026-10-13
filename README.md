@@ -592,7 +592,8 @@ Design rules:
 - **`async` takes the business type directly** — `async int` / `async void` / `async NPString *`. The legacy `(async NPTask<T>)` spelling is rejected with a migration error; a bare `- (NPTask<int>)load` remains an *ordinary synchronous* method that merely returns a task object.
 - **Signatures declare, the checker enforces** — a suspending method *must* declare the modifier (body never suspends → error; `await` without the modifier → error). Task handles are first-class values: a bare async call *creates* the task (`NPTask<int> *`); `await t` or a statement-position `[t start]` drive it, and awaiting the same task twice is legal (the result is cached). A statement-position async call is the async entry: hosted code drives it to completion right there (lowered to `jeti_task_await`), freestanding code never drives and leaves the pump to your `main`; there is deliberately no pump at `main`'s exit (ARC releases the receiver first).
 - **`await` lowers to a state machine** — the body is split at suspension points into a `switch(task->state)` driver over a heap `NPTask`; locals that survive a suspension are lifted into a per-method frame struct.
-- **Errors are plain Objective-C-style EH** — a failable async method annotates `@throws(ErrType *)` (documentation-level, the same spelling as the sync side); callers handle failures with ordinary `@try/@catch`; an unhandled failure aborts loudly. A mere suspension never fires `@finally` — a failed await does. (Checked EH backend, the default.)
+- **Inside a message send, `await` must be parenthesized** — an argument is `[self wrap:(await [self load:4])]`, a receiver is `[(await [self box:2]) value]`. A bare `[self wrap:await [self load:4]]` is a parse error (with a fix-it): unparenthesized, it reads like Swift's await-over-the-whole-chain, and Jeti deliberately defines no precedence for it. Selector position (`[task await]`) and C identifiers named `await` are unaffected; cast/grouping parens are fine — `(int)(await [self load:3])` drives the task first, then converts.
+- **Errors are plain Objective-C-style EH** — a failable async method annotates `throws(ErrType *)` (documentation-level, the same spelling as the sync side); callers handle failures with ordinary `@try/@catch`; an unhandled failure aborts loudly. A mere suspension never fires `@finally` — a failed await does. (Checked EH backend, the default.)
 - A cooperative single-thread scheduler (`jeti_sched_run`) and I/O integration are planned as the next milestone.
 
 ### Switch Pattern Matching (`case` patterns)
@@ -741,26 +742,26 @@ The semantics you get:
 
 **`-eh checked` is the default backend** — a plain `jetic run` compiles with it. `-eh legacy` (alias `-eh sjlj`) selects the old zero-overhead setjmp backend and remains a complete rollback; that backend has the classic limitation: a cross-frame throw skips intermediate frames' cleanup (documented below).
 
-### `@throws` — Declared Exceptions
+### `throws` — Declared Exceptions
 
-`@throw` and `@throws` differ by one letter and mean completely different things — the split Java draws between `throw` (a statement) and `throws` (a declaration clause).
+`@throw` and `throws` differ by one letter and mean completely different things — the split Java draws between `throw` (a statement) and `throws` (a declaration clause).
 
-| | `@throw` | `@throws` |
+| | `@throw` | `throws` |
 |--|----------|-----------|
 | What | **statement** — raises an exception at runtime | **declaration annotation** — compile-time metadata |
 | Where | inside a body | trailing, before the `;` or `{` of a declaration |
-| Shape | `@throw expr;` | `@throws(T *)` or bare `@throws` |
+| Shape | `@throw expr;` | `throws(T *)` or bare `throws` |
 | In generated C | yes (the setjmp/flag machinery) | **never** — no code, no vtable slot |
 
 ```jeti
 @interface Repo : NPObject
-- (NPString *)fetch:(const char *)url @throws(NPError *);   // throws NPError *
-- (int)parse:(const char *)s @throws;                       // throws; type unstated
+- (NPString *)fetch:(const char *)url throws(NPError *);   // throws NPError *
+- (int)parse:(const char *)s throws;                       // throws; type unstated
 - (int)count;                                              // never throws
 @end
 
 @implementation Repo
-- (NPString *)fetch:(const char *)url @throws(NPError *) {
+- (NPString *)fetch:(const char *)url throws(NPError *) {
     if (!url) {
         @throw [[NPError alloc] init];   // the statement
     }
@@ -773,12 +774,12 @@ Apple has occupied exactly this slot — trailing metadata before the `;` — wi
 
 **What the checker enforces**
 
-- `@throws(T *)` — every `@throw` that escapes the declaration must have a static type compatible with `T` (subclasses allowed):
-  `error: '@throw' of type 'AppError *' does not match the declared '@throws(NPString *)'`
-- Bare `@throws` — the body must really contain an escaping `@throw`:
-  `error: 'liar' is marked '@throws' but its body never executes '@throw'`
+- `throws(T *)` — every `@throw` that escapes the declaration must have a static type compatible with `T` (subclasses allowed):
+  `error: '@throw' of type 'AppError *' does not match the declared 'throws(NPString *)'`
+- Bare `throws` — the body must really contain an escaping `@throw`:
+  `error: 'liar' is marked 'throws' but its body never executes '@throw'`
 - No annotation — an escaping `@throw` is an error:
-  `error: '@throw' escapes 'bad' without a '@throws' annotation; declare it with '@throws(<type>)' or handle it with a local '@try'`
+  `error: '@throw' escapes 'bad' without a 'throws' annotation; declare it with 'throws(<type>)' or handle it with a local '@try'`
 
 A `@throw` caught by a `@try` **in the same body** is never an escape, so `main` and locally-guarded helpers need no annotation:
 
@@ -789,7 +790,7 @@ static void bad(int n) {                        // error: escapes 'bad'
     }
 }
 
-static void good(int n) @throws(AppError *) {   // declared — fine
+static void good(int n) throws(AppError *) {   // declared — fine
     if (n < 0) {
         @throw [[AppError alloc] init];
     }
@@ -806,7 +807,7 @@ static void guarded(int n) {                    // fine — caught locally
 }
 ```
 
-The type check is deliberately conservative: `@"..."` literals, bare C strings, casts, and variables of known type are judged; a message send is not (its class is not knowable from a selector-only registry), so it satisfies any declared type. Annotations are compile-time only — adding or removing `@throws` never changes generated C, program output, or ARC behaviour. Misusing the pair is itself an error: `@throws` inside a body, or `@throw(...)` on a declaration, each gets a diagnostic naming the other keyword.
+The type check is deliberately conservative: `@"..."` literals, bare C strings, casts, and variables of known type are judged; a message send is not (its class is not knowable from a selector-only registry), so it satisfies any declared type. Annotations are compile-time only — adding or removing `throws` never changes generated C, program output, or ARC behaviour. Misusing the pair is itself an error: `throws` inside a body, or `@throw(...)` on a declaration, each gets a diagnostic naming the other keyword.
 
 ### Implicit Root Class (`jeti_root`)
 

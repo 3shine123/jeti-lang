@@ -1,0 +1,12 @@
+// Negative (2026-10-13 decision): the @-prefixed exception annotation was
+// removed with NO deprecation window. The unified failable annotation is the
+// bare soft keyword `throws` / `throws(ErrType *)` (same spelling on sync and
+// async declarations; `@throw` — the statement — keeps its @).
+// This file MUST fail with the "'@throws' was removed" migration diagnostic.
+// Kept as documentation; the runner skips tests/negative (verified by hand /
+// cargo unit tests).
+#import <Foundation/Foundation.hje>
+
+@interface Svc : NPObject
+- (int)fetch:(int)x @throws(NPString *);
+@end

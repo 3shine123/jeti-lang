@@ -435,7 +435,7 @@ pub enum CstDeclData {
         params: Option<Box<CstParam>>,
         has_variadic: bool,
         body: Option<Box<CstStmt>>,
-        /// Trailing `@throws` / `@throws(T)` annotation (declaration position).
+        /// Trailing `throws` / `throws(T)` annotation (declaration position).
         /// `None` = not annotated. Compile-time only — never emitted to C.
         throws: Option<Box<CstType>>,
         /// `async` return-type modifier (doc/async_nptask_plan.md). Always
@@ -508,7 +508,7 @@ pub enum CstDeclData {
         params: Option<Box<CstParam>>,
         has_variadic: bool,
         body: Option<Box<CstStmt>>,
-        /// Trailing `@throws` / `@throws(T)` annotation (declaration position,
+        /// Trailing `throws` / `throws(T)` annotation (declaration position,
         /// before `;` or `{`). `None` = not annotated. Compile-time only —
         /// never emitted to C. Distinct from the `@throw` statement.
         throws: Option<Box<CstType>>,

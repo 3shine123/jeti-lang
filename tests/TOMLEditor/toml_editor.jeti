@@ -410,7 +410,7 @@ static void trim_leading(const char **p) {
     // Forward static decls
     static id parse_value(const char **p);
 
-    static void THROW(const char *msg) @throws(ParseError *) {
+    static void THROW(const char *msg) throws(ParseError *) {
         ParseError *e = [[ParseError alloc] initWithMessage:msg];
         @throw e;
     }
