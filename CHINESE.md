@@ -1671,6 +1671,9 @@ Jeti 的"后端"是**人类可读的 C99**，不是 LLVM IR。这意味着：
 
 ## 许可证
 
-MIT License
+Jeti 采用 [Apache License 2.0](LICENSE)。
 
-Copyright (c) 2026 3shine123
+Copyright © 2026 3shine123
+
+- 完整许可证文本：[`LICENSE`](LICENSE)；声明文件：[`NOTICE`](NOTICE)
+- 用 Jeti 编译代码不给产物附加任何许可义务：`jetic` 生成的 C 文件及由其构建的二进制归你所有。

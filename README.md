@@ -1720,6 +1720,10 @@ Because C99 compiles everywhere. Generate human-readable C, compile with Clang, 
 
 ## License
 
-MIT License
+Jeti is licensed under the [Apache License, Version 2.0](LICENSE).
 
-Copyright (c) 2026 3shine123
+Copyright © 2026 3shine123
+
+- Full license text: [`LICENSE`](LICENSE) · notices: [`NOTICE`](NOTICE)
+- Compiling code with Jeti places no licensing obligation on the output: the
+  C files `jetic` generates, and the binaries you build from them, are yours.

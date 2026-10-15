@@ -1,0 +1,8 @@
+Jeti — a C-superset systems language with Objective-C-style message dispatch
+Copyright 2026 3shine123
+
+This product includes the Jeti compiler (jetic), the Jeti runtime
+(libjeti.a), and the Jeti Foundation library (libjetifoundation.a),
+developed as part of the Jeti language project.
+
+The async/await semantics are modeled on Swift's concurrency design.
