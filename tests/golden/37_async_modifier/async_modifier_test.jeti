@@ -13,24 +13,23 @@
 @interface Fetcher : NPObject
 - (async int)compute:(int)n;
 - (async void)runAll;
-- (NPTask<int>)loadCachedValue;   // sync method returning a task object
 - (int)plain:(int)n;
 @end
 
 @implementation Fetcher
 - (async int)compute:(int)n {
-    int raw = await n;            // suspension point
+    // v1 rule 1: an async body MAY have zero suspension points — no fake
+    // `await n` scaffolding (the await-on-sync lint flags exactly that).
+    int raw = n;
     return raw * 2;
 }
 - (async void)runAll {
     int x = await [self compute:21];          // await across a call chain
-    NPTask<int> *t = [self loadCachedValue];  // sync call: just a task object
-    int y = await t;                          // form B: await a task variable
+    int y = await [self compute:42];          // v1 rule 2: the old form-A
+                                              // handle capture is gone —
+                                              // await the call directly
     int z = [self plain:5];                   // plain sync call, no task involved
     printf("runAll x=%d y=%d z=%d\n", x, y, z);
-}
-- (NPTask<int>)loadCachedValue {
-    return [self compute:42];    // form A: lazy — created but NOT started here
 }
 - (int)plain:(int)n {
     return n + 1;
@@ -38,9 +37,12 @@
 @end
 
 int main() {
-    Fetcher *f = [[Fetcher alloc] init];
-    NPTask<void> *task = [f runAll];   // lazy: created, not executed
-    [task start];                      // hosted statement position: drives to
-                                       // completion here, f still ARC-alive
+    // Async Semantics v1 rules 2/3: the lazy handle + statement-position
+    // `[task start]` entry form is gone — blockOn: with the awaited call
+    // inside the block is the only sync→async bridge.
+    [NPTask blockOn:async void ^ {
+        Fetcher *f = [[Fetcher alloc] init];
+        await [f runAll];
+    }];
     return 0;
 }

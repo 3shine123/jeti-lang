@@ -384,7 +384,7 @@ impl Pipeline {
         // `hosted` gates the entry auto-pump (doc/async_nptask_plan.md
         // §静态分析 3): a hosted chain drives itself, bare metal pumps from
         // its own main loop.
-        let async_desugar_warnings = jeti_async::desugar_unit_m2(&mut ast, !self.no_libc);
+        let async_desugar_warnings = jeti_async::desugar_unit_m2(&mut ast);
         // §8-①: warnings the desugar's elided-return inference produced — same
         // channel/format as the check warnings above (positions are
         // inline-buffer ones, translated through the SourceMap).

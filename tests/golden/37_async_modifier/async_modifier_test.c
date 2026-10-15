@@ -167,7 +167,6 @@ static const SEL __jeti_sel_userInfo = {.name = "userInfo", .hash = 0xBB761ACA};
 static const SEL __jeti_sel_localizedDescription = {.name = "localizedDescription", .hash = 0xDCC8AA8C};
 static const SEL __jeti_sel_compute_ = {.name = "compute:", .hash = 0xE951A1C0};
 static const SEL __jeti_sel_runAll = {.name = "runAll", .hash = 0xBEC240F1};
-static const SEL __jeti_sel_loadCachedValue = {.name = "loadCachedValue", .hash = 0x8DA5F9BC};
 static const SEL __jeti_sel_plain_ = {.name = "plain:", .hash = 0xB17DBF67};
 
 /* --------- Section 4 · Type declarations & typedefs ---------- */
@@ -220,6 +219,9 @@ struct compute__frame {
     int n;
 };
 struct runAll_frame {
+    char __jeti_pad;
+};
+struct jeti_async_block_0_frame {
     char __jeti_pad;
 };
 typedef struct NPRange {
@@ -392,10 +394,11 @@ NPDictionary * NPError_userInfo(NPObject * self, SEL _cmd);
 NPString * NPError_localizedDescription(NPObject * self, SEL _cmd);
 NPTask * Fetcher_compute_(NPObject * self, SEL _cmd, int n);
 NPTask * Fetcher_runAll(NPObject * self, SEL _cmd);
-NPTask * Fetcher_loadCachedValue(NPObject * self, SEL _cmd);
 int Fetcher_plain_(NPObject * self, SEL _cmd, int n);
 int jeti_async_state_compute_(NPTask * __jeti_task);
 int jeti_async_state_runAll(NPTask * __jeti_task);
+int jeti_async_state_jeti_async_block_0(NPTask * __jeti_task);
+NPTask * jeti_async_block_0(NPObject * __jeti_self_cap);
 int main(void);
 
 /* ------------- Section 7 · File-level variables -------------- */
@@ -525,7 +528,6 @@ struct jeti_vtable {
     NPString * (*uppercaseString)(NPObject *, SEL);
     NPDictionary * (*userInfo)(NPObject *, SEL);
     NPTask * (*compute_)(NPObject *, SEL, int);
-    NPTask * (*loadCachedValue)(NPObject *, SEL);
     NPString * (*localizedDescription)(NPObject *, SEL);
     int (*plain_)(NPObject *, SEL, int);
     NPTask * (*runAll)(NPObject *, SEL);
@@ -886,7 +888,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_jeti_root = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -977,7 +978,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPObject = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1068,7 +1068,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPDictionary = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1159,7 +1158,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPError = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = (NPString * (*)(NPObject *, SEL))NPError_localizedDescription,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1250,7 +1248,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPNumber = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1341,7 +1338,6 @@ struct jeti_vtable JETI_VTABLE_$_Fetcher = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = (NPTask * (*)(NPObject *, SEL, int))Fetcher_compute_,
-    .loadCachedValue = (NPTask * (*)(NPObject *, SEL))Fetcher_loadCachedValue,
     .localizedDescription = NULL,
     .plain_ = (int (*)(NPObject *, SEL, int))Fetcher_plain_,
     .runAll = (NPTask * (*)(NPObject *, SEL))Fetcher_runAll,
@@ -1432,7 +1428,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPPredicate = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1523,7 +1518,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPSet = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1614,7 +1608,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPString = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1705,7 +1698,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPArray = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1796,7 +1788,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPOrderedSet = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1887,7 +1878,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableSet = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -1978,7 +1968,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableString = {
     .uppercaseString = (NPString * (*)(NPObject *, SEL))NPString_uppercaseString,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -2069,7 +2058,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableArray = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -2160,7 +2148,6 @@ __attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_NPMutableDictionary = {
     .uppercaseString = NULL,
     .userInfo = NULL,
     .compute_ = NULL,
-    .loadCachedValue = NULL,
     .localizedDescription = NULL,
     .plain_ = NULL,
     .runAll = NULL,
@@ -2421,13 +2408,8 @@ static id jeti_kvc_wrap_Fetcher_runAll(id self) {
     return (id)Fetcher_runAll((NPObject *)self, __jeti_sel_runAll);
 }
 
-static id jeti_kvc_wrap_Fetcher_loadCachedValue(id self) {
-    return (id)Fetcher_loadCachedValue((NPObject *)self, __jeti_sel_loadCachedValue);
-}
-
 static const jeti_kvc_entry JETI_KVC_$_Fetcher[] = {
     { .key = "runAll", .get = jeti_kvc_wrap_Fetcher_runAll },
-    { .key = "loadCachedValue", .get = jeti_kvc_wrap_Fetcher_loadCachedValue },
     { .key = NULL, .get = NULL },
 };
 
@@ -2459,21 +2441,21 @@ NPClass JETI_CLASS_$_NPMutableArray;
 NPClass JETI_CLASS_$_NPMutableDictionary;
 
 __attribute__((constructor)) static void __jeti_vtable_layout_check(void) {
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_jeti_root)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class jeti_root | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPObject)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPObject | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPError)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPError | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPNumber)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPNumber | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Fetcher)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class Fetcher | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPPredicate)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPPredicate | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPOrderedSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPOrderedSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ loadCachedValue localizedDescription plain_ runAll | class NPMutableDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_jeti_root)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class jeti_root | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPObject)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPObject | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPError)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPError | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPNumber)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPNumber | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_Fetcher)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class Fetcher | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPPredicate)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPPredicate | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPOrderedSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPOrderedSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableSet)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPMutableSet | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableString)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPMutableString | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableArray)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPMutableArray | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_NPMutableDictionary)->__sig, 0x53851d190abf2c3bULL, "UTF8String _grow addEntriesFromDictionary_ addObject_ addObjectsFromArray_ allKeys allObjects allValues anyObject appendString_ appendUTF8String_ boolValue charValue characterAtIndex_ code compare_ containsObject_ copy count dealloc deleteCharactersInRange_ description domain doubleValue evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ filterUsingPredicate_ filteredArrayUsingPredicate_ firstObject hasPrefix_ hasSuffix_ hash indexOfObjectMatchingPredicate_ indexOfObject_ init initWithArray_ initWithCapacity_ initWithCode_domain_userInfo_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithLongLong_ initWithObjects_count_ initWithSet_ initWithString_ initWithUTF8String_ insertObject_atIndex_ insertString_atIndex_ intValue isEqualToNumber_ isEqualToString_ isEqual_ isKindOfClass_ isKindOf_ lastObject length longLongValue lowercaseString objectAtIndex_ objectForKey_ predicateFormat rangeOfString_ release removeAllObjects removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain setObject_atIndex_ setObject_forKey_ setString_ stringByAppendingString_ stringByAppendingUTF8String_ substringFromIndex_ substringToIndex_ substringWithRange_ uppercaseString userInfo compute_ localizedDescription plain_ runAll | class NPMutableDictionary | tu tests/golden/37_async_modifier/async_modifier_test.jeti");
 }
 
 __attribute__((weak)) void jeti_metaInit(void) {
@@ -3214,7 +3196,7 @@ __attribute__((weak)) NPString * NPError_localizedDescription(NPObject * self, S
 
 /* -[Fetcher compute_] */
 __attribute__((weak)) NPTask * Fetcher_compute_(NPObject * self, SEL _cmd, int n) {
-#line 24 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 25 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_compute_, self, sizeof(struct compute__frame)));
     ((struct compute__frame *)__jeti_task->frame)->n = n;
     return __jeti_task;
@@ -3223,41 +3205,34 @@ __attribute__((weak)) NPTask * Fetcher_compute_(NPObject * self, SEL _cmd, int n
 /* -[Fetcher runAll] */
 #line 1 "<jeti-generated>"
 __attribute__((weak)) NPTask * Fetcher_runAll(NPObject * self, SEL _cmd) {
-#line 31 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 33 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_runAll, self, sizeof(struct runAll_frame)));
     return __jeti_task;
-}
-
-/* -[Fetcher loadCachedValue] */
-#line 1 "<jeti-generated>"
-__attribute__((weak)) NPTask * Fetcher_loadCachedValue(NPObject * self, SEL _cmd) {
-#line 33 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    return (NPTask *)({ NPObject *__jeti_tmp_0 = ((NPObject *)(self)); __jeti_tmp_0 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->compute_)(__jeti_tmp_0, __jeti_sel_compute_, 42) : 0; });
 }
 
 /* -[Fetcher plain_] */
 #line 1 "<jeti-generated>"
 __attribute__((weak)) int Fetcher_plain_(NPObject * self, SEL _cmd, int n) {
-#line 36 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 35 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     return (n + 1);
 }
 
 #line 1 "<jeti-generated>"
 __attribute__((weak)) int jeti_async_state_compute_(NPTask * __jeti_task) {
-#line 24 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 25 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     switch (__jeti_task->state) {
         case 1:
             {
                 struct compute__frame * __jeti_f = (struct compute__frame *)__jeti_task->frame;
-#line 22 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                int raw = (__jeti_task->state = 2, __jeti_f->n);
 #line 23 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+                int raw = __jeti_f->n;
+#line 24 "tests/golden/37_async_modifier/async_modifier_test.jeti"
                 {
-                    __jeti_task->result = (void *)(unsigned)(raw * 2);
+                    __jeti_task->result = (void *)(unsigned long)(raw * 2);
                     __jeti_task->state = -1;
                     return 1;
                 }
-#line 24 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 25 "tests/golden/37_async_modifier/async_modifier_test.jeti"
                 __jeti_task->state = -1;
                 return 1;
             }
@@ -3273,22 +3248,20 @@ __attribute__((weak)) int jeti_async_state_compute_(NPTask * __jeti_task) {
 
 #line 1 "<jeti-generated>"
 __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
-#line 31 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 33 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     switch (__jeti_task->state) {
         case 1:
             {
                 struct runAll_frame * __jeti_f = (struct runAll_frame *)__jeti_task->frame;
-#line 26 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_1 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_1 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->compute_)(__jeti_tmp_1, __jeti_sel_compute_, 21) : 0; })));
 #line 27 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                NPTask * t = (NPTask *)(({ NPObject *__jeti_tmp_2 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_2 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->loadCachedValue)(__jeti_tmp_2, __jeti_sel_loadCachedValue) : 0; }));
+                int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_0 = ((NPObject *)((struct Fetcher *)__jeti_task->self_obj)); __jeti_tmp_0 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->compute_)(__jeti_tmp_0, __jeti_sel_compute_, 21) : 0; })));
 #line 28 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                int y = (__jeti_task->state = 3, (long)jeti_task_await(t));
-#line 29 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                int z = ({ NPObject *__jeti_tmp_3 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_3 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->plain_)(__jeti_tmp_3, __jeti_sel_plain_, 5) : (int){0}; });
-#line 30 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-                printf("runAll x=%d y=%d z=%d\n", x, y, z);
+                int y = (__jeti_task->state = 3, (long)jeti_task_await(({ NPObject *__jeti_tmp_1 = ((NPObject *)((struct Fetcher *)__jeti_task->self_obj)); __jeti_tmp_1 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->compute_)(__jeti_tmp_1, __jeti_sel_compute_, 42) : 0; })));
 #line 31 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+                int z = ({ NPObject *__jeti_tmp_2 = ((NPObject *)((struct Fetcher *)__jeti_task->self_obj)); __jeti_tmp_2 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->plain_)(__jeti_tmp_2, __jeti_sel_plain_, 5) : (int){0}; });
+#line 32 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+                printf("runAll x=%d y=%d z=%d\n", x, y, z);
+#line 33 "tests/golden/37_async_modifier/async_modifier_test.jeti"
                 __jeti_task->state = -1;
                 return 1;
             }
@@ -3303,18 +3276,44 @@ __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
 }
 
 #line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_jeti_async_block_0(NPTask * __jeti_task) {
+#line 46 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct jeti_async_block_0_frame * __jeti_f = (struct jeti_async_block_0_frame *)__jeti_task->frame;
+#line 44 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+                NPObject *__jeti_tmp_3 = (NPObject_alloc(&JETI_CLASS_$_Fetcher, __jeti_sel_alloc));
+                Fetcher * f = (Fetcher *)(__jeti_tmp_3 ? ((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->init(__jeti_tmp_3, __jeti_sel_init) : 0);
+#line 45 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+                (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_4 = ((NPObject *)(f)); __jeti_tmp_4 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->runAll)(__jeti_tmp_4, __jeti_sel_runAll) : 0; })));
+#line 46 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * jeti_async_block_0(NPObject * __jeti_self_cap) {
+#line 46 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_jeti_async_block_0, __jeti_self_cap, sizeof(struct jeti_async_block_0_frame)));
+    return __jeti_task;
+}
+
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int main(void) {
     jeti_metaInit();
-#line 41 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    NPObject *__jeti_tmp_4 = (NPObject_alloc(&JETI_CLASS_$_Fetcher, __jeti_sel_alloc));
-    Fetcher * f = (Fetcher *)(__jeti_tmp_4 ? ((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->init(__jeti_tmp_4, __jeti_sel_init) : 0);
-#line 42 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    NPTask * task = (NPTask *)(({ NPObject *__jeti_tmp_5 = ((NPObject *)(f)); __jeti_tmp_5 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->runAll)(__jeti_tmp_5, __jeti_sel_runAll) : 0; }));
-#line 43 "tests/golden/37_async_modifier/async_modifier_test.jeti"
-    jeti_task_await(task);
-#line 1 "<jeti-generated>"
-    jeti_release(f);
-#line 45 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+#line 46 "tests/golden/37_async_modifier/async_modifier_test.jeti"
+    (long)jeti_task_await(jeti_async_block_0((NPObject *)0));
+#line 47 "tests/golden/37_async_modifier/async_modifier_test.jeti"
     return 0;
 }
 

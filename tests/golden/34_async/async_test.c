@@ -223,6 +223,9 @@ struct twice__frame {
 struct runAll_frame {
     char __jeti_pad;
 };
+struct jeti_async_block_0_frame {
+    char __jeti_pad;
+};
 typedef struct NPRange {
     size_t location;
     size_t length;
@@ -397,6 +400,8 @@ NPTask * Fetcher_runAll(NPObject * self, SEL _cmd);
 int jeti_async_state_compute_(NPTask * __jeti_task);
 int jeti_async_state_twice_(NPTask * __jeti_task);
 int jeti_async_state_runAll(NPTask * __jeti_task);
+int jeti_async_state_jeti_async_block_0(NPTask * __jeti_task);
+NPTask * jeti_async_block_0(NPObject * __jeti_self_cap);
 int main(void);
 
 /* ------------- Section 7 · File-level variables -------------- */
@@ -3210,7 +3215,7 @@ __attribute__((weak)) int jeti_async_state_compute_(NPTask * __jeti_task) {
                 int raw = (__jeti_task->state = 2, __jeti_f->n);
 #line 20 "tests/golden/34_async/async_test.jeti"
                 {
-                    __jeti_task->result = (void *)(unsigned)(raw * 2);
+                    __jeti_task->result = (void *)(unsigned long)(raw * 2);
                     __jeti_task->state = -1;
                     return 1;
                 }
@@ -3236,12 +3241,12 @@ __attribute__((weak)) int jeti_async_state_twice_(NPTask * __jeti_task) {
             {
                 struct twice__frame * __jeti_f = (struct twice__frame *)__jeti_task->frame;
 #line 23 "tests/golden/34_async/async_test.jeti"
-                int a = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_0 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_0 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->compute_)(__jeti_tmp_0, __jeti_sel_compute_, __jeti_f->n) : 0; })));
+                int a = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_0 = ((NPObject *)((struct Fetcher *)__jeti_task->self_obj)); __jeti_tmp_0 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->compute_)(__jeti_tmp_0, __jeti_sel_compute_, __jeti_f->n) : 0; })));
 #line 24 "tests/golden/34_async/async_test.jeti"
-                int b = (__jeti_task->state = 3, (long)jeti_task_await(({ NPObject *__jeti_tmp_1 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_1 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->compute_)(__jeti_tmp_1, __jeti_sel_compute_, a) : 0; })));
+                int b = (__jeti_task->state = 3, (long)jeti_task_await(({ NPObject *__jeti_tmp_1 = ((NPObject *)((struct Fetcher *)__jeti_task->self_obj)); __jeti_tmp_1 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->compute_)(__jeti_tmp_1, __jeti_sel_compute_, a) : 0; })));
 #line 25 "tests/golden/34_async/async_test.jeti"
                 {
-                    __jeti_task->result = (void *)(unsigned)(a + b);
+                    __jeti_task->result = (void *)(unsigned long)(a + b);
                     __jeti_task->state = -1;
                     return 1;
                 }
@@ -3267,7 +3272,7 @@ __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
             {
                 struct runAll_frame * __jeti_f = (struct runAll_frame *)__jeti_task->frame;
 #line 29 "tests/golden/34_async/async_test.jeti"
-                int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_2 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_2 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->twice_)(__jeti_tmp_2, __jeti_sel_twice_, 3) : 0; })));
+                int x = (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_2 = ((NPObject *)((struct Fetcher *)__jeti_task->self_obj)); __jeti_tmp_2 ? ((NPTask * (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->twice_)(__jeti_tmp_2, __jeti_sel_twice_, 3) : 0; })));
 #line 30 "tests/golden/34_async/async_test.jeti"
                 NPLog((NPString *)jeti_stringFromCstr("result=%d"), x);
 #line 31 "tests/golden/34_async/async_test.jeti"
@@ -3285,16 +3290,44 @@ __attribute__((weak)) int jeti_async_state_runAll(NPTask * __jeti_task) {
 }
 
 #line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_jeti_async_block_0(NPTask * __jeti_task) {
+#line 43 "tests/golden/34_async/async_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct jeti_async_block_0_frame * __jeti_f = (struct jeti_async_block_0_frame *)__jeti_task->frame;
+#line 41 "tests/golden/34_async/async_test.jeti"
+                NPObject *__jeti_tmp_3 = (NPObject_alloc(&JETI_CLASS_$_Fetcher, __jeti_sel_alloc));
+                Fetcher * f = (Fetcher *)(__jeti_tmp_3 ? ((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->init(__jeti_tmp_3, __jeti_sel_init) : 0);
+#line 42 "tests/golden/34_async/async_test.jeti"
+                (__jeti_task->state = 2, (long)jeti_task_await(({ NPObject *__jeti_tmp_4 = ((NPObject *)(f)); __jeti_tmp_4 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->runAll)(__jeti_tmp_4, __jeti_sel_runAll) : 0; })));
+#line 43 "tests/golden/34_async/async_test.jeti"
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * jeti_async_block_0(NPObject * __jeti_self_cap) {
+#line 43 "tests/golden/34_async/async_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_jeti_async_block_0, __jeti_self_cap, sizeof(struct jeti_async_block_0_frame)));
+    return __jeti_task;
+}
+
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int main(void) {
     jeti_metaInit();
-#line 35 "tests/golden/34_async/async_test.jeti"
-    NPObject *__jeti_tmp_3 = (NPObject_alloc(&JETI_CLASS_$_Fetcher, __jeti_sel_alloc));
-    Fetcher * f = (Fetcher *)(__jeti_tmp_3 ? ((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->init(__jeti_tmp_3, __jeti_sel_init) : 0);
-#line 36 "tests/golden/34_async/async_test.jeti"
-    jeti_task_await(({ NPObject *__jeti_tmp_4 = ((NPObject *)(f)); __jeti_tmp_4 ? ((NPTask * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->runAll)(__jeti_tmp_4, __jeti_sel_runAll) : 0; }));
-#line 1 "<jeti-generated>"
-    jeti_release(f);
-#line 37 "tests/golden/34_async/async_test.jeti"
+#line 43 "tests/golden/34_async/async_test.jeti"
+    (long)jeti_task_await(jeti_async_block_0((NPObject *)0));
+#line 44 "tests/golden/34_async/async_test.jeti"
     return 0;
 }
 

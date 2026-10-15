@@ -36,10 +36,10 @@
 31_proto_conformance/ 协议一致性检查 + 协议组合 P & Q
 32_foundation_dispatch/ isKindOfClass: / respondsToSelector: / isEqual:
 33_struct_eq/       struct == / != 值比较
-34_async/           await 状态机（语句位裸调用=入口，hosted 就地驱动）
+34_async/           await 状态机（async 调用唯一形态 await；sync main 经 blockOn 桥进入）
 35_variadic_method/ 真 variadic 方法（va_list）
 36_defer/           @defer 作用域退出执行
-37_async_modifier/  async 修饰符 + 语句位入口驱动（软关键字：async 业务类型；归一化为 NPTask<T>*）
+37_async_modifier/  async 修饰符 + 调用点纪律（裸 async 调用必拦；blockOn 桥；软关键字：async 业务类型；归一化为 NPTask<T>*）
 38_macros/          jeti 语法宏展开（双轨 #define）
 39_complex/         C99 _Complex 透传
 40_nparray_generic/ NPArray<T> / NPDictionary<K,V> 真单态化 + 元素类型检查
@@ -51,6 +51,7 @@
 46_generic_bounds/  泛型协议约束 T : Proto（实例化检查 + 继承重申/弱化）
 47_async_blocks/    async 块字面量（IIFE + 三元混合；负例 async_block_ternary_mix-F）
 48_async_throws_await/ 裸 `throws`/`throws(T)`（同步+异步同一拼写）+ 消息内括号 await（实参位/接收者位）
+49_soft_keywords/   软关键字矩阵：async/await/throws/when/in/nullable/nonnull 七词 × 字段/局部/ivar/方法名/选择子位 + 关键字位 + `id` 各名字位（README 含三列消歧表）
 ```
 
 > 每个目录的 `README.md` 记录该特性的**实现要点、判据表、M1 限制与踩过的坑**——排查问题时先看它，比读 `.jeti` 快得多。

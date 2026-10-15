@@ -1,0 +1,39 @@
+// Negative (Async Semantics v1 rule 2, 2026-10-14): a call to an async
+// method MUST be awaited. A bare async call yields a task handle, not a
+// value — under the Swift model there is no "bare call creates a task"
+// escape, no statement-position auto-drive, and no sync→async blocking
+// wrapper. The only sync→async bridge is +[NPTask blockOn:<async block>].
+//
+// Every position below is a bare async call and MUST fail with the
+// "call to async method ... must be awaited" diagnostic:
+//   * statement position (the old auto-drive entry form),
+//   * expression position,
+//   * cast-to-void (explicit discard),
+//   * return position,
+//   * from a synchronous method.
+// Kept as documentation; the runner skips tests/negative (verified by hand /
+// cargo unit tests).
+#import <Foundation/Foundation.hje>
+
+@interface Bearer : NPObject
+- (async int)compute:(int)v;
+- (async void)tick;
+- (int)syncCall;
+@end
+
+@implementation Bearer
+- (async int)compute:(int)v { return v * 2; }
+- (async void)tick { }
+- (int)syncCall {
+    return [self compute:1];     // bare async call in return position
+}
+@end
+
+int main(void) {
+    Bearer *b = [[Bearer alloc] init];
+    [b tick];                    // bare async call, statement position
+    (void)[b compute:2];         // cast-to-void discard
+    int x = 1 + [b compute:3];   // expression position
+    (void)x;
+    return 0;
+}

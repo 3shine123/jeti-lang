@@ -1,9 +1,10 @@
-//! Async/await desugar (route map item #4, milestone 1).
+//! Async/await desugar — Async Semantics v1 (doc/plans/async_semantics_v1.md).
 //!
-//! Methods whose body contains `await` are async: the desugar pass rewrites
-//! each one into a **state-machine function** operating on a heap task, and
-//! `async void` methods additionally get a **blocking wrapper** entry that
-//! pumps the scheduler to completion. Design (AGENTS.md「语言特性路线图」):
+//! `async` is part of the signature and means MAY suspend. A call to an async
+//! method must be `await`-ed (rule 2 — the checker enforces it); the desugar
+//! rewrites each async method into a **state-machine function** operating on
+//! a heap task, and the only sync→async bridge is `+[NPTask blockOn:<async
+//! block>]` (rule 3), which lowers to a blocking `jeti_task_await`.
 //!
 //! - `await e` splits the body into segments; each segment runs inside one
 //!   `switch (task->state)` arm.
@@ -26,16 +27,6 @@
 //! became real values; `[task start]` / `await` drive them afterwards.
 
 use jeti_ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstExprKind, AstStmt, AstStmtData};
-
-/// A method classified as async, with the data the desugar needs.
-pub struct AsyncMethod<'a> {
-    /// `Owner_selector` symbol of the method (used for the frame/entry names).
-    pub symbol: String,
-    /// True when the method returns void (→ blocking-wrapper entry candidate).
-    pub returns_void: bool,
-    /// The method's body before transformation.
-    pub body: &'a mut AstStmt,
-}
 
 /// Does this expression subtree contain an `await`?
 pub fn expr_contains_await(e: &AstExpr) -> bool {
@@ -125,11 +116,10 @@ fn decl_contains_await(d: &AstDecl) -> bool {
 
 // ── §7 body self-evidence: what counts as a suspension point ────────────────
 //
-// An `await` is the obvious one. A statement-position async CALL also
-// suspends: the auto-drive rewrite (drive_entry_call, hosted) turns it into a
-// blocking jeti_task_await — the body genuinely suspends there (§5.1 语句位
-// IIFE, §2.1 both examples). Without counting it, `async` bodies that drive
-// only via IIFEs false-positive on "body never suspends".
+// An `await` is the only suspension-point shape left (Async Semantics v1
+// rule 2 removed statement-position auto-drive). The statement-position
+// async-call arm below is kept ONLY to feed the `suspends` flag the
+// reconcile/diagnostic path still reads; it does not rewrite anything.
 
 /// Does this statement subtree contain a suspension point (an `await`, or a
 /// statement-position call to a known async method / async-block thunk)?
@@ -239,18 +229,328 @@ fn expr_yields_task_static(e: &AstExpr, async_sels: &std::collections::HashSet<S
     }
 }
 
+/// Async Semantics v1 rule 6: `await` applied to an expression that can never
+/// yield a task handle is a no-op — the operand evaluates synchronously and
+/// the await just forwards its value. A WARNING, never an error (the stage-2
+/// Swift-model switch tightens call-site discipline separately). Deliberately
+/// conservative to avoid false positives:
+///   * identifier operands are skipped — `await t` may await a task handle,
+///     and proving which needs the symbol table this pass doesn't have;
+///   * Paren/Cast wrappers are transparent (expr_yields_task_static has no
+///     arms for them by design);
+///   * every other operand is classified by the desugar's own rule
+///     (expr_yields_task_static), so the lint can never contradict the
+///     lowering.
+fn warn_await_on_sync_stmt(
+    s: &AstStmt,
+    async_sels: &std::collections::HashSet<String>,
+    warns: &mut Vec<String>,
+) {
+    match &s.data {
+        AstStmtData::Expr(e) => warn_await_on_sync_expr(e, async_sels, warns),
+        AstStmtData::Return(Some(e)) => warn_await_on_sync_expr(e, async_sels, warns),
+        AstStmtData::Decl(d) => warn_await_on_sync_decl(d, async_sels, warns),
+        AstStmtData::If { cond, then, else_, .. } => {
+            warn_await_on_sync_expr(cond, async_sels, warns);
+            warn_await_on_sync_stmt(then, async_sels, warns);
+            if let Some(e) = else_ { warn_await_on_sync_stmt(e, async_sels, warns); }
+        }
+        AstStmtData::While { cond, body, .. } => {
+            warn_await_on_sync_expr(cond, async_sels, warns);
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        AstStmtData::Do { cond, body, .. } => {
+            warn_await_on_sync_expr(cond, async_sels, warns);
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        AstStmtData::For { init, cond, body, .. } => {
+            if let Some(i) = init { warn_await_on_sync_stmt(i, async_sels, warns); }
+            if let Some(c) = cond { warn_await_on_sync_expr(c, async_sels, warns); }
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        AstStmtData::Switch { expr, body, .. } => {
+            warn_await_on_sync_expr(expr, async_sels, warns);
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        AstStmtData::Case { value, body, .. } => {
+            warn_await_on_sync_expr(value, async_sels, warns);
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        AstStmtData::Default(body) => warn_await_on_sync_stmt(body, async_sels, warns),
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            warn_await_on_sync_stmt(try_block, async_sels, warns);
+            for c in catches { warn_await_on_sync_stmt(c, async_sels, warns); }
+            if let Some(f) = finally_block { warn_await_on_sync_stmt(f, async_sels, warns); }
+        }
+        AstStmtData::Compound(stmts) => {
+            for st in stmts { warn_await_on_sync_stmt(st, async_sels, warns); }
+        }
+        AstStmtData::Autoreleasepool(body) | AstStmtData::NoArc(body) => {
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        AstStmtData::Synchronized { lock, body, .. } => {
+            warn_await_on_sync_expr(lock, async_sels, warns);
+            warn_await_on_sync_stmt(body, async_sels, warns);
+        }
+        _ => {}
+    }
+}
+
+fn warn_await_on_sync_decl(
+    d: &AstDecl,
+    async_sels: &std::collections::HashSet<String>,
+    warns: &mut Vec<String>,
+) {
+    match &d.data {
+        AstDeclData::Variable { init, next, .. } => {
+            if let Some(e) = init { warn_await_on_sync_expr(e, async_sels, warns); }
+            if let Some(n) = next { warn_await_on_sync_decl(n, async_sels, warns); }
+        }
+        _ => {}
+    }
+}
+
+fn warn_await_on_sync_expr(
+    e: &AstExpr,
+    async_sels: &std::collections::HashSet<String>,
+    warns: &mut Vec<String>,
+) {
+    match &e.data {
+        AstExprData::Await { inner } => {
+            // Classify the operand: strip transparent wrappers first, then
+            // apply the desugar's own task-yield rule.
+            let mut op: &AstExpr = inner;
+            while let AstExprData::Paren(p) | AstExprData::Cast { expr: p, .. } = &op.data {
+                op = p;
+            }
+            let identifier_op = matches!(op.data, AstExprData::VarRef { .. });
+            if !identifier_op && !expr_yields_task_static(op, async_sels) {
+                warns.push(format!(
+                    "{}:{}: 'await' has no effect here — the operand is not async and yields no task handle (Async Semantics v1 rule 6)",
+                    e.line, e.col));
+            }
+            warn_await_on_sync_expr(inner, async_sels, warns);
+        }
+        AstExprData::MsgSend { receiver, args, .. } => {
+            warn_await_on_sync_expr(receiver, async_sels, warns);
+            for a in args { warn_await_on_sync_expr(a, async_sels, warns); }
+        }
+        AstExprData::FuncCall { callee, args, .. } => {
+            if let Some(c) = callee { warn_await_on_sync_expr(c, async_sels, warns); }
+            for a in args { warn_await_on_sync_expr(a, async_sels, warns); }
+        }
+        AstExprData::Unary { operand, .. } => warn_await_on_sync_expr(operand, async_sels, warns),
+        AstExprData::Binary { left, right, .. }
+        | AstExprData::Assign { target: left, value: right } => {
+            warn_await_on_sync_expr(left, async_sels, warns);
+            warn_await_on_sync_expr(right, async_sels, warns);
+        }
+        AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => {
+            warn_await_on_sync_expr(inner, async_sels, warns);
+        }
+        AstExprData::Ternary { cond, then, else_ } => {
+            warn_await_on_sync_expr(cond, async_sels, warns);
+            warn_await_on_sync_expr(then, async_sels, warns);
+            warn_await_on_sync_expr(else_, async_sels, warns);
+        }
+        AstExprData::Comma(exprs) => {
+            for x in exprs { warn_await_on_sync_expr(x, async_sels, warns); }
+        }
+        AstExprData::Subscript { object, key } => {
+            warn_await_on_sync_expr(object, async_sels, warns);
+            warn_await_on_sync_expr(key, async_sels, warns);
+        }
+        AstExprData::InitList(items) | AstExprData::ArrayLit(items) => {
+            for x in items { warn_await_on_sync_expr(x, async_sels, warns); }
+        }
+        AstExprData::Block { body, .. } => {
+            if let Some(b) = body { warn_await_on_sync_stmt(b, async_sels, warns); }
+        }
+        _ => {}
+    }
+}
+
+/// Async Semantics v1 rule 2 (doc/plans/async_semantics_v1.md §2): a call to
+/// an async method MUST be awaited. A bare task-yielding expression whose
+/// value is silently discarded (statement position, comma tail, cast-to-void,
+/// block-literal no-op call) used to auto-drive (hosted) — the Swift-model
+/// switch removes that third meaning; the error points at the legal
+/// spellings. `awaited` marks an operand already consumed by an enclosing
+/// `await` (casts do NOT count — see the Cast arm).
+fn check_call_site_discipline_stmt(
+    s: &AstStmt,
+    async_sels: &std::collections::HashSet<String>,
+    errs: &mut Vec<String>,
+) {
+    match &s.data {
+        AstStmtData::Expr(e) => check_call_site_discipline_expr(e, false, async_sels, errs),
+        // v1 rule 2 has NO "capture instead" escape: `return [f x];` and
+        // `NPTask<T> *t = [f x];` are bare async calls too — under the Swift
+        // model a bare call creates no handle (handles come only from spawn,
+        // stage 3), so both are errors here.
+        AstStmtData::Return(Some(e)) => {
+            check_call_site_discipline_expr(e, false, async_sels, errs)
+        }
+        AstStmtData::Decl(d) => check_call_site_discipline_decl(d, async_sels, errs),
+        AstStmtData::If { cond, then, else_, .. } => {
+            check_call_site_discipline_expr(cond, false, async_sels, errs);
+            check_call_site_discipline_stmt(then, async_sels, errs);
+            if let Some(e) = else_ { check_call_site_discipline_stmt(e, async_sels, errs); }
+        }
+        AstStmtData::While { cond, body, .. } => {
+            check_call_site_discipline_expr(cond, false, async_sels, errs);
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        AstStmtData::Do { cond, body, .. } => {
+            check_call_site_discipline_expr(cond, false, async_sels, errs);
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        AstStmtData::For { init, cond, body, .. } => {
+            if let Some(i) = init { check_call_site_discipline_stmt(i, async_sels, errs); }
+            if let Some(c) = cond { check_call_site_discipline_expr(c, false, async_sels, errs); }
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        AstStmtData::Switch { expr, body, .. } => {
+            check_call_site_discipline_expr(expr, false, async_sels, errs);
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        AstStmtData::Case { value, body, .. } => {
+            check_call_site_discipline_expr(value, false, async_sels, errs);
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        AstStmtData::Default(body) => check_call_site_discipline_stmt(body, async_sels, errs),
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            check_call_site_discipline_stmt(try_block, async_sels, errs);
+            for c in catches { check_call_site_discipline_stmt(c, async_sels, errs); }
+            if let Some(f) = finally_block { check_call_site_discipline_stmt(f, async_sels, errs); }
+        }
+        AstStmtData::Compound(stmts) => {
+            for st in stmts { check_call_site_discipline_stmt(st, async_sels, errs); }
+        }
+        AstStmtData::Autoreleasepool(body) | AstStmtData::NoArc(body) => {
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        AstStmtData::Synchronized { lock, body, .. } => {
+            check_call_site_discipline_expr(lock, false, async_sels, errs);
+            check_call_site_discipline_stmt(body, async_sels, errs);
+        }
+        _ => {}
+    }
+}
+
+fn check_call_site_discipline_decl(
+    d: &AstDecl,
+    async_sels: &std::collections::HashSet<String>,
+    errs: &mut Vec<String>,
+) {
+    match &d.data {
+        AstDeclData::Variable { init, next, .. } => {
+            if let Some(e) = init { check_call_site_discipline_expr(e, false, async_sels, errs); }
+            if let Some(n) = next { check_call_site_discipline_decl(n, async_sels, errs); }
+        }
+        _ => {}
+    }
+}
+
+fn check_call_site_discipline_expr(
+    e: &AstExpr,
+    awaited: bool,
+    async_sels: &std::collections::HashSet<String>,
+    errs: &mut Vec<String>,
+) {
+    let mut awaited = awaited;
+    match &e.data {
+        AstExprData::Await { inner, .. } => {
+            // The await site itself: its operand is consumed here — including
+            // through grouping/casts, which pass `awaited` through below.
+            // Identifier operands are NOT tracked (task vars are desugar-ctx
+            // state this pass doesn't have) — no false positives by design.
+            awaited = true;
+            check_call_site_discipline_expr(inner, awaited, async_sels, errs);
+        }
+        AstExprData::MsgSend { receiver, selector, args, .. } => {
+            check_call_site_discipline_expr(receiver, false, async_sels, errs);
+            for a in args { check_call_site_discipline_expr(a, false, async_sels, errs); }
+            if !awaited && async_sels.contains(&selector.replace(':', "")) {
+                errs.push(format!(
+                    "{0}:{1}: call to async method '{2}' must be awaited — an async call yields a task handle, not a value (Async Semantics v1 rule 2)",
+                    e.line, e.col, selector));
+            }
+        }
+        AstExprData::FuncCall { callee, args, .. } => {
+            if let Some(c) = callee { check_call_site_discipline_expr(c, false, async_sels, errs); }
+            for a in args { check_call_site_discipline_expr(a, false, async_sels, errs); }
+            // NOTE: async-block IIFE call sites (`async ^{…}()`) are
+            // deliberately not disciplined here — the block desugar runs
+            // after check_unit, and the spawn/await split for block handles
+            // lands with the stage-3 spawn work (spec §5-3).
+        }
+        AstExprData::Unary { operand, .. } => {
+            check_call_site_discipline_expr(operand, false, async_sels, errs)
+        }
+        AstExprData::Binary { left, right, .. } => {
+            check_call_site_discipline_expr(left, false, async_sels, errs);
+            check_call_site_discipline_expr(right, false, async_sels, errs);
+        }
+        AstExprData::Assign { target, value } => {
+            check_call_site_discipline_expr(target, false, async_sels, errs);
+            check_call_site_discipline_expr(value, false, async_sels, errs);
+        }
+        AstExprData::Paren(inner) => {
+            check_call_site_discipline_expr(inner, awaited, async_sels, errs)
+        }
+        // A cast cannot satisfy the await requirement: `(void)[self compute]`
+        // is an explicit discard, not a consume — the call still leaks its
+        // task handle, so it must error like any bare call.
+        AstExprData::Cast { expr: inner, .. } => {
+            check_call_site_discipline_expr(inner, false, async_sels, errs)
+        }
+        AstExprData::Ternary { cond, then, else_ } => {
+            check_call_site_discipline_expr(cond, false, async_sels, errs);
+            // A ternary is ONE async expression: when the whole thing is
+            // awaited (`await (c ? [a] : [b])`), its branches are consumed by
+            // that single await — same reasoning as Paren. A BARE ternary
+            // passes awaited=false down, so its async branches still error.
+            check_call_site_discipline_expr(then, awaited, async_sels, errs);
+            check_call_site_discipline_expr(else_, awaited, async_sels, errs);
+        }
+        AstExprData::Comma(exprs) => {
+            let last = exprs.len().saturating_sub(1);
+            for (i, x) in exprs.iter().enumerate() {
+                check_call_site_discipline_expr(x, awaited && i == last, async_sels, errs);
+            }
+        }
+        AstExprData::Subscript { object, key } => {
+            check_call_site_discipline_expr(object, false, async_sels, errs);
+            check_call_site_discipline_expr(key, false, async_sels, errs);
+        }
+        AstExprData::InitList(items) | AstExprData::ArrayLit(items) => {
+            for x in items { check_call_site_discipline_expr(x, false, async_sels, errs); }
+        }
+        AstExprData::Block { body: Some(b), is_async: true, .. } => {
+            check_call_site_discipline_stmt(b, async_sels, errs);
+        }
+        _ => {}
+    }
+}
+
 /// Is the given method async? The `async` declaration marker decides; for
 /// legacy shapes without a marker the body containing an `await` still
 /// classifies (see the comment inside).
 pub fn method_is_async(m: &AstDecl) -> bool {
     match &m.data {
-        // Declaration marker wins: `- (async int)compute2:(int)x` is async
-        // even if its only awaits sit inside an async-block literal that the
-        // §5 block-desugar already extracted (the body then holds no Await
-        // node, and "body contains await" alone would misclassify it).
-        AstDeclData::Method { async_marker, body, .. } => {
-            *async_marker || body.as_ref().map_or(false, |b| stmt_contains_await(b))
-        }
+        // The declaration marker IS the classification (Async Semantics v1:
+        // `async` is a signature concept). The old body-contains-await
+        // heuristic is gone — it reclassified a SYNC method that merely
+        // contains an `await` (e.g. a blockOn: bridge, whose synthesized
+        // Await lands in the body before this runs) as async and ran the M2
+        // rewrite over it, emitting `return __jeti_task` from an `int`
+        // function. An unmarked body with `await` is a checker error before
+        // the desugar ever runs, so nothing legal depended on the heuristic.
+        AstDeclData::Method { async_marker, .. } => *async_marker,
+        // Top-level functions keep the legacy body probe — the parser's
+        // async-marker plumbing for top-level functions is a registered
+        // known gap (async-semantics v1 §4), not touched in this stage.
         AstDeclData::Function { body: Some(b), .. } => stmt_contains_await(b),
         _ => false,
     }
@@ -285,6 +585,15 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
     // Async selector set for the §7 self-evidence walk below (same shape as
     // the desugar pass's pre-collection — colon-stripped).
     let mut async_sels: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Class IMPLEMENTATIONS only — never protocol requirement names. The
+    // Protocol AST variant stores bare selector strings with no async marker,
+    // so collecting from it classified every sync protocol method (`speak`,
+    // `draw`, `printOn:` …) as async and made rule-2 checker error on
+    // ordinary protocol calls. Calls through `id<Proto>` to conformers
+    // implemented in this unit are covered by the impl classes here; a
+    // conformer in ANOTHER TU cannot be driven anyway (the M2 entry fn is
+    // static to its owner TU — cross-TU async calls are not a supported
+    // shape).
     for decl in &unit.decls {
         if let AstDeclData::Class { methods, .. } = &decl.data {
             for m in methods {
@@ -338,6 +647,19 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
                         let suspends = stmt_suspends(b, &async_sels);
                         let real_await = stmt_contains_await(b);
                         reconcile_marker(marker, suspends, real_await, sym, m.line, m.col, &mut diags);
+                        // v1 rule 6 lint: `await` on a non-async operand. Only
+                        // inside async bodies — an `await` in a sync body is
+                        // already a hard error from the context walk, and
+                        // stacking a warning on it is noise. Needs the
+                        // unit-wide async_sels set, so it runs here rather
+                        // than inside check_async_context.
+                        if marker {
+                            warn_await_on_sync_stmt(b, &async_sels, &mut diags.warnings);
+                        }
+                        // v1 rule 2 call-site discipline: every async call in
+                        // the body must be awaited — in async bodies AND sync
+                        // ones (rule 2 has no context exemption).
+                        check_call_site_discipline_stmt(b, &async_sels, &mut diags.errors);
                     }
                 }
             }
@@ -404,15 +726,18 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
             }
             AstDeclData::Function { body: Some(b), async_marker, .. } => {
                 let sym = decl.name.clone().unwrap_or_else(|| "<function>".into());
-                // §4.2 body self-evidence: an async function whose body never
-                // suspends is an error. Methods get the same rule from
-                // reconcile_marker; functions are checked inline here.
-                if *async_marker && !stmt_contains_await(b) {
-                    diags.errors.push(format!(
-                        "{}:{}: async function '{}' never suspends: the body has no 'await' — drop the 'async' modifier or add a suspension point",
-                        decl.line, decl.col, sym));
-                }
+                // Async Semantics v1 rule 1: `async` is a capability ("MAY
+                // suspend"), NOT "must suspend" — a body with no `await` is
+                // legal (cache hit, protocol impl that happens to be sync).
+                // The old §4.2 body-self-evidence error is gone (doc/plans/
+                // async_semantics_v1.md §3). The reverse check (await without
+                // the modifier) stays a hard error, enforced below.
                 check_async_context(b, &sym, *async_marker, &mut diags);
+                if *async_marker {
+                    warn_await_on_sync_stmt(b, &async_sels, &mut diags.warnings);
+                }
+                // v1 rule 2 call-site discipline — same rule as methods.
+                check_call_site_discipline_stmt(b, &async_sels, &mut diags.errors);
             }
             _ => {}
         }
@@ -425,12 +750,11 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
 
 
 
-/// §5.3-1 + §7: `await` is legal only inside an async context — an async
+/// §5.3-1: `await` is legal only inside an async context — an async
 /// method body (checked via the method-level reconciliation below), an async
 /// function body, or an `async ^…` block body. A `await` inside a PLAIN block
-/// body is an error (replaces the old silent-swallow bug). Also §7 body
-/// self-evidence: an async function whose body never suspends is an error
-/// (methods go through `reconcile_marker`).
+/// body is an error (replaces the old silent-swallow bug). (Async Semantics
+/// v1 rule 1 removed the old "never suspends" self-evidence check.)
 fn check_async_context(
     body: &AstStmt,
     owner: &str,
@@ -578,8 +902,10 @@ fn check_async_nptask_spelling(rt: &AstType, line: usize, col: usize, diags: &mu
 /// (doc/async_nptask_plan.md, stage B). The modifier is part of the
 /// signature, so a lying signature is an error in BOTH directions:
 ///   marked + await     → ok
-///   marked, no await   → error — the modifier must not lie (same philosophy
-///                        as a bare `throws` requiring a real throw)
+///   marked, no await   → ok — Async Semantics v1 rule 1: `async` means
+///                        "MAY suspend" (a capability), not "must suspend";
+///                        cache hits and sync protocol impls are normal
+///                        (doc/plans/async_semantics_v1.md §2-1)
 ///   await, unmarked    → error — the signature is lying: a suspending method
 ///                        MUST be declared `(async T)`
 ///   unmarked, no await → ok
@@ -592,11 +918,11 @@ fn reconcile_marker(
     col: usize,
     diags: &mut AsyncDiagnostics,
 ) {
-    if marked && !suspends {
-        diags.errors.push(format!(
-            "{}:{}: '{}' is declared 'async' but its body never suspends — drop the modifier or add an 'await'",
-            line, col, sym));
-    } else if !marked && real_await {
+    // `suspends` is no longer consulted for the marked case (v1 rule 1);
+    // the parameter stays because the statement-position auto-drive pass
+    // still distinguishes it until the Swift-model switch (stage 2).
+    let _ = suspends;
+    if !marked && real_await {
         diags.errors.push(format!(
             "{}:{}: '{}' contains 'await' but is not declared 'async' — a suspending method must declare the async modifier",
             line, col, sym));
@@ -645,215 +971,10 @@ fn check_stmt_for_try_await(s: &AstStmt, owner: &str, diags: &mut AsyncDiagnosti
     }
 }
 
-// ─── Milestone 1 desugar: task wrapper + await lowering ─────────────────────
-
-/// Rewrite an async method body into the M1 task-driven form:
-///
-/// ```text
-///     { NPTask *__jeti_task = jeti_task_create(entry_stub, (NPObject *)self, 0);
-///       ...original body with `await e` lowered...
-///       jeti_task_join(__jeti_task); }
-/// ```
-///
-
-/// `await e` lowers to `(*__jeti_task->entry)(__jeti_task), (e)` — evaluate
-/// the task's next segment (M1: the entry stub is a no-op returning 1, so
-/// this is a pure sequencing hook), then the awaited expression. This keeps
-/// the AST/observable behavior of M1 identical to synchronous execution while
-/// establishing the exact task API contract that M2's real state-machine
-/// split (segment lifting, suspension) builds on.
-///
-/// `returns_void` async methods get the join appended (blocking wrapper
-/// semantics: pumping to completion). Non-void async methods also join —
-/// their return value flows through the expression normally (only callable
-/// from async contexts per the check pass).
-pub fn desugar_method_body(body: &mut AstStmt) {
-    use jeti_ast::{AstStmtKind, AstType};
-    use jeti_cst::TypePrim;
-
-    let line = body.line;
-    let col = body.col;
-    // 1. Lower every `await e` in place, deepest-first is not needed: we do a
-    //    full-tree rewrite where each Await becomes a Comma(call_hook, e).
-    fn lower_awaits(s: &mut AstStmt) {
-        match &mut s.data {
-            AstStmtData::Expr(e) => lower_awaits_expr(e),
-            AstStmtData::Compound(stmts) => { for st in stmts { lower_awaits(st); } }
-            AstStmtData::If { cond, then, else_ } => {
-                lower_awaits_expr(cond);
-                lower_awaits(then);
-                if let Some(e) = else_ { lower_awaits(e); }
-            }
-            AstStmtData::While { cond, body } | AstStmtData::Do { body, cond } => {
-                lower_awaits_expr(cond);
-                lower_awaits(body);
-            }
-            AstStmtData::For { init, cond, incr, body } => {
-                if let Some(i) = init { lower_awaits(i); }
-                if let Some(c) = cond { lower_awaits_expr(c); }
-                if let Some(u) = incr { lower_awaits_expr(u); }
-                lower_awaits(body);
-            }
-            AstStmtData::Return(Some(e)) => lower_awaits_expr(e),
-            AstStmtData::Decl(d) => lower_awaits_decl(d),
-            _ => {}
-        }
-    }
-    fn lower_awaits_decl(d: &mut AstDecl) {
-        if let AstDeclData::Variable { init, next, .. } = &mut d.data {
-            if let Some(i) = init { lower_awaits_expr(i); }
-            if let Some(n) = next { lower_awaits_decl(n); }
-        }
-    }
-    fn lower_awaits_expr(e: &mut AstExpr) {
-        let line = e.line;
-        let col = e.col;
-        match &mut e.data {
-            AstExprData::Await { inner, .. } => {
-                lower_awaits_expr(inner);
-                // NPTask design (doc/async_nptask_plan.md, stage D):
-                // `await e` → `jeti_task_await(e)` — the awaited expression
-                // is an async call (lazy task creation) or an NPTask handle;
-                // the runtime auto-starts and blocks/suspends, caching the
-                // result (multi-await safe).
-                let taken = std::mem::replace(&mut **inner, AstExpr {
-                    kind: AstExprKind::Int, expr_type: None, line, col,
-                    data: AstExprData::Int(0),
-                });
-                *e = AstExpr {
-                    kind: AstExprKind::FuncCall, expr_type: None, line, col,
-                    data: AstExprData::FuncCall {
-                        func: None,
-                        name: "jeti_task_await".to_string(),
-                        callee: None,
-                        args: vec![taken],
-                    },
-                };
-            }
-            AstExprData::MsgSend { receiver, args, .. } => {
-                lower_awaits_expr(receiver);
-                for a in args.iter_mut() { lower_awaits_expr(a); }
-            }
-            AstExprData::FuncCall { callee, args, .. } => {
-                if let Some(c) = callee { lower_awaits_expr(c); }
-                for a in args.iter_mut() { lower_awaits_expr(a); }
-            }
-            AstExprData::Unary { operand, .. } => lower_awaits_expr(operand),
-            AstExprData::Binary { left, right, .. } => {
-                lower_awaits_expr(left);
-                lower_awaits_expr(right);
-            }
-            AstExprData::Assign { target, value } => {
-                lower_awaits_expr(target);
-                lower_awaits_expr(value);
-            }
-            AstExprData::Cast { expr, .. } => lower_awaits_expr(expr),
-            AstExprData::Ternary { cond, then, else_ } => {
-                lower_awaits_expr(cond);
-                lower_awaits_expr(then);
-                lower_awaits_expr(else_);
-            }
-            AstExprData::Comma(exprs) => {
-                for x in exprs.iter_mut() { lower_awaits_expr(x); }
-            }
-            AstExprData::Subscript { object, key } => {
-                lower_awaits_expr(object);
-                lower_awaits_expr(key);
-            }
-            AstExprData::InitList(items) | AstExprData::ArrayLit(items) => {
-                for x in items.iter_mut() { lower_awaits_expr(x); }
-            }
-            _ => {}
-        }
-    }
-    lower_awaits(body);
-
-    // 2. Wrap: prepend task creation, append join. Body must be a Compound.
-    let orig = std::mem::replace(body, AstStmt {
-        kind: AstStmtKind::Compound, line, col,
-        data: AstStmtData::Compound(Vec::new()),
-    });
-    let create_call = AstExpr {
-        kind: AstExprKind::FuncCall, expr_type: None, line, col,
-        data: AstExprData::FuncCall {
-            func: None,
-            name: "jeti_task_create".to_string(),
-            callee: None,
-            args: vec![
-                AstExpr { kind: AstExprKind::Int, expr_type: None, line, col, data: AstExprData::Int(0) }, // entry: NULL (M1)
-                AstExpr { kind: AstExprKind::VarRef, expr_type: None, line, col, data: AstExprData::VarRef { sym: None, name: "self".to_string() } },
-                AstExpr { kind: AstExprKind::Int, expr_type: None, line, col, data: AstExprData::Int(0) }, // frame_size: 0 (M1)
-            ],
-        },
-    };
-    let task_decl = AstDecl {
-        kind: jeti_ast::AstDeclKind::Variable,
-        name: Some("__jeti_task".to_string()),
-        line, col,
-        data: AstDeclData::Variable {
-            var_type: Some(Box::new({
-                let mut inner = AstType::new(TypePrim::Named);
-                inner.name = Some("NPTask".to_string());
-                let mut t = AstType::new(TypePrim::Named);
-                t.is_pointer = true;
-                t.subtype = Some(Box::new(inner));
-                t
-            })),
-            init: Some(Box::new(create_call)),
-            is_static: false, is_extern: false, is_const: false,
-            is_block_qual: false, is_weak: false,
-            next: None,
-        },
-        attributes: Vec::new(),
-    };
-    let join_call = AstStmt {
-        kind: AstStmtKind::Expr, line, col,
-        data: AstStmtData::Expr(AstExpr {
-            kind: AstExprKind::FuncCall, expr_type: None, line, col,
-            data: AstExprData::FuncCall {
-                func: None,
-                name: "jeti_task_join".to_string(),
-                callee: None,
-                args: vec![AstExpr {
-                    kind: AstExprKind::VarRef, expr_type: None, line, col,
-                    data: AstExprData::VarRef { sym: None, name: "__jeti_task".to_string() },
-                }],
-            },
-        }),
-    };
-    let task_create_stmt = AstStmt { kind: AstStmtKind::Decl, line, col, data: AstStmtData::Decl(task_decl) };
-    let mut out: Vec<AstStmt> = Vec::new();
-    out.push(task_create_stmt);
-    match orig.data {
-        AstStmtData::Compound(inner) => out.extend(inner), // splice for one clean scope
-        other => out.push(AstStmt { kind: orig.kind, line: orig.line, col: orig.col, data: other }),
-    }
-    out.push(join_call);
-    *body = AstStmt { kind: AstStmtKind::Compound, line, col, data: AstStmtData::Compound(out) };
-}
-
-/// Apply the desugar over the whole unit: rewrite every async method body.
-pub fn desugar_unit(unit: &mut jeti_ast::AstUnit) {
-    for decl in &mut unit.decls {
-        if let AstDeclData::Class { methods, .. } = &mut decl.data {
-            for m in methods.iter_mut() {
-                if method_is_async(m) {
-                    if let AstDeclData::Method { body: Some(ref mut b), .. } = &mut m.data {
-                        desugar_method_body(b);
-                    }
-                }
-            }
-        }
-    }
-    // `[task start]` appears in CALLER bodies too (e.g. main), which the
-    // async-method pass above never visits — rewrite it unit-wide. (M1 path:
-    // empty context — the checker-annotated expr_type decides. Not hosted:
-    // M1 has no entry drive, so a start stays an enqueue.)
-    let mut ctx = AsyncCtx::default();
-    for decl in &mut unit.decls {
-        lower_task_starts_decl(decl, &mut ctx, false);
-    }
-}
+// (Milestone 1 task-wrapper desugar REMOVED — Async Semantics v1 rules 2/3
+// made it unreachable: bare async calls are checker errors, statement
+// positions no longer auto-drive, and the only sync→async entry is blockOn,
+// which lowers through the M2/block-thunk machinery instead.)
 
 /// `[task start]` on an NPTask handle → `jeti_task_start(task)`. The handle
 /// is a runtime struct, not an NPObject — a vtable message send would be
@@ -871,13 +992,14 @@ fn is_task_start_send(e: &AstExpr) -> bool {
     false
 }
 
-/// `drive` = this expression sits at STATEMENT position of a hosted unit: a
-/// `[t start]` there becomes a blocking drive (`jeti_task_await`) instead of a
-/// bare enqueue. The doc's entry idiom (`NPTask *t = [f run]; [t start];`)
-/// must run while the receiver is still ARC-alive — an end-of-main pump cannot
-/// guarantee that (ARC's scope-end release lands first: SIGSEGV, lldb-verified
-/// on golden 37). Freestanding passes `drive = false` (enqueue only).
-fn lower_task_starts_expr(e: &mut AstExpr, ctx: &AsyncCtx, drive: bool) {
+/// `drive` = this expression sits at STATEMENT position: a `[t start]` there
+/// becomes an enqueue (`jeti_task_start`) — Async Semantics v1 removed the
+/// hosted statement-position blocking drive (rule 2: `await` is the only
+/// blocking form; the checker rejects bare task-yielding expressions, so the
+/// old "enqueue vs drive by call site" split has nothing left to drive).
+/// The parameter stays for the rewrite shape: statement position enqueues,
+/// every other position is a no-op for the start send.
+fn lower_task_starts_expr(e: &mut AstExpr, ctx: &AsyncCtx) {
     if is_task_start_send(e) || {
         // `[t start]` with t a known task var (desugar precedes the checker,
         // so expr_type is unannotated — decide from the collected context).
@@ -889,7 +1011,7 @@ fn lower_task_starts_expr(e: &mut AstExpr, ctx: &AsyncCtx, drive: bool) {
         let col = e.col;
         let taken = std::mem::replace(e, int_expr(0, line, col));
         let AstExprData::MsgSend { receiver, .. } = taken.data else { unreachable!() };
-        let start_fn = if drive { "jeti_task_await" } else { "jeti_task_start" };
+        let start_fn = "jeti_task_start";
         *e = AstExpr {
             kind: AstExprKind::FuncCall, expr_type: None, line, col,
             data: AstExprData::FuncCall {
@@ -901,66 +1023,66 @@ fn lower_task_starts_expr(e: &mut AstExpr, ctx: &AsyncCtx, drive: bool) {
     }
     match &mut e.data {
         AstExprData::MsgSend { receiver, args, .. } => {
-            lower_task_starts_expr(receiver, ctx, false);
-            for a in args.iter_mut() { lower_task_starts_expr(a, ctx, false); }
+            lower_task_starts_expr(receiver, ctx);
+            for a in args.iter_mut() { lower_task_starts_expr(a, ctx); }
         }
         AstExprData::FuncCall { callee, args, .. } => {
-            if let Some(c) = callee { lower_task_starts_expr(c, ctx, false); }
-            for a in args.iter_mut() { lower_task_starts_expr(a, ctx, false); }
+            if let Some(c) = callee { lower_task_starts_expr(c, ctx); }
+            for a in args.iter_mut() { lower_task_starts_expr(a, ctx); }
         }
-        AstExprData::Unary { operand, .. } => lower_task_starts_expr(operand, ctx, false),
+        AstExprData::Unary { operand, .. } => lower_task_starts_expr(operand, ctx),
         AstExprData::Binary { left, right, .. } => {
-            lower_task_starts_expr(left, ctx, false);
-            lower_task_starts_expr(right, ctx, false);
+            lower_task_starts_expr(left, ctx);
+            lower_task_starts_expr(right, ctx);
         }
         AstExprData::Assign { target, value } => {
-            lower_task_starts_expr(target, ctx, false);
-            lower_task_starts_expr(value, ctx, false);
+            lower_task_starts_expr(target, ctx);
+            lower_task_starts_expr(value, ctx);
         }
-        AstExprData::Comma(parts) => { for p in parts.iter_mut() { lower_task_starts_expr(p, ctx, false); } }
-        AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => lower_task_starts_expr(inner, ctx, false),
+        AstExprData::Comma(parts) => { for p in parts.iter_mut() { lower_task_starts_expr(p, ctx); } }
+        AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => lower_task_starts_expr(inner, ctx),
         _ => {}
     }
 }
 
-fn lower_task_starts_stmt(s: &mut AstStmt, ctx: &mut AsyncCtx, hosted: bool) {
+fn lower_task_starts_stmt(s: &mut AstStmt, ctx: &mut AsyncCtx) {
     match &mut s.data {
-        AstStmtData::Expr(e) => lower_task_starts_expr(e, ctx, hosted),
-        AstStmtData::Return(Some(e)) => lower_task_starts_expr(e, ctx, false),
+        AstStmtData::Expr(e) => lower_task_starts_expr(e, ctx),
+        AstStmtData::Return(Some(e)) => lower_task_starts_expr(e, ctx),
         AstStmtData::If { cond, then, else_ } => {
-            lower_task_starts_expr(cond, ctx, false);
-            lower_task_starts_stmt(then, ctx, hosted);
-            if let Some(e) = else_ { lower_task_starts_stmt(e, ctx, hosted); }
+            lower_task_starts_expr(cond, ctx);
+            lower_task_starts_stmt(then, ctx);
+            if let Some(e) = else_ { lower_task_starts_stmt(e, ctx); }
         }
         AstStmtData::While { cond, body } | AstStmtData::Do { body, cond } => {
-            lower_task_starts_expr(cond, ctx, false);
-            lower_task_starts_stmt(body, ctx, hosted);
+            lower_task_starts_expr(cond, ctx);
+            lower_task_starts_stmt(body, ctx);
         }
         AstStmtData::For { init, cond, incr, body } => {
-            if let Some(i) = init { lower_task_starts_stmt(i, ctx, hosted); }
-            if let Some(c) = cond { lower_task_starts_expr(c, ctx, false); }
-            if let Some(u) = incr { lower_task_starts_expr(u, ctx, false); }
-            lower_task_starts_stmt(body, ctx, hosted);
+            if let Some(i) = init { lower_task_starts_stmt(i, ctx); }
+            if let Some(c) = cond { lower_task_starts_expr(c, ctx); }
+            if let Some(u) = incr { lower_task_starts_expr(u, ctx); }
+            lower_task_starts_stmt(body, ctx);
         }
-        AstStmtData::Compound(stmts) => { for st in stmts.iter_mut() { lower_task_starts_stmt(st, ctx, hosted); } }
-        AstStmtData::Decl(d) => lower_task_starts_decl(d, ctx, hosted),
+        AstStmtData::Compound(stmts) => { for st in stmts.iter_mut() { lower_task_starts_stmt(st, ctx); } }
+        AstStmtData::Decl(d) => lower_task_starts_decl(d, ctx),
         // §5.1: a statement-position task-yielding call inside a switch case
         // body auto-drives too (an async method's entry body is wrapped in a
         // state-machine switch by the time this runs).
         AstStmtData::Switch { expr, body } => {
-            lower_task_starts_expr(expr, ctx, false);
-            lower_task_starts_stmt(body, ctx, hosted);
+            lower_task_starts_expr(expr, ctx);
+            lower_task_starts_stmt(body, ctx);
         }
         AstStmtData::Case { value, body } => {
-            lower_task_starts_expr(value, ctx, false);
-            lower_task_starts_stmt(body, ctx, hosted);
+            lower_task_starts_expr(value, ctx);
+            lower_task_starts_stmt(body, ctx);
         }
-        AstStmtData::Default(body) => lower_task_starts_stmt(body, ctx, hosted),
+        AstStmtData::Default(body) => lower_task_starts_stmt(body, ctx),
         _ => {}
     }
 }
 
-fn lower_task_starts_decl(d: &mut AstDecl, ctx: &mut AsyncCtx, hosted: bool) {
+fn lower_task_starts_decl(d: &mut AstDecl, ctx: &mut AsyncCtx) {
     match &mut d.data {
         AstDeclData::Variable { var_type, init, next, .. } => {
             // Collect task-handle variables unit-wide: any variable whose
@@ -972,14 +1094,14 @@ fn lower_task_starts_decl(d: &mut AstDecl, ctx: &mut AsyncCtx, hosted: bool) {
                 }
             }
             // A variable initialiser is not statement position: keep enqueue.
-            if let Some(i) = init { lower_task_starts_expr(i, ctx, false); }
-            if let Some(n) = next { lower_task_starts_decl(n, ctx, hosted); }
+            if let Some(i) = init { lower_task_starts_expr(i, ctx); }
+            if let Some(n) = next { lower_task_starts_decl(n, ctx); }
         }
-        AstDeclData::Function { body: Some(b), .. } => lower_task_starts_stmt(b, ctx, hosted),
+        AstDeclData::Function { body: Some(b), .. } => lower_task_starts_stmt(b, ctx),
         AstDeclData::Class { methods, .. } => {
             for m in methods.iter_mut() {
                 if let AstDeclData::Method { body: Some(b), .. } = &mut m.data {
-                    lower_task_starts_stmt(b, ctx, hosted);
+                    lower_task_starts_stmt(b, ctx);
                 }
             }
         }
@@ -990,7 +1112,7 @@ fn lower_task_starts_decl(d: &mut AstDecl, ctx: &mut AsyncCtx, hosted: bool) {
 // ─── Milestone 2: real state machine (frame + entry fn + driver) ────────────
 
 use jeti_ast::{AstDeclKind, AstStmtKind, AstType};
-use jeti_cst::TypePrim;
+use jeti_cst::{TagKind, TypePrim};
 
 /// Named struct field type for the frame: `struct <Method>_frame`.
 fn frame_type_name(symbol: &str) -> String {
@@ -1022,6 +1144,7 @@ fn desugar_method_m2(
     return_type: Option<&AstType>,
     async_ctx: &mut AsyncCtx,
     self_source: &str,
+    self_cls: Option<&str>,
 ) {
     // 1. Frame carries ONLY the params in M2: the synchronous-drive model
     // never suspends between a local's declaration and its last use, so
@@ -1127,7 +1250,7 @@ fn desugar_method_m2(
     // written) frame fields would read garbage.
     let params_only: Vec<(String, AstType)> = params.to_vec();
     for stmt in case_body_stmts.iter_mut() {
-        rewrite_entry_refs_stmt(stmt, &params_only);
+        rewrite_entry_refs_stmt(stmt, &params_only, self_cls);
     }
     // §9 value typing for the RETURN path: the AST carries an async method's
     // return type as the task handle `NPTask<T> *`, so the business type is the
@@ -1468,6 +1591,11 @@ struct AsyncCtx {
     /// plain functions/main — a block body that actually uses `self` there
     /// is already a checker error, so the null is never dereferenced.
     in_method: bool,
+    /// The enclosing class name (cls_sym) while walking method bodies — the
+    /// typed-self cast target for the M2 entry (`((struct Cls *)
+    /// __jeti_task->self_obj)`); None in plain functions/main, where a `self`
+    /// reference is already a checker error.
+    current_class: Option<String>,
     /// Diagnostics produced while inferring elided block return types; handed
     /// back by `desugar_unit_m2` and printed as async warnings by the driver.
     warnings: Vec<String>,
@@ -1841,130 +1969,156 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
 }
 
 /// Rewrite references inside the entry body: params → `__jeti_f->param`,
-/// `self` → `__jeti_task->self_obj`. The entry only receives the task, so all
-/// param/self access must go through the frame / task.
-fn rewrite_entry_refs_stmt(s: &mut AstStmt, params: &[(String, AstType)]) {
+/// `self` → `((struct Cls *)__jeti_task->self_obj)` (typed when the enclosing
+/// class is known, bare member otherwise). The entry only receives the task,
+/// so all param/self access must go through the frame / task.
+fn rewrite_entry_refs_stmt(s: &mut AstStmt, params: &[(String, AstType)], self_cls: Option<&str>) {
     match &mut s.data {
-        AstStmtData::Expr(e) => rewrite_entry_refs_expr(e, params),
+        AstStmtData::Expr(e) => rewrite_entry_refs_expr(e, params, self_cls),
         AstStmtData::Compound(stmts) => {
-            for st in stmts { rewrite_entry_refs_stmt(st, params); }
+            for st in stmts { rewrite_entry_refs_stmt(st, params, self_cls); }
         }
-        AstStmtData::Decl(d) => rewrite_entry_refs_decl(d, params),
+        AstStmtData::Decl(d) => rewrite_entry_refs_decl(d, params, self_cls),
         AstStmtData::If { cond, then, else_ } => {
-            rewrite_entry_refs_expr(cond, params);
-            rewrite_entry_refs_stmt(then, params);
-            if let Some(e) = else_ { rewrite_entry_refs_stmt(e, params); }
+            rewrite_entry_refs_expr(cond, params, self_cls);
+            rewrite_entry_refs_stmt(then, params, self_cls);
+            if let Some(e) = else_ { rewrite_entry_refs_stmt(e, params, self_cls); }
         }
         AstStmtData::While { cond, body } | AstStmtData::Do { body, cond } => {
-            rewrite_entry_refs_expr(cond, params);
-            rewrite_entry_refs_stmt(body, params);
+            rewrite_entry_refs_expr(cond, params, self_cls);
+            rewrite_entry_refs_stmt(body, params, self_cls);
         }
         AstStmtData::For { init, cond, incr, body } => {
-            if let Some(i) = init { rewrite_entry_refs_stmt(i, params); }
-            if let Some(c) = cond { rewrite_entry_refs_expr(c, params); }
-            if let Some(u) = incr { rewrite_entry_refs_expr(u, params); }
-            rewrite_entry_refs_stmt(body, params);
+            if let Some(i) = init { rewrite_entry_refs_stmt(i, params, self_cls); }
+            if let Some(c) = cond { rewrite_entry_refs_expr(c, params, self_cls); }
+            if let Some(u) = incr { rewrite_entry_refs_expr(u, params, self_cls); }
+            rewrite_entry_refs_stmt(body, params, self_cls);
         }
-        AstStmtData::Return(Some(e)) => rewrite_entry_refs_expr(e, params),
+        AstStmtData::Return(Some(e)) => rewrite_entry_refs_expr(e, params, self_cls),
         // The entry body is wrapped in a state-machine switch before this walk
         // only for awaits; rewrite_entry_refs runs on the ORIGINAL body, but
         // walk switches/cases anyway so any shape reaches the rewriter.
         AstStmtData::Switch { expr, body } => {
-            rewrite_entry_refs_expr(expr, params);
-            rewrite_entry_refs_stmt(body, params);
+            rewrite_entry_refs_expr(expr, params, self_cls);
+            rewrite_entry_refs_stmt(body, params, self_cls);
         }
         AstStmtData::Case { value, body } => {
-            rewrite_entry_refs_expr(value, params);
-            rewrite_entry_refs_stmt(body, params);
+            rewrite_entry_refs_expr(value, params, self_cls);
+            rewrite_entry_refs_stmt(body, params, self_cls);
         }
-        AstStmtData::Default(body) => rewrite_entry_refs_stmt(body, params),
-        AstStmtData::Throw(Some(e)) => rewrite_entry_refs_expr(e, params),
+        AstStmtData::Default(body) => rewrite_entry_refs_stmt(body, params, self_cls),
+        AstStmtData::Throw(Some(e)) => rewrite_entry_refs_expr(e, params, self_cls),
         AstStmtData::Try { try_block, catches, finally_block } => {
-            rewrite_entry_refs_stmt(try_block, params);
-            for c in catches.iter_mut() { rewrite_entry_refs_stmt(c, params); }
-            if let Some(f) = finally_block { rewrite_entry_refs_stmt(f, params); }
+            rewrite_entry_refs_stmt(try_block, params, self_cls);
+            for c in catches.iter_mut() { rewrite_entry_refs_stmt(c, params, self_cls); }
+            if let Some(f) = finally_block { rewrite_entry_refs_stmt(f, params, self_cls); }
         }
         AstStmtData::Synchronized { lock, body } => {
-            rewrite_entry_refs_expr(lock, params);
-            rewrite_entry_refs_stmt(body, params);
+            rewrite_entry_refs_expr(lock, params, self_cls);
+            rewrite_entry_refs_stmt(body, params, self_cls);
         }
         _ => {}
     }
 }
 
-fn rewrite_entry_refs_decl(d: &mut AstDecl, params: &[(String, AstType)]) {
+fn rewrite_entry_refs_decl(d: &mut AstDecl, params: &[(String, AstType)], self_cls: Option<&str>) {
     if let AstDeclData::Variable { init, next, .. } = &mut d.data {
-        if let Some(i) = init { rewrite_entry_refs_expr(i, params); }
-        if let Some(n) = next { rewrite_entry_refs_decl(n, params); }
+        if let Some(i) = init { rewrite_entry_refs_expr(i, params, self_cls); }
+        if let Some(n) = next { rewrite_entry_refs_decl(n, params, self_cls); }
     }
 }
 
-fn rewrite_entry_refs_expr(e: &mut AstExpr, params: &[(String, AstType)]) {
+fn rewrite_entry_refs_expr(e: &mut AstExpr, params: &[(String, AstType)], self_cls: Option<&str>) {
     let line = e.line;
     let col = e.col;
     match &mut e.data {
         AstExprData::VarRef { name, .. } => {
             if name == "self" {
-                // __jeti_task->self_obj
-                *e = member_expr("__jeti_task", "self_obj", line, col);
+                // Typed self: wrap the task's self_obj in `((struct Cls *)…)`
+                // when the enclosing class is known. codegen's IvarRef emitter
+                // has its inline-cast special case ONLY for a bare `self`
+                // Ident, and a raw `__jeti_task->self_obj` is an untyped
+                // NPObject* — so `self->ivar` inside an async body used to
+                // emit a C member access on NPObject and fail to compile.
+                // The Cast wrapper both type-checks the ivar access in C and
+                // gives the PropRef arrow-forcing below a recognizable shape.
+                let self_obj = member_expr("__jeti_task", "self_obj", line, col);
+                *e = match self_cls {
+                    Some(cls) => AstExpr {
+                        kind: AstExprKind::Cast, expr_type: None, line, col,
+                        data: AstExprData::Cast {
+                            target_type: struct_ptr_type(cls),
+                            expr: Box::new(self_obj),
+                        },
+                    },
+                    None => self_obj,
+                };
             } else if params.iter().any(|(n, _)| n == name) {
                 // __jeti_f->param
                 *e = member_expr("__jeti_f", name, line, col);
             }
         }
         AstExprData::MsgSend { receiver, args, .. } => {
-            rewrite_entry_refs_expr(receiver, params);
-            for a in args.iter_mut() { rewrite_entry_refs_expr(a, params); }
+            rewrite_entry_refs_expr(receiver, params, self_cls);
+            for a in args.iter_mut() { rewrite_entry_refs_expr(a, params, self_cls); }
         }
         AstExprData::FuncCall { callee, args, .. } => {
-            if let Some(c) = callee { rewrite_entry_refs_expr(c, params); }
-            for a in args.iter_mut() { rewrite_entry_refs_expr(a, params); }
+            if let Some(c) = callee { rewrite_entry_refs_expr(c, params, self_cls); }
+            for a in args.iter_mut() { rewrite_entry_refs_expr(a, params, self_cls); }
         }
-        AstExprData::Unary { operand, .. } => rewrite_entry_refs_expr(operand, params),
+        AstExprData::Unary { operand, .. } => rewrite_entry_refs_expr(operand, params, self_cls),
         AstExprData::Binary { left, right, .. } => {
-            rewrite_entry_refs_expr(left, params);
-            rewrite_entry_refs_expr(right, params);
+            rewrite_entry_refs_expr(left, params, self_cls);
+            rewrite_entry_refs_expr(right, params, self_cls);
         }
         AstExprData::Assign { target, value } => {
-            rewrite_entry_refs_expr(target, params);
-            rewrite_entry_refs_expr(value, params);
+            rewrite_entry_refs_expr(target, params, self_cls);
+            rewrite_entry_refs_expr(value, params, self_cls);
         }
-        AstExprData::Cast { expr, .. } => rewrite_entry_refs_expr(expr, params),
+        AstExprData::Cast { expr, .. } => rewrite_entry_refs_expr(expr, params, self_cls),
         AstExprData::Ternary { cond, then, else_ } => {
-            rewrite_entry_refs_expr(cond, params);
-            rewrite_entry_refs_expr(then, params);
-            rewrite_entry_refs_expr(else_, params);
+            rewrite_entry_refs_expr(cond, params, self_cls);
+            rewrite_entry_refs_expr(then, params, self_cls);
+            rewrite_entry_refs_expr(else_, params, self_cls);
         }
         AstExprData::Comma(exprs) => {
-            for x in exprs.iter_mut() { rewrite_entry_refs_expr(x, params); }
+            for x in exprs.iter_mut() { rewrite_entry_refs_expr(x, params, self_cls); }
         }
         AstExprData::Subscript { object, key } => {
-            rewrite_entry_refs_expr(object, params);
-            rewrite_entry_refs_expr(key, params);
+            rewrite_entry_refs_expr(object, params, self_cls);
+            rewrite_entry_refs_expr(key, params, self_cls);
         }
         // The block param itself often appears as the OBJECT of an ivar
         // access (`userID->_cstr`) or property access — rewrite the receiver
         // too, not just the bare VarRef spelling.
-        AstExprData::IvarRef { obj, .. } => rewrite_entry_refs_expr(obj, params),
+        AstExprData::IvarRef { obj, .. } => rewrite_entry_refs_expr(obj, params, self_cls),
         AstExprData::PropRef { obj, is_arrow, .. } => {
-            rewrite_entry_refs_expr(obj, params);
-            // `self.service` inside an entry: `self` became
-            // `__jeti_task->self_obj` (an IvarRef node), whose type is
-            // unknown to the emitter (NPObject*). The `.`/`->` decision then
-            // defaults to `.` and generates invalid C — force the arrow form
+            rewrite_entry_refs_expr(obj, params, self_cls);
+            // `self.service` inside an entry: `self` became a task-self
+            // IvarRef node (bare, or Cast-wrapped when typed), whose type the
+            // emitter may not know (NPObject*) — the `.`/`->` decision then
+            // defaults to `.` and generates invalid C. Force the arrow form
             // when the receiver was rewritten.
-            if matches!(&obj.data, AstExprData::IvarRef { ivar: Some(n), obj: inner, .. }
-                if n == "self_obj" && matches!(&inner.data,
-                    AstExprData::VarRef { name: v, .. } if v == "__jeti_task"))
-            {
+            let rewritten_self = match &obj.data {
+                AstExprData::IvarRef { ivar: Some(n), obj: inner, .. } => {
+                    n == "self_obj" && matches!(&inner.data,
+                        AstExprData::VarRef { name: v, .. } if v == "__jeti_task")
+                }
+                AstExprData::Cast { expr, .. } => matches!(&expr.data,
+                    AstExprData::IvarRef { ivar: Some(n), obj: inner, .. }
+                        if n == "self_obj" && matches!(&inner.data,
+                            AstExprData::VarRef { name: v, .. } if v == "__jeti_task")),
+                _ => false,
+            };
+            if rewritten_self {
                 *is_arrow = true;
             }
         }
         // `await (expr)` keeps the user's parens in the AST — walk through them.
-        AstExprData::Paren(inner) => rewrite_entry_refs_expr(inner, params),
-        AstExprData::Await { inner, .. } => rewrite_entry_refs_expr(inner, params),
+        AstExprData::Paren(inner) => rewrite_entry_refs_expr(inner, params, self_cls),
+        AstExprData::Await { inner, .. } => rewrite_entry_refs_expr(inner, params, self_cls),
         AstExprData::InitList(items) | AstExprData::ArrayLit(items) => {
-            for x in items.iter_mut() { rewrite_entry_refs_expr(x, params); }
+            for x in items.iter_mut() { rewrite_entry_refs_expr(x, params, self_cls); }
         }
         _ => {}
     }
@@ -2076,7 +2230,20 @@ fn named_type(name: &str, is_ptr: bool) -> AstType {
     }
 }
 
-fn prim_type(p: TypePrim) -> AstType { AstType::new(p) }
+/// `struct Cls *` — the typed-self cast target for the M2 entry. The tag
+/// fields are what make codegen's ast_type_to_c_str render the `struct`
+/// keyword before the class name (same shape the elaborator produces for
+/// declared struct types).
+fn struct_ptr_type(cls_name: &str) -> AstType {
+    let mut inner = AstType::new(TypePrim::Named);
+    inner.name = Some(cls_name.to_string());
+    inner.is_struct = true;
+    inner.tag = TagKind::Struct;
+    let mut t = AstType::new(TypePrim::Named);
+    t.is_pointer = true;
+    t.subtype = Some(Box::new(inner));
+    t
+}
 
 fn int_expr(v: i64, line: usize, col: usize) -> AstExpr {
     AstExpr { kind: AstExprKind::Int, expr_type: None, line, col, data: AstExprData::Int(v) }
@@ -2197,7 +2364,7 @@ fn normalize_task_handle(rt: &mut AstType) {
 }
 
 /// Apply the M2 desugar over the whole unit.
-pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String> {
+pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> Vec<String> {
     // Signature normalization BEFORE anything else in this pass: the desugar,
     // the checker, and codegen all key off the old-model handle shape.
     normalize_async_signatures(unit);
@@ -2221,6 +2388,8 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
     let mut sel_ret_obj: std::collections::HashMap<String, bool> =
         std::collections::HashMap::new();
     for decl in unit.decls.iter() {
+        // Class implementations only — see check_unit's async_sels note
+        // (protocol names carry no async marker and would poison the set).
         if let AstDeclData::Class { methods, .. } = &decl.data {
             for m in methods {
                 if method_is_async(m) {
@@ -2292,6 +2461,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
         block_ret_obj: std::collections::HashMap::new(),
         task_var_obj: std::collections::HashMap::new(),
         in_method: false,
+        current_class: None,
         warnings: Vec::new(),
     };
     // Async block literals (§5 desugar) FIRST: every async `^{…}` in the unit
@@ -2308,7 +2478,8 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
     let mut top_decls2: Vec<AstDecl> = Vec::new();
     for decl in unit.decls.iter_mut() {
         match &mut decl.data {
-            AstDeclData::Class { methods, .. } => {
+            AstDeclData::Class { methods, cls_sym, .. } => {
+                ctx.current_class = cls_sym.clone();
                 ctx.in_method = true;
                 for m in methods.iter_mut() {
                     if let AstDeclData::Method { body: Some(ref mut b), .. } = &mut m.data {
@@ -2317,6 +2488,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
                 }
             }
             AstDeclData::Function { body: Some(ref mut b), .. } => {
+                ctx.current_class = None;
                 ctx.in_method = false;
                 lower_async_blocks_stmt(b, &mut block_thunk_seq, &mut top_decls2, &mut ctx);
             }
@@ -2329,7 +2501,8 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
     }
     let mut top_decls: Vec<AstDecl> = Vec::new();
     for decl in unit.decls.iter_mut() {
-        if let AstDeclData::Class { methods, .. } = &mut decl.data {
+        if let AstDeclData::Class { methods, cls_sym, .. } = &mut decl.data {
+            ctx.current_class = cls_sym.clone();
             for m in methods.iter_mut() {
                 let is_async = method_is_async(m);
                 if !is_async { continue; }
@@ -2345,7 +2518,8 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
                     }
                     let sym = m.name.clone().unwrap_or_default();
                     let rt = return_type.as_deref().cloned();
-                    desugar_method_m2(&sym, &plist, b, &mut top_decls, rt.as_ref(), &mut ctx, "self");
+                    let self_cls = ctx.current_class.clone();
+                    desugar_method_m2(&sym, &plist, b, &mut top_decls, rt.as_ref(), &mut ctx, "self", self_cls.as_deref());
                 }
             }
         }
@@ -2364,18 +2538,21 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit, hosted: bool) -> Vec<String
     // blocking-join entry form lowers to jeti_task_await(e) here; async
     // method bodies were already rewritten above.
     for decl in &mut unit.decls {
-        lower_task_starts_decl(decl, &mut ctx, hosted);
-        lower_toplevel_awaits_decl(decl, &ctx, hosted);
+        lower_task_starts_decl(decl, &mut ctx);
+        lower_toplevel_awaits_decl(decl);
     }
     // §8-① diagnostics the elided-return inference produced — the driver prints
     // them as async warnings (`-Werror` escalates them to errors).
     std::mem::take(&mut ctx.warnings)
 }
 
-/// `await e` in a non-async (synchronous) body → `jeti_task_await(e)` —
-/// the blocking-join entry form. Must NOT touch async method bodies (their
-/// awaits were already lowered with state-machine bookkeeping above; the
-/// double rewrite would corrupt the Comma chains).
+/// `await e` in a non-async (synchronous) body → `jeti_task_await(e)`.
+/// Async Semantics v1 rule 3: the only legal sync→async bridge is
+/// `+[NPTask blockOn:<async block>]`, which compiles to exactly this
+/// blocking-join form (`await` inside the block + the block-on call site
+/// itself). Must NOT touch async method bodies (their awaits were already
+/// lowered with state-machine bookkeeping above; the double rewrite would
+/// corrupt the Comma chains).
 fn lower_toplevel_awaits_expr(e: &mut AstExpr) {
     if let AstExprData::Await { inner, .. } = &mut e.data {
         let line = e.line;
@@ -2424,78 +2601,64 @@ fn lower_toplevel_awaits_expr(e: &mut AstExpr) {
     }
 }
 
-fn lower_toplevel_awaits_stmt(s: &mut AstStmt, ctx: &AsyncCtx, hosted: bool) {
+fn lower_toplevel_awaits_stmt(s: &mut AstStmt) {
     match &mut s.data {
         AstStmtData::Expr(e) => {
             lower_toplevel_awaits_expr(e);
-            if hosted { drive_entry_call(e, ctx); }
         }
         AstStmtData::Return(Some(e)) => lower_toplevel_awaits_expr(e),
         AstStmtData::If { cond, then, else_ } => {
             lower_toplevel_awaits_expr(cond);
-            lower_toplevel_awaits_stmt(then, ctx, hosted);
-            if let Some(e) = else_ { lower_toplevel_awaits_stmt(e, ctx, hosted); }
+            lower_toplevel_awaits_stmt(then);
+            if let Some(e) = else_ { lower_toplevel_awaits_stmt(e); }
         }
         AstStmtData::While { cond, body } | AstStmtData::Do { body, cond } => {
             lower_toplevel_awaits_expr(cond);
-            lower_toplevel_awaits_stmt(body, ctx, hosted);
+            lower_toplevel_awaits_stmt(body);
         }
         AstStmtData::For { init, cond, incr, body } => {
-            if let Some(i) = init { lower_toplevel_awaits_stmt(i, ctx, hosted); }
+            if let Some(i) = init { lower_toplevel_awaits_stmt(i); }
             if let Some(c) = cond { lower_toplevel_awaits_expr(c); }
             if let Some(u) = incr { lower_toplevel_awaits_expr(u); }
-            lower_toplevel_awaits_stmt(body, ctx, hosted);
+            lower_toplevel_awaits_stmt(body);
         }
-        AstStmtData::Compound(stmts) => { for st in stmts.iter_mut() { lower_toplevel_awaits_stmt(st, ctx, hosted); } }
-        AstStmtData::Decl(d) => lower_toplevel_awaits_decl(d, ctx, hosted),
+        AstStmtData::Compound(stmts) => { for st in stmts.iter_mut() { lower_toplevel_awaits_stmt(st); } }
+        AstStmtData::Decl(d) => lower_toplevel_awaits_decl(d),
         // Same switch walk as lower_task_starts_stmt: the entry body of an
         // async method is a state-machine switch by the time this runs, and a
         // statement-position task-yielding call inside a case auto-drives (§5.1).
         AstStmtData::Switch { expr, body } => {
             lower_toplevel_awaits_expr(expr);
-            lower_toplevel_awaits_stmt(body, ctx, hosted);
+            lower_toplevel_awaits_stmt(body);
         }
         AstStmtData::Case { value, body } => {
             lower_toplevel_awaits_expr(value);
-            lower_toplevel_awaits_stmt(body, ctx, hosted);
+            lower_toplevel_awaits_stmt(body);
         }
-        AstStmtData::Default(body) => lower_toplevel_awaits_stmt(body, ctx, hosted),
+        AstStmtData::Default(body) => lower_toplevel_awaits_stmt(body),
         _ => {}
     }
 }
 
-/// Hosted drive at the statement position (doc/async_nptask_plan.md §静态分析 3).
-/// A bare call to an async method at STATEMENT position (its result discarded)
-/// is the async chain's "spawn and forget" entry — lower it to
-/// `jeti_task_await(call)`. `jeti_task_await` starts an unstarted task and
-/// blocks until it drains (runtime.c), so `[f runAll];` runs to completion
-/// without an explicit pump.
-///
-/// A CAPTURED call stays lazy (form A, §调用点语义): `NPTask<T> *t = [f runX];`
-/// yields a first-class handle the caller may `await` or `[t start]` (the
-/// latter also drives when written as a hosted statement).
-/// Freestanding (`hosted == false`) never auto-drives — bare-metal `main` owns
-/// its own pump loop (doc/async_nptask_plan.md §runtime).
-fn drive_entry_call(e: &mut AstExpr, ctx: &AsyncCtx) {
-    if !expr_yields_task(e, ctx) { return; }
-    let line = e.line;
-    let col = e.col;
-    let taken = std::mem::replace(e, int_expr(0, line, col));
-    *e = call_expr("jeti_task_await", vec![taken], line, col);
-}
+// Hosted drive at the statement position REMOVED (Async Semantics v1 rule 2):
+// a bare task-yielding call at statement position is a checker ERROR now
+// (check_call_site_discipline), and the lowering side no longer rewrites it.
+// The only sync→async bridge is `+[NPTask blockOn:<async block>]` (which
+// lowers to the same jeti_task_await blocking join); the only concurrency
+// entry is `+[NPTask spawn:<async block>]` (stage 3).
 
-fn lower_toplevel_awaits_decl(d: &mut AstDecl, ctx: &AsyncCtx, hosted: bool) {
+fn lower_toplevel_awaits_decl(d: &mut AstDecl) {
     match &mut d.data {
         AstDeclData::Variable { init, next, .. } => {
             if let Some(i) = init { lower_toplevel_awaits_expr(i); }
-            if let Some(n) = next { lower_toplevel_awaits_decl(n, ctx, hosted); }
+            if let Some(n) = next { lower_toplevel_awaits_decl(n); }
         }
         // Plain functions AND the async entries emitted by desugar_method_m2 /
         // block thunks: statement-position task-yielding calls inside them
         // auto-drive in hosted mode (§5.1 语句位 IIFE — an IIFE inside an
         // async method body lives in the entry by the time this runs).
         AstDeclData::Function { body: Some(b), .. } => {
-            lower_toplevel_awaits_stmt(b, ctx, hosted);
+            lower_toplevel_awaits_stmt(b);
         }
         AstDeclData::Class { methods, .. } => {
             for m in methods.iter_mut() {
@@ -2503,7 +2666,7 @@ fn lower_toplevel_awaits_decl(d: &mut AstDecl, ctx: &AsyncCtx, hosted: bool) {
                 // bookkeeping now; a second rewrite would nest await calls.
                 let async_m = method_is_async(m);
                 if let AstDeclData::Method { body: Some(b), .. } = &mut m.data {
-                    if !async_m { lower_toplevel_awaits_stmt(b, ctx, hosted); }
+                    if !async_m { lower_toplevel_awaits_stmt(b); }
                 }
             }
         }
@@ -2598,7 +2761,72 @@ fn lower_async_blocks_expr(
     // Recurse FIRST so nested async blocks lower innermost-first: an inner
     // IIFE's thunk call is just an argument expression to the outer rewrite.
     match &mut e.data {
-        AstExprData::MsgSend { receiver, args, .. } => {
+        AstExprData::MsgSend { receiver, selector, args, .. } => {
+            // ── +[NPTask blockOn:<async block>] — the ONLY sync→async bridge
+            // (Async Semantics v1 rule 3). Intercept BEFORE the generic
+            // recursion: a bare block argument would otherwise hit the
+            // §5.3-3 "block literal with no execution site" arm and be
+            // discarded as (void)0. Instead: build the block's thunk, wrap
+            // the call in a synthesized Await, and let the unit-wide
+            // toplevel-awaits pass (sync bodies) or the M2 state machine
+            // (async bodies) lower it to jeti_task_await — the exact
+            // blocking-join form rule 3 specifies. The checker never sees
+            // the synthesized Await (it runs before the desugar), so using
+            // blockOn in main is legal while a user-written `await` there
+            // stays an error.
+            if selector == "blockOn:"
+                && matches!(&receiver.data, AstExprData::VarRef { name, .. } if name == "NPTask")
+            {
+                if let [arg] = &mut args[..] {
+                    if let AstExprData::Block { params, return_type, body, is_async } =
+                        &mut arg.data
+                    {
+                        if *is_async {
+                            let params = std::mem::take(params);
+                            let return_type = return_type.take();
+                            let body = body.take();
+                            let line = e.line;
+                            let col = e.col;
+                            let thunk_name = format!("jeti_async_block_{}", seq);
+                            *seq += 1;
+                            let return_type = elided_block_return_type(
+                                return_type, body.as_deref(), ctx, line, col,
+                            );
+                            build_async_block_thunk(
+                                &thunk_name, &params, return_type.as_deref(), body,
+                                top_decls, ctx,
+                            );
+                            ctx.async_block_fns.insert(thunk_name.clone());
+                            ctx.block_ret_obj.insert(
+                                thunk_name.clone(),
+                                return_type.as_deref().map_or(false, type_is_object),
+                            );
+                            // Hidden capture argument: live `self` inside a
+                            // method, `(NPObject *)0` in plain functions/main
+                            // (same rule as the IIFE arm).
+                            let capture = if ctx.in_method {
+                                ident_expr("self", line, col)
+                            } else {
+                                AstExpr {
+                                    kind: AstExprKind::Cast, expr_type: None, line, col,
+                                    data: AstExprData::Cast {
+                                        target_type: named_type("NPObject", true),
+                                        expr: Box::new(int_expr(0, line, col)),
+                                    },
+                                }
+                            };
+                            let call = call_expr(&thunk_name, vec![capture], line, col);
+                            *e = AstExpr {
+                                kind: AstExprKind::Await, expr_type: None, line, col,
+                                data: AstExprData::Await { inner: Box::new(call) },
+                            };
+                            return;
+                        }
+                    }
+                }
+                // blockOn: with a non-block or multi-arg shape falls through —
+                // codegen rejects it (no such vtable method on NPTask).
+            }
             lower_async_blocks_expr(receiver, seq, top_decls, ctx);
             for a in args.iter_mut() { lower_async_blocks_expr(a, seq, top_decls, ctx); }
         }
@@ -2767,6 +2995,10 @@ fn build_async_block_thunk(
     // (type, name) — flip before delegating.
     let m2_params: Vec<(String, AstType)> =
         params.iter().map(|(t, n)| (n.clone(), t.clone())).collect();
+    // The thunk's hidden capture param is the task's self_obj, so block-body
+    // `self` flows through the same `__jeti_task->self_obj` rewrite as method
+    // bodies — pass the enclosing class for the typed-self cast too.
+    let self_cls = ctx.current_class.clone();
     desugar_method_m2(
         thunk_name,
         &m2_params,
@@ -2775,6 +3007,7 @@ fn build_async_block_thunk(
         return_type,
         ctx,
         "__jeti_self_cap",
+        self_cls.as_deref(),
     );
 
     let thunk_decl = AstDecl {

@@ -32,7 +32,14 @@
 @end
 
 int main() {
-    Fetcher *f = [[Fetcher alloc] init];
-    [f runAll];                  // statement position = entry: run to completion
+    // Async Semantics v1 rules 2/3: a bare async call is a checker error and
+    // statement positions no longer auto-drive — the only sync→async bridge
+    // is +[NPTask blockOn:], with the awaited call inside the block.
+    // (The receiver is allocated inside the block: block thunks capture
+    // params + self only until the stage-3 spawn work lands.)
+    [NPTask blockOn:async void ^ {
+        Fetcher *f = [[Fetcher alloc] init];
+        await [f runAll];
+    }];
     return 0;
 }

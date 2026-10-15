@@ -562,8 +562,12 @@ async 方法用修饰符直接声明**业务返回类型**——`async int`、`a
 @end
 
 int main() {
-    Fetcher *f = [[Fetcher alloc] init];
-    [f runAll];                       // 语句位=入口：就地驱动到完成
+    // v1 规则3：blockOn: 是唯一同步→异步桥——裸 async 调用在任何位置都是 error（规则2）。
+    // 接收者在块内分配（块 thunk 阶段3前只捕获参数+self）。
+    [NPTask blockOn:async void ^ {
+        Fetcher *f = [[Fetcher alloc] init];
+        await [f runAll];             // 规则2：async 调用必须 await
+    }];
     return 0;
 }
 ```
@@ -571,7 +575,7 @@ int main() {
 设计规则：
 
 - **`async` 直接修饰业务类型**——`async int` / `async void` / `async NPString *`。旧的 `(async NPTask<T>)` 拼写已废除（报迁移 error）；裸 `- (NPTask<int>)load` 是**普通同步方法**，只返回一个任务对象。
-- **签名声明、checker 强制**——会挂起的方法**必须**声明修饰符（体内从不挂起 → error；有 `await` 不标 → error）。任务句柄是一等值：裸调用 async 方法只*创建*任务（`NPTask<int> *`），由 `await t` 或语句位 `[t start]` 驱动；同一任务可多次 `await`（结果缓存）。**语句位**的裸调用（`[f run];`）与语句位 `[t start];` 就是 async 入口：hosted 下在调用点就地驱动到完成（降为 `jeti_task_await`），`-ffreestanding` 永不驱动、泵留给裸机 `main`；`main` 退出处刻意不兜底泵（ARC 先释放接收者）。
+- **签名声明、checker 强制**——有 `await` 不标 → error。体内无 `await` 合法（Async Semantics v1 规则 1：`async` 表示*允许*挂起——缓存命中、碰巧同步的协议实现都是正常形态；见 `docs/plans/async_semantics_v1.md`）。**调用 async 方法只有一种形态：`await [f x]`**（规则2）——裸 async 调用在任何位置都是 checker error（语句位/表达式位/cast 弃值/return 位/同步方法内）：不再有"裸调用创建任务"、语句位自动驱动、同步调用方自动 wrapper。同步→异步唯一显式桥是 `+[NPTask blockOn:<async 块>]`（规则3）；`await` 是唯一阻塞驱动形态。
 - **`await` 降级为状态机**——方法体在挂起点被拆进 `switch(task->state)` 驱动的堆上 `NPTask`；活过挂起点的局部变量提升进每方法一个的 frame 结构体。
 - **消息发送内的 `await` 必须加小括号**——实参写 `[self wrap:(await [self load:4])]`，接收者写 `[(await [self box:2]) value]`；裸写 `[self wrap:await [self load:4]]` 是解析错误（带修正提示）：不加括号会被读成 await 盖住整条消息链（Swift 语义），Jeti 刻意不为它定义优先级。选择子位（`[task await]`）与名为 `await` 的 C 标识符不受影响；cast/分组括号合法——`(int)(await [self load:3])` 先驱动任务再转换。
 - **错误处理走普通 ObjC 式 EH**——可失败的 async 方法用 `throws(ErrType *)` 标注（文档性，与同步侧同一拼写）；调用方用普通 `@try/@catch` 处理失败；无人接则顶层 loud abort。单纯的挂起不触发 `@finally`，失败的 await 才触发。（checked EH 后端，默认。）
@@ -1145,15 +1149,15 @@ M1 限制（编译期强制）：`@defer` 必须直接位于块内；defer 体�
 | 声明 | 体内 | 判定 |
 |------|------|------|
 | `async T` | 有 `await` | ✅ |
-| `async T` | 无 `await` | **error** —— `'compute:' is declared 'async' but its body never suspends — drop the modifier or add an 'await'` |
+| `async T` | 无 `await` | ✅ —— 合法（规则 1：`async` 是"允许挂起"的能力；缓存命中、碰巧同步的协议实现都正常） |
 | 不标 | 有 `await` | **error** —— `'compute:' contains 'await' but is not declared 'async' — a suspending method must declare the async modifier` |
 | 不标 | 无 `await` | ✅ |
 
 - 修饰符是签名的一部分：`@interface` 与 `@implementation` 必须一致——`'async' modifier mismatch on 'compute:': the @interface and @implementation disagree — the modifier is part of the method signature` 报 error。仅头文件声明的 `@interface` 方法豁免（跨 TU 安全）。
 - `async` 直接修饰业务类型（`async int` / `async NPString *` / `async void`）；旧的 `(async NPTask<T>)` 拼写报迁移 error（见 `tests/negative/async_nptask_*.jeti`）。
-- 任务句柄是一等值：`NPTask<T> *` 可作变量/参数/ivar——`await t` 是唯一取值通道。
+- 任务句柄在 v1 下不可被用户捕获：`NPTask<T> *t = [f compute];` 是 error（规则2 废除了"裸调用创建任务"）；句柄将只在显式 `+[NPTask spawn:…]` 诞生（阶段3，规划中）。`await` 仍是唯一取值通道，同一任务可多次 `await`（结果缓存）。
 - `NPTask` 是保留类名。
-- **入口 = 语句位**：`[f runAll];`（丢弃返回值）与语句位 `[t start];` 就是 async 入口——hosted 下就地驱动到完成（降为 `jeti_task_await`）；裸机只入队、等用户主循环。`main` 退出处不做兜底泵：ARC 的 scope-end release 比它更晚。
+- **一座桥，无入口位**：`[NPTask blockOn:async T ^{ … }]` 在调用点把 async 块驱动到完成（降为 `jeti_task_await`），是唯一同步→异步通道——`main`、同步方法、裸机同样适用。旧的语句位入口（`[f runAll];` 自动驱动、语句位 `[t start];` 驱动）已废除——语句位 `[t start];` 现在只入队，裸的任务产出语句是 checker error。`main` 退出处依旧不做兜底泵：ARC 的 scope-end release 比它更晚。
 
 Golden：`tests/golden/37_async_modifier/`。
 

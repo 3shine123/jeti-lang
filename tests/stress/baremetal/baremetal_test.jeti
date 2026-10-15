@@ -193,11 +193,11 @@ static unsigned loopsum(int n) {
     - (void) setWeight:(int)w { weight = w; }
     - (int)  addTo:(int)v times:(int)k { return v + k * uid; }
     - (async int) sumAsync:(int)v {
-        int r = await [self addTo:v times:2];    // 5 + 2*7 = 19 (v=5, uid=7)
+        int r = [self addTo:v times:2];          // addTo: is sync — v1 rule 1: no fake await (5 + 2*7 = 19, v=5, uid=7)
         return r + v;                            // 24
     }
     + (async void) awaitMake {
-        int awaited = await [Metal::Widget make:10 plus:3];
+        int awaited = [Metal::Widget make:10 plus:3];   // sync call — v1 rule 1: no fake await
         kputs("[R5] await make:plus:=");
         kputdec(awaited);
         kputs("\n");
@@ -637,10 +637,10 @@ skip_hit:
     if (wweak) kputs("[R4] __weak alias OK\n");
     else       kputs("[R4] __weak FAIL\n");
 
-    // Freestanding never auto-drives: hold the handle, start, pump (plan §C).
-    NPTask<void> *mk = [Metal::Widget awaitMake];
-    [mk start];
-    jeti_sched_run();
+    // Async Semantics v1 rule 3: blockOn: is the only sync→async bridge —
+    // the blocking join pumps the task to completion (no manual handle +
+    // start + sched_run pump).
+    [NPTask blockOn:async void ^ { await [Metal::Widget awaitMake]; }];
 
     // ── 17. new-syntax batch (Sep 2026): defer / pattern switch / async
     //        marker / weak re-registration / parent-chain catch / macros ──
@@ -718,10 +718,14 @@ skip_hit:
         kputs("\n");
     }
 
-    // async signature modifier + await chain (freestanding: manual drive)
-    NPTask<void> *sum = [Metal::Widget awaitSum:w];
-    [sum start];
-    jeti_sched_run();
+    // async signature modifier + await chain — v1 rule 3: blockOn: bridge.
+    // The widget is rebuilt inside the block (block thunks capture params +
+    // self only until the stage-3 spawn work): same uid=7/weight=30 state,
+    // so the printed sum is unchanged.
+    [NPTask blockOn:async void ^ {
+        Metal::Widget *wsum = [[Metal::Widget alloc] initWithUid:7 weight:30];
+        await [Metal::Widget awaitSum:wsum];
+    }];
 
     // __weak ASSIGN re-registration + zeroing when the object dies
     @noarc {

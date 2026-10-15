@@ -24,17 +24,21 @@
 @implementation Api
 - (async int)load:(int)uid throws(NetErr *) {
     if (uid < 0) { @throw [[NetErr alloc] init]; }
-    return await [self decode:uid];
+    // decode: is a plain sync method — no await (v1 rule 1: an async body
+    // MAY have zero suspension points; the old fake-await scaffolding is
+    // exactly what the await-on-sync lint exists to catch).
+    return [self decode:uid];
 }
 
 - (async int)probe:(int)uid throws {
     if (uid == 99) { @throw [[NetErr alloc] init]; }
-    return await [self wrap:uid];
+    return [self wrap:uid];
 }
 
 - (async Api *)box:(int)uid {
     (void)uid;
-    return await [self asObj];
+    // asObj is sync — v1 rule 1: no fake await on a non-async call.
+    return [self asObj];
 }
 
 - (Api *)asObj { return self; }
@@ -76,7 +80,10 @@
 @end
 
 int main(void) {
-    Api *api = [[Api alloc] init];
-    [api run];
+    // v1 rule 2/3: blockOn: is the only sync→async bridge.
+    [NPTask blockOn:async void ^ {
+        Api *api = [[Api alloc] init];
+        await [api run];
+    }];
     return 0;
 }

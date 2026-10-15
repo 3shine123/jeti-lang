@@ -8,11 +8,13 @@
 // doc/async_nptask_plan.md §Foundation 壳层）。做成类会把它排除在 `-ffreestanding`
 // 之外，并把 vtable / `__sig` / multi-TU 元数据拖进 async 方法的返回类型。
 //
-// `[t start]` 与 `await` **不是消息发送**，desugar 期直接降为运行时 C API：
+// `[t start]` 与 `await` **不是消息发送**，desugar 期直接降为运行时 C API
+//（Async Semantics v1：`await` 是唯一阻塞驱动形态，语句位 `[t start]` 只入队）：
 //
-//     [t start];              → jeti_task_await(t)     // hosted 语句位：就地驱动到完成
+//     [t start];              → jeti_task_start(t)     // 仅入队；阻塞驱动用 await
 //     await t                 → jeti_task_await(t)     // 未 start 自动 start，取结果
-//     await [f compute:1]     → create + start + await // 形态 C 糖
+//     await [f compute:1]     → create + start + await // 唯一调用形态（规则2）
+//     [NPTask blockOn:async T ^{…}] → thunk + jeti_task_await  // 唯一同步桥（规则3）
 //
 // 本头不声明任何符号：`NPTask` 的 C 类型来自 jeti/runtime.h（Foundation.hje 已包含）。
 // 它存在只为保持「每个 Foundation 类型都有 .hje/.jeti 对」的目录约定，以及给

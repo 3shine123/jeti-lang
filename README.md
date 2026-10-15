@@ -581,8 +581,13 @@ An async method declares the modifier with its **business return type** — `asy
 @end
 
 int main() {
-    Fetcher *f = [[Fetcher alloc] init];
-    [f runAll];                       // statement position: driven to completion here
+    // v1 rule 3: blockOn: is the only sync→async bridge — a bare async call
+    // is an error everywhere (rule 2). The receiver lives inside the block
+    // (block thunks capture params + self until the stage-3 spawn work).
+    [NPTask blockOn:async void ^ {
+        Fetcher *f = [[Fetcher alloc] init];
+        await [f runAll];             // rule 2: an async call MUST be awaited
+    }];
     return 0;
 }
 ```
@@ -590,7 +595,7 @@ int main() {
 Design rules:
 
 - **`async` takes the business type directly** — `async int` / `async void` / `async NPString *`. The legacy `(async NPTask<T>)` spelling is rejected with a migration error; a bare `- (NPTask<int>)load` remains an *ordinary synchronous* method that merely returns a task object.
-- **Signatures declare, the checker enforces** — a suspending method *must* declare the modifier (body never suspends → error; `await` without the modifier → error). Task handles are first-class values: a bare async call *creates* the task (`NPTask<int> *`); `await t` or a statement-position `[t start]` drive it, and awaiting the same task twice is legal (the result is cached). A statement-position async call is the async entry: hosted code drives it to completion right there (lowered to `jeti_task_await`), freestanding code never drives and leaves the pump to your `main`; there is deliberately no pump at `main`'s exit (ARC releases the receiver first).
+- **Signatures declare, the checker enforces** — `await` without the modifier → error. A body with no `await` is legal (Async Semantics v1 rule 1: `async` means *may* suspend — cache hits and sync protocol impls are normal; see `docs/plans/async_semantics_v1.md`). **A call to an async method has exactly one form: `await [f x]`** (rule 2) — a bare async call is a checker error in every position (statement, expression, cast-to-void discard, return, and from sync methods): no "bare call creates a task", no statement-position auto-drive, no sync blocking wrapper. The only sync→async bridge is `+[NPTask blockOn:<async block>]` (rule 3); `await` is the only blocking drive.
 - **`await` lowers to a state machine** — the body is split at suspension points into a `switch(task->state)` driver over a heap `NPTask`; locals that survive a suspension are lifted into a per-method frame struct.
 - **Inside a message send, `await` must be parenthesized** — an argument is `[self wrap:(await [self load:4])]`, a receiver is `[(await [self box:2]) value]`. A bare `[self wrap:await [self load:4]]` is a parse error (with a fix-it): unparenthesized, it reads like Swift's await-over-the-whole-chain, and Jeti deliberately defines no precedence for it. Selector position (`[task await]`) and C identifiers named `await` are unaffected; cast/grouping parens are fine — `(int)(await [self load:3])` drives the task first, then converts.
 - **Errors are plain Objective-C-style EH** — a failable async method annotates `throws(ErrType *)` (documentation-level, the same spelling as the sync side); callers handle failures with ordinary `@try/@catch`; an unhandled failure aborts loudly. A mere suspension never fires `@finally` — a failed await does. (Checked EH backend, the default.)
@@ -1191,15 +1196,15 @@ The body's awaits decide the truth, and the checker reconciles both directions:
 | declaration | body | verdict |
 |-------------|------|---------|
 | `async T` | has `await` | ✅ |
-| `async T` | no `await` | **error** — `'compute:' is declared 'async' but its body never suspends — drop the modifier or add an 'await'` |
+| `async T` | no `await` | ✅ — legal (rule 1: `async` is a capability, "may suspend"; cache hits and sync protocol impls are normal) |
 | unmarked | has `await` | **error** — `'compute:' contains 'await' but is not declared 'async' — a suspending method must declare the async modifier` |
 | unmarked | no `await` | ✅ |
 
 - The modifier is part of the signature: `@interface` and `@implementation` must agree — `'async' modifier mismatch on 'compute:': the @interface and @implementation disagree — the modifier is part of the method signature`. Header-only `@interface` methods are exempt (cross-TU safety).
 - `async` takes the business type directly (`async int` / `async NPString *` / `async void`); the legacy `(async NPTask<T>)` spelling produces a migration error (see `tests/negative/async_nptask_*.jeti`).
-- Task handles are first-class values: `NPTask<T> *` is legal in variables, parameters and ivars — `await t` is the only way to read the result.
+- Task handles are not user-capturable under v1: `NPTask<T> *t = [f compute];` is an error (rule 2 removed "bare call creates a task"); handles will be born only at the explicit `+[NPTask spawn:…]` (stage 3, planned). `await` remains the only way to read a result, and awaiting the same task twice is legal (the result is cached).
 - `NPTask` is a reserved class name.
-- **Entry is statement position** — `[f runAll];` (return value discarded) and a statement-position `[t start];` are the async entry: hosted code drives them to completion right there (lowered to `jeti_task_await`), bare-metal code only enqueues and expects the user's own pump. There is deliberately no pump at `main`'s exit — ARC's scope-end release lands later.
+- **One bridge, no entry positions** — `[NPTask blockOn:async T ^{ … }]` pumps an async block to completion at the call site (lowered to `jeti_task_await`); it is the only sync→async path, in `main`, sync methods, and freestanding code alike. The old statement-position entry (`[f runAll];` auto-drive, statement-position `[t start];`) is gone — a statement-position `[t start];` now merely enqueues, and bare task-yielding statements are checker errors. There is still no pump at `main`'s exit — ARC's scope-end release lands later.
 
 Golden: `tests/golden/37_async_modifier/`.
 

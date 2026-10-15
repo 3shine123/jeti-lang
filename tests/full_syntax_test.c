@@ -324,6 +324,12 @@ struct box__frame {
 struct runAll10_frame {
     char __jeti_pad;
 };
+struct jeti_async_block_0_frame {
+    char __jeti_pad;
+};
+struct jeti_async_block_1_frame {
+    char __jeti_pad;
+};
 typedef struct NPRange {
     size_t location;
     size_t length;
@@ -571,6 +577,10 @@ int jeti_async_state_runAll(NPTask * __jeti_task);
 int jeti_async_state_load_(NPTask * __jeti_task);
 int jeti_async_state_box_(NPTask * __jeti_task);
 int jeti_async_state_runAll10(NPTask * __jeti_task);
+int jeti_async_state_jeti_async_block_0(NPTask * __jeti_task);
+NPTask * jeti_async_block_0(NPObject * __jeti_self_cap);
+int jeti_async_state_jeti_async_block_1(NPTask * __jeti_task);
+NPTask * jeti_async_block_1(NPObject * __jeti_self_cap);
 __attribute__((format (printf , 1 , 2 ))) int fs_format_fn(const char * fmt, ...);
 int fs_asm_square(int x);
 int fs_asm_add3(int a, int b, int c);
@@ -7009,7 +7019,7 @@ __attribute__((weak)) int jeti_async_state_compute_(NPTask * __jeti_task) {
             {
                 struct compute__frame * __jeti_f = (struct compute__frame *)__jeti_task->frame;
 #line 813 "tests/full_syntax_test.jeti"
-                int a = (__jeti_task->state = 2, ({ NPObject *__jeti_tmp_26 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_26 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_26->isa->vtable)->helper_)(__jeti_tmp_26, __jeti_sel_helper_, __jeti_f->n) : (int){0}; }));
+                int a = (__jeti_task->state = 2, ({ NPObject *__jeti_tmp_26 = ((NPObject *)((struct FsFetcher *)__jeti_task->self_obj)); __jeti_tmp_26 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_26->isa->vtable)->helper_)(__jeti_tmp_26, __jeti_sel_helper_, __jeti_f->n) : (int){0}; }));
 #line 814 "tests/full_syntax_test.jeti"
                 {
                     __jeti_task->result = (void *)(unsigned long)(a * 2);
@@ -7069,7 +7079,7 @@ __attribute__((weak)) int jeti_async_state_load_(NPTask * __jeti_task) {
                 struct load__frame * __jeti_f = (struct load__frame *)__jeti_task->frame;
 #line 936 "tests/full_syntax_test.jeti"
                 {
-                    __jeti_task->result = (void *)(unsigned long)(__jeti_task->state = 2, ({ NPObject *__jeti_tmp_29 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_29 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_29->isa->vtable)->decode_)(__jeti_tmp_29, __jeti_sel_decode_, __jeti_f->uid) : (int){0}; }));
+                    __jeti_task->result = (void *)(unsigned long)(__jeti_task->state = 2, ({ NPObject *__jeti_tmp_29 = ((NPObject *)((struct FsApi *)__jeti_task->self_obj)); __jeti_tmp_29 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_29->isa->vtable)->decode_)(__jeti_tmp_29, __jeti_sel_decode_, __jeti_f->uid) : (int){0}; }));
                     __jeti_task->state = -1;
                     return 1;
                 }
@@ -7098,7 +7108,7 @@ __attribute__((weak)) int jeti_async_state_box_(NPTask * __jeti_task) {
                 (void)__jeti_f->uid;
 #line 940 "tests/full_syntax_test.jeti"
                 {
-                    __jeti_task->result = (void *)(__jeti_task->state = 2, ({ NPObject *__jeti_tmp_30 = ((NPObject *)(__jeti_task->self_obj)); __jeti_tmp_30 ? ((FsApi * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_30->isa->vtable)->asObj)(__jeti_tmp_30, __jeti_sel_asObj) : 0; }));
+                    __jeti_task->result = (void *)(__jeti_task->state = 2, ({ NPObject *__jeti_tmp_30 = ((NPObject *)((struct FsApi *)__jeti_task->self_obj)); __jeti_tmp_30 ? ((FsApi * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_30->isa->vtable)->asObj)(__jeti_tmp_30, __jeti_sel_asObj) : 0; }));
                     __jeti_task->state = -1;
                     return 1;
                 }
@@ -7160,6 +7170,62 @@ __attribute__((weak)) int jeti_async_state_runAll10(NPTask * __jeti_task) {
     }
     __jeti_task->state = -1;
     return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_jeti_async_block_0(NPTask * __jeti_task) {
+#line 866 "tests/full_syntax_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct jeti_async_block_0_frame * __jeti_f = (struct jeti_async_block_0_frame *)__jeti_task->frame;
+                (__jeti_task->state = 2, (long)jeti_task_await(FsFetcher_runAll(&JETI_CLASS_$_FsFetcher, __jeti_sel_runAll)));
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * jeti_async_block_0(NPObject * __jeti_self_cap) {
+#line 866 "tests/full_syntax_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_jeti_async_block_0, __jeti_self_cap, sizeof(struct jeti_async_block_0_frame)));
+    return __jeti_task;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) int jeti_async_state_jeti_async_block_1(NPTask * __jeti_task) {
+#line 972 "tests/full_syntax_test.jeti"
+    switch (__jeti_task->state) {
+        case 1:
+            {
+                struct jeti_async_block_1_frame * __jeti_f = (struct jeti_async_block_1_frame *)__jeti_task->frame;
+                (__jeti_task->state = 2, (long)jeti_task_await(FsApi_runAll10(&JETI_CLASS_$_FsApi, __jeti_sel_runAll10)));
+                __jeti_task->state = -1;
+                return 1;
+            }
+        case 2:
+            {
+                __jeti_task->state = -1;
+                return 1;
+            }
+    }
+    __jeti_task->state = -1;
+    return 1;
+}
+
+#line 1 "<jeti-generated>"
+__attribute__((weak)) NPTask * jeti_async_block_1(NPObject * __jeti_self_cap) {
+#line 972 "tests/full_syntax_test.jeti"
+    NPTask * __jeti_task = (NPTask *)(jeti_task_create(jeti_async_state_jeti_async_block_1, __jeti_self_cap, sizeof(struct jeti_async_block_1_frame)));
+    return __jeti_task;
 }
 
 __attribute__((format (printf , 1 , 2 ))) int fs_format_fn(const char * fmt, ...);
@@ -8567,7 +8633,7 @@ __attribute__((weak)) void sec5_misc(void ) {
 #line 863 "tests/full_syntax_test.jeti"
                             printf("5.6 throws %d\n", caught);
 #line 866 "tests/full_syntax_test.jeti"
-                            jeti_task_await(FsFetcher_runAll(&JETI_CLASS_$_FsFetcher, __jeti_sel_runAll));
+                            (long)jeti_task_await(jeti_async_block_0((NPObject *)0));
 #line 869 "tests/full_syntax_test.jeti"
                             __asm__ ("nop");
 #line 870 "tests/full_syntax_test.jeti"
@@ -8675,7 +8741,7 @@ __attribute__((weak)) int main(void ) {
                             if ((__jeti_eh_flag == 0)) {
                                 {
 #line 972 "tests/full_syntax_test.jeti"
-                                    jeti_task_await(FsApi_runAll10(&JETI_CLASS_$_FsApi, __jeti_sel_runAll10));
+                                    (long)jeti_task_await(jeti_async_block_1((NPObject *)0));
 #line 973 "tests/full_syntax_test.jeti"
                                     printf("ALL SECTIONS DONE\n");
 #line 974 "tests/full_syntax_test.jeti"

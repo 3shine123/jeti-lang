@@ -1,0 +1,118 @@
+// golden/49 — soft-keyword matrix (Async Semantics v1 stage-0 companion).
+// Pins the C-superset promise for every soft keyword: async / await / throws /
+// when / in / nullable / nonnull are KEYWORDS only in their recognized
+// positions and degrade to plain identifiers everywhere else. See README.md
+// for the disambiguation table (recognized position / degradation rule /
+// tie-break priority).
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+// All seven as STRUCT FIELD names (plain C superset territory)
+struct SkFields {
+    int async;
+    int await;
+    int throws;
+    int when;
+    int in;
+    int nullable;
+    int nonnull;
+};
+
+// ── `id` — the builtin object type, identifier in every NAME position ──
+// NOT a soft keyword: `id` is a real type. Degradation is purely by syntax
+// context — parse_type_* consumes it where a TYPE is expected; every NAME
+// position (struct/union field, ivar, local/global variable, C/ObjC/block
+// parameter, method name, selector segment, for-in variable) accepts it as
+// a plain identifier. Same-name combinations (`id id`, `(id)id`) are legal.
+// One faithful C boundary: at file scope the ordinary-identifier namespace
+// already holds the typedef `id`, so an ENUMERATOR named `id` collides with
+// it — a C-level redefinition, exactly as in ObjC. Not a parser gap.
+struct IdUser { int id; int age; };
+id g_obj;                                          // `id object;` — type position
+int global_id = 42;                                // global variable named id
+int take_id(id id) { return id == nil ? 0 : 1; }   // param: type id, name id
+@interface IdHold : NPObject
+- (int)id;                                         // method named id
+- (int)id:(int)id;                                 // selector segment + param id
+@end
+@implementation IdHold
+- (int)id { return 71; }
+- (int)id:(int)id { return id; }
+@end
+
+// All seven as IVAR names + two of them as METHOD names + one as a selector
+// segment. `throws`/`await` are method names by the return-type-then-first-
+// token rule; `throws:` with a trailing colon is a selector segment.
+@interface Sk : NPObject
+{
+    @public
+    int async;
+    int await;
+    int throws;
+    int when;
+    int in;
+    int nullable;
+    int nonnull;
+}
+- (int)throws;
+- (int)await;
+- (int)throws:(int)x;
+@end
+
+@implementation Sk
+- (int)throws { return 71; }
+- (int)await { return 72; }
+- (int)throws:(int)x { return x; }
+@end
+
+int main(void) {
+    printf("== soft keywords ==\n");
+
+    struct SkFields f = { 1, 2, 3, 4, 5, 6, 7 };
+    printf("fields=%d%d%d%d%d%d%d\n",
+           f.async, f.await, f.throws, f.when, f.in, f.nullable, f.nonnull);
+
+    // All seven as LOCAL variable names
+    int async = 10, await = 11, throws = 12, when = 13, in = 14, nullable = 15, nonnull = 16;
+    printf("locals=%d %d %d %d %d %d %d\n",
+           async, await, throws, when, in, nullable, nonnull);
+
+    // All seven as IVARS accessed with -> (member-access parse path)
+    Sk *s = [[Sk alloc] init];
+    s->async = 20; s->await = 21; s->throws = 22; s->when = 23;
+    s->in = 24; s->nullable = 25; s->nonnull = 26;
+    printf("ivars=%d %d %d %d %d %d %d\n",
+           s->async, s->await, s->throws, s->when, s->in, s->nullable, s->nonnull);
+
+    // Keyword positions still recognize the words: `throws`/`await` as method
+    // names, `throws:` as a selector segment
+    printf("methods=%d %d %d\n", [s throws], [s await], [s throws:73]);
+
+    // `in` still drives for-in; `when` as a variable next to a pattern
+    // `case > N:` switch (the guard keyword position is a different context)
+    int total = 0;
+    for (NPString *p in @[@"a"]) { total += 1; (void)p; }
+    switch (when) {
+        case > 100: total += 100; break;
+        default: total += 1; break;
+    }
+    printf("kw=%d\n", total);
+
+    // `id` in every NAME position + the type position (see the comment at
+    // the top of the id section)
+    struct IdUser iu = { 9, 8 };
+    int (^idblk)(int) = ^(int id) { return id + 1; };   // block param named id
+    printf("idfield=%d %d\n", iu.id, iu.age);
+    printf("idglobal=%d %d\n", global_id, g_obj == nil ? 1 : 0);
+    {
+        id obj = [[IdHold alloc] init];                 // type position
+        printf("idtype=%d %d\n", [obj id], [obj id:73]);
+    }
+    {
+        int id = 5; id += 2;                            // local variable named id
+        printf("idlocal=%d\n", id);
+    }
+    printf("idparam=%d\n", take_id(nil));               // (id)id
+    printf("idblk=%d\n", idblk(41));
+    return 0;
+}

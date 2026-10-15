@@ -47,7 +47,10 @@
 @end
 
 int main() {
-    EhFetcher *f = [[EhFetcher alloc] init];
-    [f runAll];
+    // v1 rule 2/3: blockOn: is the only sync→async bridge.
+    [NPTask blockOn:async void ^ {
+        EhFetcher *f = [[EhFetcher alloc] init];
+        await [f runAll];
+    }];
     return 0;
 }

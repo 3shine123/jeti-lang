@@ -48,7 +48,7 @@
 ## 已知边界（不在此钉住）
 
 - 顶层 async 函数路径的两个既有缺口：`static async void` 不被认作 async
-  上下文；裸 `async void` 体内对 async 方法的同步调用被误降级为任务驱动。
-  入口走类方法 `+ (async void)`（full_syntax §5.10 同型）。
-- async 帧内 `self->ivar` 访问编译不过（`self_obj` 是 `NPObject *`）——
-  探针用参数传 service 绕开。
+  上下文；裸 `async void` 函数体内不被认作 async 上下文。入口走类方法
+  `+ (async void)`（full_syntax §5.10 同型）。
+- 块不捕获任意局部变量（只有参数 + 隐藏 self）——任意捕获留给阶段3
+  spawn 会话。

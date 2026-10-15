@@ -284,7 +284,14 @@ impl<'a> Parser<'a> {
 
     fn is_name_token(&self) -> bool {
         self.current.kind == TokenKind::Identifier ||
-        (self.current.kind == TokenKind::Keyword && self.current.keyword == KeywordKind::Self_) ||
+        (self.current.kind == TokenKind::Keyword &&
+            (self.current.keyword == KeywordKind::Self_ ||
+             // `id` degrades to a plain identifier in every NAME position
+             // (struct field, ivar, local/loop variable, C/ObjC param name):
+             // the builtin object type only wins where a TYPE is expected —
+             // parse_type_* consumes it there first. C-superset iron law:
+             // `struct User { int id; };` and `int id = 42;` must parse.
+             self.current.keyword == KeywordKind::Id)) ||
         self.is_contextual_kw_ident()
     }
 
@@ -2199,10 +2206,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     attributes: Vec::new(),
                         next: None,
                     };
-                    if self.current.kind == TokenKind::Identifier
-                        || (self.current.kind == TokenKind::Keyword
-                            && (self.current.keyword == KeywordKind::Self_
-                                || self.is_contextual_kw_ident())) {
+                    if self.is_name_token() {
                         p.name = Some(self.current_text().to_string());
                         self.advance();
                     }
@@ -4764,7 +4768,9 @@ if self.current.kind == TokenKind::Identifier {
                 // (`int (*cb)(int)` / `void (^blk)(int)`).
                 let fname = if let Some(ref bn) = ftype.block_name {
                     bn.clone()
-                } else if self.current.kind == TokenKind::Identifier {
+                } else if self.current.kind == TokenKind::Identifier ||
+                          (self.current.kind == TokenKind::Keyword &&
+                           self.current.keyword == KeywordKind::Id) {
                     let n = self.current_text().to_string();
                     self.advance();
                     n
@@ -4892,7 +4898,11 @@ if self.current.kind == TokenKind::Identifier {
             self.advance();
             let mut next_val: i64 = 0;
             while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
-                if self.current.kind == TokenKind::Identifier {
+                if self.current.kind == TokenKind::Identifier ||
+                   (self.current.kind == TokenKind::Keyword &&
+                    self.current.keyword == KeywordKind::Id) {
+                    // `id` as an enumerator name: constant-name position, the
+                    // builtin type never wins here (C superset: `enum E { id };`).
                     let mname = self.current_text().to_string();
                     self.advance();
                     members.push(mname);
@@ -5603,7 +5613,7 @@ if self.current.kind == TokenKind::Identifier {
                 KeywordKind::Void | KeywordKind::Int | KeywordKind::Char |
                 KeywordKind::Short | KeywordKind::Long | KeywordKind::Float |
                 KeywordKind::Double | KeywordKind::Bool | KeywordKind::Signed |
-                KeywordKind::Unsigned | KeywordKind::Id | KeywordKind::Class |
+                KeywordKind::Unsigned | KeywordKind::Class |
                 KeywordKind::Sel | KeywordKind::Instancetype |
                 KeywordKind::Block | KeywordKind::Weak | KeywordKind::Strong |
                 KeywordKind::Autoreleasing | KeywordKind::UnsafeUnretained |
@@ -5657,7 +5667,7 @@ if self.current.kind == TokenKind::Identifier {
                             KeywordKind::Void | KeywordKind::Int | KeywordKind::Char |
                             KeywordKind::Short | KeywordKind::Long | KeywordKind::Float |
                             KeywordKind::Double | KeywordKind::Bool | KeywordKind::Signed |
-                            KeywordKind::Unsigned | KeywordKind::Id | KeywordKind::Class |
+                            KeywordKind::Unsigned | KeywordKind::Class |
                             KeywordKind::Sel | KeywordKind::Instancetype |
                             KeywordKind::Block | KeywordKind::Weak | KeywordKind::Strong |
                             KeywordKind::AtThrow | KeywordKind::AtThrows)) {
