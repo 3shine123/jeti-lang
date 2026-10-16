@@ -416,6 +416,27 @@ async function main() {
     assert.strictEqual(noHelp, undefined, 'outside a call there is no signature');
     console.log('ok  signatureHelp provider → label, parameters, active parameter');
 
+    // Incremental sync: the change travels as a range, and the diagnostics
+    // follow it. Delete the `;` of `return 0;`, then put it back.
+    const semicolon = positionOf(program, 'return 0;', 8);
+    fire('change', {
+      document: programDocument,
+      contentChanges: [{ range: { start: semicolon, end: { line: semicolon.line, character: semicolon.character + 1 } }, text: '' }],
+    });
+    const introduced = await waitUntil(() => {
+      const entries = collection().get(uri);
+      return entries && entries.length ? entries : null;
+    }, 'the range edit to be diagnosed');
+    assert.match(introduced[0].message, /expected ';'/);
+    assert.strictEqual(introduced[0].range.start.line, semicolon.line);
+
+    fire('change', {
+      document: programDocument,
+      contentChanges: [{ range: { start: semicolon, end: semicolon }, text: ';' }],
+    });
+    await waitUntil(() => (collection().get(uri) || []).length === 0, 'the range edit to be undone');
+    console.log('ok  didChange with a range → diagnostics track the edit');
+
     // A missing server must not throw: it warns, stays inert, and a settings
     // change brings it back without reloading the window.
     await extension.deactivate();

@@ -275,12 +275,16 @@ function restart() {
         client.openDocument(document.uri.toString(), document.getText());
       }
     }),
-    // Full-document sync (the server advertises `textDocumentSync: 1`), so the
-    // whole buffer travels on every keystroke batch.
+    // Incremental sync (the server advertises `textDocumentSync: 2`): forward
+    // the editor's own change events, ranges and all. An event without changes
+    // (or without a document snapshot) falls back to the whole buffer, which the
+    // server also accepts.
     vscode.workspace.onDidChangeTextDocument((event) => {
-      if (client && isJetiDocument(event.document)) {
-        client.changeDocument(event.document.uri.toString(), event.document.getText());
-      }
+      if (!client || !isJetiDocument(event.document)) return;
+      const changes = event.contentChanges && event.contentChanges.length
+        ? event.contentChanges
+        : [{ text: event.document.getText() }];
+      client.changeDocument(event.document.uri.toString(), changes);
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       if (client && isJetiDocument(document)) {

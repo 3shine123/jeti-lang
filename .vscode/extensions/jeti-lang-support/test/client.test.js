@@ -67,7 +67,6 @@ async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jeti-lsp-vscode-'));
   const file = path.join(dir, 'probe.jeti');
   const broken = 'int main(void) { return 0 }\n';
-  const fixed = 'int main(void) { return 0; }\n';
   fs.writeFileSync(file, broken);
   const uri = pathToFileURL(file).toString();
 
@@ -84,7 +83,7 @@ async function main() {
   try {
     // The extension's start(): initialize handshake before any document event.
     const init = await client.start({ rootUri: pathToFileURL(REPO_ROOT).toString() });
-    assert.strictEqual(init.capabilities.textDocumentSync, 1, 'expected full document sync');
+    assert.strictEqual(init.capabilities.textDocumentSync, 2, 'expected incremental document sync');
     assert.strictEqual(init.capabilities.documentSymbolProvider, true, 'expected an outline provider');
     assert.strictEqual(init.capabilities.definitionProvider, true, 'expected a definition provider');
     assert.strictEqual(init.capabilities.hoverProvider, true, 'expected a hover provider');
@@ -107,10 +106,12 @@ async function main() {
     assert.strictEqual(first.source, 'jeti');
     console.log(`ok  didOpen → ${reported.length} diagnostic(s): ${first.message}`);
 
-    // didChange (full sync) with the fixed buffer clears them.
-    client.changeDocument(uri, fixed);
+    // didChange with the changed range (incremental sync) clears them: replace
+    // the `}` after `return 0 ` with `}` + `;`.
+    const missing = { line: 0, character: 25 };
+    client.changeDocument(uri, [{ range: { start: missing, end: missing }, text: ';' }]);
     await feed.waitFor(uri, (diagnostics) => diagnostics.length === 0);
-    console.log('ok  didChange → diagnostics cleared');
+    console.log('ok  didChange (a range) → diagnostics cleared');
 
     // didClose clears the entry as well and must not resurrect it.
     client.closeDocument(uri);

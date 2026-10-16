@@ -90,14 +90,26 @@ class JetiLanguageClient {
     });
   }
 
-  /** `textDocument/didChange` with the full new buffer (server advertises `textDocumentSync: 1`). */
-  changeDocument(uri, text) {
+  /**
+   * `textDocument/didChange`.
+   *
+   * The server advertises `textDocumentSync: 2` (incremental), so the caller
+   * passes VS Code's `contentChanges` — each with its range — and only the
+   * changed ranges travel. A change without a range is a whole-buffer
+   * replacement, which the server also accepts (that is what VS Code sends when
+   * it rewrites everything, and what the tests use).
+   *
+   * @param {string} uri
+   * @param {Array<{range?: object, text: string}>} changes
+   *   VS Code's `TextDocumentContentChangeEvent`s (ranges are already 0-based
+   *   lines with UTF-16 characters — LSP's own coordinates).
+   */
+  changeDocument(uri, changes) {
     const version = (this.versions.get(uri) || 1) + 1;
     this.versions.set(uri, version);
-    this.notify('textDocument/didChange', {
-      textDocument: { uri, version },
-      contentChanges: [{ text }],
-    });
+    const contentChanges = (changes || []).map((change) =>
+      change.range ? { range: change.range, text: change.text } : { text: change.text });
+    this.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges });
   }
 
   /** `textDocument/didClose`; the server then clears that document's diagnostics. */
