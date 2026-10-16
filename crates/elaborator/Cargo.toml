@@ -9,3 +9,6 @@ jeti-cst = { path = "../cst" }
 jeti-ast = { path = "../ast" }
 jeti-symbol = { path = "../symbol" }
 jeti-binder = { path = "../binder" }
+
+[dev-dependencies]
+jeti-parser = { path = "../parser" }

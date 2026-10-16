@@ -1034,6 +1034,8 @@ fn lower_task_starts_expr(e: &mut AstExpr, ctx: &AsyncCtx) {
                 func: None, name: start_fn.to_string(), callee: None,
                 args: vec![*receiver],
             },
+            end_line: 0,
+            end_col: 0,
         };
         return;
     }
@@ -1196,6 +1198,8 @@ fn desugar_method_m2(
             is_weak: false,
         },
         attributes: Vec::new(),
+        end_line: body.end_line,
+        end_col: body.end_col,
     }).collect();
     let frame_decl = AstDecl {
         kind: AstDeclKind::Struct,
@@ -1203,6 +1207,8 @@ fn desugar_method_m2(
         line: body.line, col: body.col,
         data: AstDeclData::Aggregate { fields: fields_decls, is_union: false },
         attributes: Vec::new(),
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     top_decls.push(frame_decl);
 
@@ -1245,10 +1251,12 @@ fn desugar_method_m2(
     let orig_stmt = std::mem::replace(body, AstStmt {
         kind: AstStmtKind::Compound, line: body.line, col: body.col,
         data: AstStmtData::Compound(Vec::new()),
+        end_line: body.end_line,
+        end_col: body.end_col,
     });
     let (o_kind, o_line, o_col, body_stmts) = match orig_stmt.data {
         AstStmtData::Compound(inner) => (orig_stmt.kind, orig_stmt.line, orig_stmt.col, inner),
-        other => (orig_stmt.kind, orig_stmt.line, orig_stmt.col, vec![AstStmt { kind: orig_stmt.kind, line: orig_stmt.line, col: orig_stmt.col, data: other }]),
+        other => (orig_stmt.kind, orig_stmt.line, orig_stmt.col, vec![AstStmt { kind: orig_stmt.kind, line: orig_stmt.line, col: orig_stmt.col, data: other, end_line: orig_stmt.end_line, end_col: orig_stmt.end_col }]),
     };
     let (body_kind, body_line, body_col) = (o_kind, o_line, o_col);
     let _ = (body_kind, body_line, body_col);
@@ -1309,12 +1317,18 @@ fn desugar_method_m2(
                         },
                         expr: Box::new(member_expr("__jeti_task", "frame", body.line, body.col)),
                     },
+                    end_line: body.end_line,
+                    end_col: body.end_col,
                 })),
                 is_static: false, is_extern: false, is_const: false,
                 is_block_qual: false, is_weak: false, next: None,
             },
             attributes: Vec::new(),
+            end_line: body.end_line,
+            end_col: body.end_col,
         }),
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     case_body_stmts.insert(0, f_decl);
     // Append: __jeti_task->state = -1; return 1;
@@ -1326,11 +1340,17 @@ fn desugar_method_m2(
                 target: Box::new(member_expr("__jeti_task", "state", body.line, body.col)),
                 value: Box::new(int_expr(-1, body.line, body.col)),
             },
+            end_line: body.end_line,
+            end_col: body.end_col,
         }),
+        end_line: body.end_line,
+        end_col: body.end_col,
     });
     case_body_stmts.push(AstStmt {
         kind: AstStmtKind::Return, line: body.line, col: body.col,
         data: AstStmtData::Return(Some(Box::new(int_expr(1, body.line, body.col)))),
+        end_line: body.end_line,
+        end_col: body.end_col,
     });
 
     let case1 = AstStmt {
@@ -1340,8 +1360,12 @@ fn desugar_method_m2(
             body: Box::new(AstStmt {
                 kind: AstStmtKind::Compound, line: body.line, col: body.col,
                 data: AstStmtData::Compound(case_body_stmts),
+                end_line: body.end_line,
+                end_col: body.end_col,
             }),
         },
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     let case_final = AstStmt {
         kind: AstStmtKind::Case, line: body.line, col: body.col,
@@ -1358,15 +1382,25 @@ fn desugar_method_m2(
                                 target: Box::new(member_expr("__jeti_task", "state", body.line, body.col)),
                                 value: Box::new(int_expr(-1, body.line, body.col)),
                             },
+                            end_line: body.end_line,
+                            end_col: body.end_col,
                         }),
+                        end_line: body.end_line,
+                        end_col: body.end_col,
                     },
                     AstStmt {
                         kind: AstStmtKind::Return, line: body.line, col: body.col,
                         data: AstStmtData::Return(Some(Box::new(int_expr(1, body.line, body.col)))),
+                        end_line: body.end_line,
+                        end_col: body.end_col,
                     },
                 ]),
+                end_line: body.end_line,
+                end_col: body.end_col,
             }),
         },
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     let switch_stmt = AstStmt {
         kind: AstStmtKind::Switch, line: body.line, col: body.col,
@@ -1375,8 +1409,12 @@ fn desugar_method_m2(
             body: Box::new(AstStmt {
                 kind: AstStmtKind::Compound, line: body.line, col: body.col,
                 data: AstStmtData::Compound(vec![case1, case_final]),
+                end_line: body.end_line,
+                end_col: body.end_col,
             }),
         },
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
 
     // Entry params: (NPTask *__jeti_task). The name is deliberately RESERVED:
@@ -1388,12 +1426,14 @@ fn desugar_method_m2(
         kind: AstDeclKind::Function,
         name: Some(entry_name.clone()),
         line: body.line, col: body.col,
+        end_line: body.end_line, end_col: body.end_col,
         data: AstDeclData::Function {
             func_sym: None,
             return_type: Some(Box::new(AstType::new(TypePrim::Int))),
             params: Some(Box::new(entry_param)),
             body: Some(Box::new(AstStmt {
                 kind: AstStmtKind::Compound, line: body.line, col: body.col,
+                end_line: body.end_line, end_col: body.end_col,
                 data: AstStmtData::Compound(vec![
                     switch_stmt,
                     // Fallback: a state outside 1..=final (corrupt task, or a
@@ -1409,11 +1449,17 @@ fn desugar_method_m2(
                                 target: Box::new(member_expr("__jeti_task", "state", body.line, body.col)),
                                 value: Box::new(int_expr(-1, body.line, body.col)),
                             },
+                            end_line: body.end_line,
+                            end_col: body.end_col,
                         }),
+                        end_line: body.end_line,
+                        end_col: body.end_col,
                     },
                     AstStmt {
                         kind: AstStmtKind::Return, line: body.line, col: body.col,
                         data: AstStmtData::Return(Some(Box::new(int_expr(1, body.line, body.col)))),
+                        end_line: body.end_line,
+                        end_col: body.end_col,
                     },
                 ]),
             })),
@@ -1441,9 +1487,13 @@ fn desugar_method_m2(
                     data: AstExprData::FuncCall {
                         func: None, name: "__builtin_sizeof_frame".to_string(), callee: None, args: vec![],
                     },
+                    end_line: body.end_line,
+                    end_col: body.end_col,
                 },
             ],
         },
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     let _ = create_call; // replaced below by sizeof-based version
     // sizeof expr: AST Sizeof { type_expr, expr: None } → codegen emits sizeof(type)
@@ -1458,6 +1508,8 @@ fn desugar_method_m2(
             },
             expr: None,
         },
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     let create_call = AstExpr {
         kind: AstExprKind::FuncCall, expr_type: None, line: body.line, col: body.col,
@@ -1469,6 +1521,8 @@ fn desugar_method_m2(
                 sizeof_frame,
             ],
         },
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
     // Driver: task create FIRST, then fill frame params, then join.
     // ((struct <M>_frame *)__jeti_task->frame)->param = param;
@@ -1484,8 +1538,10 @@ fn desugar_method_m2(
             is_block_qual: false, is_weak: false, next: None,
         },
         attributes: Vec::new(),
+        end_line: body.end_line,
+        end_col: body.end_col,
     };
-    pre.push(AstStmt { kind: AstStmtKind::Decl, line: body.line, col: body.col, data: AstStmtData::Decl(task_decl) });
+    pre.push(AstStmt { kind: AstStmtKind::Decl, line: body.line, col: body.col, data: AstStmtData::Decl(task_decl), end_line: body.end_line, end_col: body.end_col });
     for (pname, _) in params {
         // obj expr: (struct FT *)(__jeti_task->frame)
         let frame_access = AstExpr {
@@ -1502,6 +1558,8 @@ fn desugar_method_m2(
                 },
                 expr: Box::new(member_expr("__jeti_task", "frame", body.line, body.col)),
             },
+            end_line: body.end_line,
+            end_col: body.end_col,
         };
         pre.push(AstStmt {
             kind: AstStmtKind::Expr, line: body.line, col: body.col,
@@ -1514,10 +1572,16 @@ fn desugar_method_m2(
                             obj: Box::new(frame_access),
                             ivar: Some(pname.clone()), cls: None,
                         },
+                        end_line: body.end_line,
+                        end_col: body.end_col,
                     }),
                     value: Box::new(ident_expr(pname, body.line, body.col)),
                 },
+                end_line: body.end_line,
+                end_col: body.end_col,
             }),
+            end_line: body.end_line,
+            end_col: body.end_col,
         });
     }
 
@@ -1543,12 +1607,18 @@ fn desugar_method_m2(
                             target_type: AstType::new(TypePrim::Long),
                             expr: Box::new(call_expr("jeti_task_join", vec![ident_expr("__jeti_task", body.line, body.col)], body.line, body.col)),
                         },
+                        end_line: body.end_line,
+                        end_col: body.end_col,
                     })),
                     is_static: false, is_extern: false, is_const: false,
                     is_block_qual: false, is_weak: false, next: None,
                 },
                 attributes: Vec::new(),
+                end_line: body.end_line,
+                end_col: body.end_col,
             }),
+            end_line: body.end_line,
+            end_col: body.end_col,
         });
     }
     // Lazy driver: no join — the body is just create + param fill + return
@@ -1559,8 +1629,10 @@ fn desugar_method_m2(
     out.push(AstStmt {
         kind: AstStmtKind::Return, line: body.line, col: body.col,
         data: AstStmtData::Return(Some(Box::new(ident_expr("__jeti_task", body.line, body.col)))),
+        end_line: body.end_line,
+        end_col: body.end_col,
     });
-    *body = AstStmt { kind: AstStmtKind::Compound, line: body.line, col: body.col, data: AstStmtData::Compound(out) };
+    *body = AstStmt { kind: AstStmtKind::Compound, line: body.line, col: body.col, data: AstStmtData::Compound(out), end_line: body.end_line, end_col: body.end_col };
 }
 
 // ─── M2 helpers ──────────────────────────────────────────────────────────────
@@ -1912,6 +1984,8 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
                     target: Box::new(member_expr("__jeti_task", "state", line, col)),
                     value: Box::new(int_expr(n as i64, line, col)),
                 },
+                end_line: 0,
+                end_col: 0,
             };
             let taken = std::mem::replace(&mut **inner, int_expr(0, line, col));
             // Only wrap when the awaited expression yields a task handle.
@@ -1927,6 +2001,8 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
                 *e = AstExpr {
                     kind: AstExprKind::Comma, expr_type: None, line, col,
                     data: AstExprData::Comma(vec![state_assign, taken]),
+                    end_line: 0,
+                    end_col: 0,
                 };
                 return;
             }
@@ -1936,6 +2012,8 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
                     func: None, name: "jeti_task_await".to_string(), callee: None,
                     args: vec![taken],
                 },
+                end_line: 0,
+                end_col: 0,
             };
             // §9 value typing: the runtime carries every result in one
             // `void *` slot. A scalar business result must be cast back to a
@@ -1952,6 +2030,8 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
                         target_type: AstType::new(TypePrim::Long),
                         expr: Box::new(await_call),
                     },
+                    end_line: 0,
+                    end_col: 0,
                 }
             };
             let cast = value_expr;
@@ -1962,6 +2042,8 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
             *e = AstExpr {
                 kind: AstExprKind::Comma, expr_type: None, line, col,
                 data: AstExprData::Comma(parts),
+                end_line: 0,
+                end_col: 0,
             };
         }
         AstExprData::MsgSend { receiver, args, .. } => {
@@ -2084,6 +2166,8 @@ fn rewrite_entry_refs_expr(e: &mut AstExpr, params: &[(String, AstType)], self_c
                             target_type: struct_ptr_type(cls),
                             expr: Box::new(self_obj),
                         },
+                        end_line: 0,
+                        end_col: 0,
                     },
                     None => self_obj,
                 };
@@ -2192,6 +2276,8 @@ fn rewrite_returns_stmt(s: &mut AstStmt, returns_object: bool) {
                             target_type: named_type("unsigned long", false),
                             expr: Box::new(*e),
                         },
+                        end_line: 0,
+                        end_col: 0,
                     }
                 };
                 repl.push(AstStmt {
@@ -2206,9 +2292,15 @@ fn rewrite_returns_stmt(s: &mut AstStmt, returns_object: bool) {
                                     target_type: named_type("void", true),
                                     expr: Box::new(value_expr),
                                 },
+                                end_line: 0,
+                                end_col: 0,
                             }),
                         },
+                        end_line: 0,
+                        end_col: 0,
                     }),
+                    end_line: 0,
+                    end_col: 0,
                 });
             }
             repl.push(AstStmt {
@@ -2219,16 +2311,24 @@ fn rewrite_returns_stmt(s: &mut AstStmt, returns_object: bool) {
                         target: Box::new(member_expr("__jeti_task", "state", line, col)),
                         value: Box::new(int_expr(-1, line, col)),
                     },
+                    end_line: 0,
+                    end_col: 0,
                 }),
+                end_line: 0,
+                end_col: 0,
             });
             repl.push(AstStmt {
                 kind: AstStmtKind::Return, line, col,
                 data: AstStmtData::Return(Some(Box::new(int_expr(1, line, col)))),
+                end_line: 0,
+                end_col: 0,
             });
             // Replace this single Return with a Compound of the repl statements.
             *s = AstStmt {
                 kind: AstStmtKind::Compound, line, col,
                 data: AstStmtData::Compound(repl),
+                end_line: 0,
+                end_col: 0,
             };
         }
         AstStmtData::Compound(stmts) => rewrite_returns_to_result(stmts, returns_object),
@@ -2280,13 +2380,15 @@ fn struct_ptr_type(cls_name: &str) -> AstType {
 }
 
 fn int_expr(v: i64, line: usize, col: usize) -> AstExpr {
-    AstExpr { kind: AstExprKind::Int, expr_type: None, line, col, data: AstExprData::Int(v) }
+    AstExpr { kind: AstExprKind::Int, expr_type: None, line, col, data: AstExprData::Int(v), end_line: 0, end_col: 0 }
 }
 
 fn ident_expr(name: &str, line: usize, col: usize) -> AstExpr {
     AstExpr {
         kind: AstExprKind::VarRef, expr_type: None, line, col,
         data: AstExprData::VarRef { sym: None, name: name.to_string() },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -2298,6 +2400,8 @@ fn member_expr(obj: &str, field: &str, line: usize, col: usize) -> AstExpr {
             obj: Box::new(ident_expr(obj, line, col)),
             ivar: Some(field.to_string()), cls: None,
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -2305,11 +2409,13 @@ fn call_expr(name: &str, args: Vec<AstExpr>, line: usize, col: usize) -> AstExpr
     AstExpr {
         kind: AstExprKind::FuncCall, expr_type: None, line, col,
         data: AstExprData::FuncCall { func: None, name: name.to_string(), callee: None, args },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
 fn call_stmt(name: &str, args: Vec<AstExpr>, line: usize, col: usize) -> AstStmt {
-    AstStmt { kind: AstStmtKind::Expr, line, col, data: AstStmtData::Expr(call_expr(name, args, line, col)) }
+    AstStmt { kind: AstStmtKind::Expr, line, col, data: AstStmtData::Expr(call_expr(name, args, line, col)), end_line: 0, end_col: 0 }
 }
 
 fn jeti_task_ptr_type() -> AstType {
@@ -2603,6 +2709,8 @@ fn lower_toplevel_awaits_expr(e: &mut AstExpr) {
                 func: None, name: "jeti_task_await".to_string(), callee: None,
                 args: vec![taken],
             },
+            end_line: 0,
+            end_col: 0,
         };
         *e = AstExpr {
             kind: AstExprKind::Cast, expr_type: None, line, col,
@@ -2610,6 +2718,8 @@ fn lower_toplevel_awaits_expr(e: &mut AstExpr) {
                 target_type: AstType::new(TypePrim::Long),
                 expr: Box::new(await_call),
             },
+            end_line: 0,
+            end_col: 0,
         };
         return;
     }
@@ -2887,12 +2997,16 @@ fn lower_async_blocks_expr(
                                         target_type: named_type("NPObject", true),
                                         expr: Box::new(int_expr(0, line, col)),
                                     },
+                                    end_line: 0,
+                                    end_col: 0,
                                 }
                             };
                             let call = call_expr(&thunk_name, vec![capture], line, col);
                             *e = AstExpr {
                                 kind: AstExprKind::Await, expr_type: None, line, col,
                                 data: AstExprData::Await { inner: Box::new(call) },
+                                end_line: 0,
+                                end_col: 0,
                             };
                             return;
                         }
@@ -2991,6 +3105,8 @@ fn lower_async_blocks_expr(
                             target_type: named_type("NPObject", true),
                             expr: Box::new(int_expr(0, line, col)),
                         },
+                        end_line: 0,
+                        end_col: 0,
                     });
                 }
                 *e = call_expr(&thunk_name, call_args, line, col);
@@ -3054,6 +3170,8 @@ fn lower_async_blocks_expr(
                     target_type: AstType::new(TypePrim::Void),
                     expr: Box::new(int_expr(0, line, col)),
                 },
+                end_line: 0,
+                end_col: 0,
             };
         }
         _ => {}
@@ -3140,6 +3258,8 @@ fn build_async_block_thunk(
             async_marker: false,
         },
         attributes: Vec::new(),
+        end_line: 0,
+        end_col: 0,
     };
     top_decls.push(thunk_decl);
 }

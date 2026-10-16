@@ -727,6 +727,8 @@ mod tests {
             line: 1,
             col: 1,
             data: AstExprData::VarRef { sym: None, name: name.to_string() },
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -746,6 +748,8 @@ mod tests {
                 selector: selector.to_string(),
                 args: vec![],
             },
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -754,11 +758,11 @@ mod tests {
     }
 
     fn expr_stmt(e: AstExpr) -> AstStmt {
-        AstStmt { kind: AstStmtKind::Expr, line: 1, col: 1, data: AstStmtData::Expr(e) }
+        AstStmt { kind: AstStmtKind::Expr, line: 1, col: 1, data: AstStmtData::Expr(e), end_line: 0, end_col: 0 }
     }
 
     fn decl_stmt(d: AstDecl) -> AstStmt {
-        AstStmt { kind: AstStmtKind::Decl, line: 1, col: 1, data: AstStmtData::Decl(d) }
+        AstStmt { kind: AstStmtKind::Decl, line: 1, col: 1, data: AstStmtData::Decl(d), end_line: 0, end_col: 0 }
     }
 
     fn func_call(name: &str, args: Vec<AstExpr>) -> AstExpr {
@@ -773,6 +777,8 @@ mod tests {
                 callee: None,
                 args,
             },
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -793,6 +799,8 @@ mod tests {
                 next: None,
             },
             attributes: vec![],
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -811,12 +819,16 @@ mod tests {
                     line: 1,
                     col: 1,
                     data: AstStmtData::Compound(body),
+                    end_line: 0,
+                    end_col: 0,
                 })),
                 has_variadic: false,
                 throws: None,
                 async_marker: false,
             },
             attributes: vec![],
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -893,7 +905,11 @@ mod tests {
                         decl_stmt(decl("tmp", alloc_init())),
                         expr_stmt(func_call("jeti_autorelease", vec![var_ref("tmp")])),
                     ]),
+                    end_line: 0,
+                    end_col: 0,
                 })),
+                end_line: 0,
+                end_col: 0,
             },
         ]);
         assert!(out.contains("pool pop"), "out:\n{}", out);
@@ -937,8 +953,12 @@ mod tests {
                         decl_stmt(decl("c", alloc_init())),
                         expr_stmt(func_call("jeti_release", vec![var_ref("c")])),
                     ]),
+                    end_line: 0,
+                    end_col: 0,
                 }),
             },
+            end_line: 0,
+            end_col: 0,
         }]);
         assert!(out.contains("Cat#1"), "out:\n{}", out);
         assert!(out.contains("Cat#2"), "out:\n{}", out);
@@ -950,6 +970,8 @@ mod tests {
             line: 1,
             col: 1,
             data: AstStmtData::Return(Some(Box::new(e))),
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -959,6 +981,8 @@ mod tests {
             line: 1,
             col: 1,
             data: AstStmtData::Throw(Some(Box::new(e))),
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -1008,8 +1032,12 @@ mod tests {
                     data: AstStmtData::Compound(vec![
                         expr_stmt(func_call("jeti_release", vec![var_ref("e")])),
                     ]),
+                    end_line: 0,
+                    end_col: 0,
                 }),
             },
+            end_line: 0,
+            end_col: 0,
         };
         let out = trace(vec![catch]);
         assert!(!out.contains("untracked e"), "out:\n{}", out);
@@ -1055,7 +1083,11 @@ mod tests {
                     target: Box::new(var_ref("s")),
                     value: Box::new(alloc_init()),
                 },
+                end_line: 0,
+                end_col: 0,
             }),
+            end_line: 0,
+            end_col: 0,
         };
         let if_stmt = AstStmt {
             kind: AstStmtKind::If,
@@ -1068,9 +1100,13 @@ mod tests {
                     line: 1,
                     col: 1,
                     data: AstStmtData::Compound(vec![assign]),
+                    end_line: 0,
+                    end_col: 0,
                 }),
                 else_: None,
             },
+            end_line: 0,
+            end_col: 0,
         };
         let out = trace(vec![if_stmt, ret_stmt(var_ref("s"))]);
         assert!(!out.contains("possible leak"), "out:\n{}", out);

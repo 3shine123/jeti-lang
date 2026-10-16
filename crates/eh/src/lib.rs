@@ -210,6 +210,8 @@ fn int_expr(n: i64) -> AstExpr {
     AstExpr {
         kind: jeti_ast::AstExprKind::Int, expr_type: None, line: 0, col: 0,
         data: AstExprData::Int(n),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -217,6 +219,8 @@ fn varref(name: &str) -> AstExpr {
     AstExpr {
         kind: jeti_ast::AstExprKind::VarRef, expr_type: None, line: 0, col: 0,
         data: AstExprData::VarRef { sym: None, name: name.into() },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -224,6 +228,8 @@ fn expr_stmt(e: AstExpr) -> AstStmt {
     AstStmt {
         kind: jeti_ast::AstStmtKind::Expr, line: 0, col: 0,
         data: AstStmtData::Expr(e),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -231,6 +237,8 @@ fn assign_stmt(target: &str, value: AstExpr) -> AstStmt {
     expr_stmt(AstExpr {
         kind: jeti_ast::AstExprKind::Assign, expr_type: None, line: 0, col: 0,
         data: AstExprData::Assign { target: Box::new(varref(target)), value: Box::new(value) },
+        end_line: 0,
+        end_col: 0,
     })
 }
 
@@ -252,8 +260,12 @@ fn return_zero(ret: &AstType) -> AstStmt {
                 expr: Box::new(AstExpr {
                     kind: jeti_ast::AstExprKind::InitList, expr_type: None, line: 0, col: 0,
                     data: AstExprData::InitList(vec![int_expr(0)]),
+                    end_line: 0,
+                    end_col: 0,
                 }),
             },
+            end_line: 0,
+            end_col: 0,
         }))
     } else {
         Some(Box::new(int_expr(0)))
@@ -261,6 +273,8 @@ fn return_zero(ret: &AstType) -> AstStmt {
     AstStmt {
         kind: jeti_ast::AstStmtKind::Return, line: 0, col: 0,
         data: AstStmtData::Return(val),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -299,13 +313,19 @@ fn guard_stmt(s: AstStmt) -> AstStmt {
                     left: Box::new(varref("__jeti_eh_flag")),
                     right: Box::new(int_expr(0)),
                 },
+                end_line: 0,
+                end_col: 0,
             }),
             then: Box::new(AstStmt {
                 kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
                 data: AstStmtData::Compound(vec![s]),
+                end_line: 0,
+                end_col: 0,
             }),
             else_: None,
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -318,6 +338,8 @@ fn flag_is(n: i64) -> AstExpr {
             left: Box::new(varref("__jeti_eh_flag")),
             right: Box::new(int_expr(n)),
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -332,6 +354,8 @@ fn cond_and_flag_clear(cond: AstExpr) -> AstExpr {
             left: Box::new(flag_is(0)),
             right: Box::new(cond),
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -347,6 +371,8 @@ fn logical_or(a: AstExpr, b: AstExpr) -> AstExpr {
             left: Box::new(a),
             right: Box::new(b),
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -361,6 +387,8 @@ fn func_call(name: &str, args: Vec<AstExpr>) -> AstExpr {
             callee: None,
             args,
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -389,7 +417,11 @@ fn var_decl(name: &str, ty: AstType, init: Option<AstExpr>, line: usize, col: us
                 next: None,
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         }),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -529,9 +561,13 @@ fn desugar_body(body: &mut AstStmt, ret: &AstType, is_main: bool, fx: &EffectTab
                             data: AstStmtData::Compound(vec![
                                 expr_stmt(func_call("jeti_eh_uncaught", vec![])),
                             ]),
+                            end_line: 0,
+                            end_col: 0,
                         }),
                         else_: None,
                     },
+                    end_line: 0,
+                    end_col: 0,
                 });
             } else {
                 stmts.push(if_armed_ret(&zero_ret));
@@ -549,9 +585,13 @@ fn if_armed_ret(zero_ret: &AstStmt) -> AstStmt {
             then: Box::new(AstStmt {
                 kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
                 data: AstStmtData::Compound(vec![zero_ret.clone()]),
+                end_line: 0,
+                end_col: 0,
             }),
             else_: None,
         },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -600,6 +640,8 @@ fn rewrite_stmts(stmts: &mut Vec<AstStmt>, zero_ret: &AstStmt, fx: &EffectTable)
             line: 0,
             col: 0,
             data: AstStmtData::Compound(tail),
+            end_line: 0,
+            end_col: 0,
         };
         if let AstStmtData::Compound(inner) = &mut tail_block.data {
             rewrite_stmts(inner, zero_ret, fx);
@@ -1119,6 +1161,8 @@ fn rewrite_stmt(s: &mut AstStmt, zero_ret: &AstStmt, fx: &EffectTable) {
             let cast = AstExpr {
                 kind: jeti_ast::AstExprKind::Cast, expr_type: None, line: s.line, col: s.col,
                 data: AstExprData::Cast { target_type: npobject_ptr_type(), expr: val_expr },
+                end_line: s.end_line,
+                end_col: s.end_col,
             };
             *s = AstStmt {
                 kind: jeti_ast::AstStmtKind::Compound, line: s.line, col: s.col,
@@ -1129,6 +1173,8 @@ fn rewrite_stmt(s: &mut AstStmt, zero_ret: &AstStmt, fx: &EffectTable) {
                     expr_stmt(func_call("jeti_autorelease", vec![varref("__jeti_eh_val")])),
                     assign_stmt("__jeti_eh_flag", int_expr(1)),
                 ]),
+                end_line: s.end_line,
+                end_col: s.end_col,
             };
         }
         AstStmtData::Expr(e) => rewrite_expr_stmt(e),
@@ -1242,7 +1288,11 @@ fn catch_param_decl(param_type: &str, param_name: &str, init: Option<AstExpr>, l
                 next: None,
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         }),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -1317,6 +1367,8 @@ fn rewrite_try(
         out.push(AstStmt {
             kind: jeti_ast::AstStmtKind::Compound, line: try_block.line, col: try_block.col,
             data: AstStmtData::Compound(std::mem::take(inner)),
+            end_line: try_block.end_line,
+            end_col: try_block.end_col,
         });
     } else {
         rewrite_stmt(try_block, zero_ret, fx);
@@ -1354,6 +1406,8 @@ fn rewrite_try(
                 let cast = AstExpr {
                     kind: jeti_ast::AstExprKind::Cast, expr_type: None, line, col,
                     data: AstExprData::Cast { target_type: type_from_c_spelling(&param_type), expr: Box::new(varref("__jeti_eh_val")) },
+                    end_line: 0,
+                    end_col: 0,
                 };
                 arm.push(catch_param_decl(&param_type, &param_name, Some(cast), line, col));
             } else {
@@ -1365,6 +1419,8 @@ fn rewrite_try(
             let mut handled = AstStmt {
                 kind: jeti_ast::AstStmtKind::Compound, line, col,
                 data: AstStmtData::Compound(arm),
+                end_line: 0,
+                end_col: 0,
             };
             if !is_id_catch {
                 handled = AstStmt {
@@ -1374,6 +1430,8 @@ fn rewrite_try(
                         then: Box::new(handled),
                         else_: None,
                     },
+                    end_line: 0,
+                    end_col: 0,
                 };
             }
 
@@ -1391,6 +1449,8 @@ fn rewrite_try(
                                     left: Box::new(varref("__jeti_eh_flag")),
                                     right: Box::new(int_expr(1)),
                                 },
+                                end_line: 0,
+                                end_col: 0,
                             }),
                             right: Box::new(AstExpr {
                                 kind: jeti_ast::AstExprKind::Binary, expr_type: None, line, col,
@@ -1399,12 +1459,18 @@ fn rewrite_try(
                                     left: Box::new(varref(&done)),
                                     right: Box::new(int_expr(0)),
                                 },
+                                end_line: 0,
+                                end_col: 0,
                             }),
                         },
+                        end_line: 0,
+                        end_col: 0,
                     }),
                     then: Box::new(handled),
                     else_: None,
                 },
+                end_line: 0,
+                end_col: 0,
             });
         }
     }
@@ -1435,6 +1501,8 @@ fn rewrite_try(
     AstStmt {
         kind: jeti_ast::AstStmtKind::Compound, line, col,
         data: AstStmtData::Compound(out),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -1500,6 +1568,8 @@ fn isolated_block(s: AstStmt, line: usize, col: usize) -> AstStmt {
             s,
             assign_stmt("__jeti_eh_flag", logical_or(varref(&saved), varref("__jeti_eh_flag"))),
         ]),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -1517,6 +1587,8 @@ fn isa_test_expr(param_type: &str, line: usize, col: usize) -> AstExpr {
                 target_type: npobject_ptr_type(),
                 expr: Box::new(varref("__jeti_eh_val")),
             },
+            end_line: 0,
+            end_col: 0,
         },
         // &JETI_CLASS_$_<Flat> — codegen emits the weak class metadata
         // definition (and extern decl) in every TU, so this resolves at link
@@ -1524,6 +1596,8 @@ fn isa_test_expr(param_type: &str, line: usize, col: usize) -> AstExpr {
         AstExpr {
             kind: jeti_ast::AstExprKind::VarRef, expr_type: None, line, col,
             data: AstExprData::VarRef { sym: None, name: format!("&JETI_CLASS_$_{}", flat) },
+            end_line: 0,
+            end_col: 0,
         },
     ])
 }
@@ -1721,10 +1795,14 @@ mod tests {
         let throw = AstStmt {
             kind: jeti_ast::AstStmtKind::Throw, line: 0, col: 0,
             data: AstStmtData::Throw(Some(Box::new(int_expr(1)))),
+            end_line: 0,
+            end_col: 0,
         };
         let try_block = AstStmt {
             kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
             data: AstStmtData::Compound(vec![throw]),
+            end_line: 0,
+            end_col: 0,
         };
         let catch = AstStmt {
             kind: jeti_ast::AstStmtKind::Catch, line: 0, col: 0,
@@ -1736,15 +1814,23 @@ mod tests {
                 body: Box::new(AstStmt {
                     kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
                     data: AstStmtData::Compound(vec![]),
+                    end_line: 0,
+                    end_col: 0,
                 }),
             },
+            end_line: 0,
+            end_col: 0,
         };
         let finally = AstStmt {
             kind: jeti_ast::AstStmtKind::Finally, line: 0, col: 0,
             data: AstStmtData::Finally(Box::new(AstStmt {
                 kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
                 data: AstStmtData::Compound(vec![]),
+                end_line: 0,
+                end_col: 0,
             })),
+            end_line: 0,
+            end_col: 0,
         };
         let try_stmt = AstStmt {
             kind: jeti_ast::AstStmtKind::Try, line: 0, col: 0,
@@ -1753,10 +1839,14 @@ mod tests {
                 catches: vec![catch],
                 finally_block: Some(Box::new(finally)),
             },
+            end_line: 0,
+            end_col: 0,
         };
         let body = AstStmt {
             kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
             data: AstStmtData::Compound(vec![try_stmt]),
+            end_line: 0,
+            end_col: 0,
         };
         let func = AstDecl {
             kind: jeti_ast::AstDeclKind::Function, name: Some("probe".into()), line: 1, col: 1,
@@ -1766,6 +1856,8 @@ mod tests {
                 has_variadic: false, throws: None, async_marker: false,
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         };
         let mut unit = AstUnit { decls: vec![func], filename: "probe.jeti".into() };
         desugar_unit(&mut unit);
@@ -1872,6 +1964,8 @@ mod tests {
         let throw = AstStmt {
             kind: jeti_ast::AstStmtKind::Throw, line: 0, col: 0,
             data: AstStmtData::Throw(Some(Box::new(int_expr(1)))),
+            end_line: 0,
+            end_col: 0,
         };
         let mut unit = unit_with_while(Some(throw));
         desugar_unit(&mut unit);
@@ -1913,6 +2007,8 @@ mod tests {
         let mut items = vec![AstStmt {
             kind: jeti_ast::AstStmtKind::Expr, line: 0, col: 0,
             data: AstStmtData::Expr(int_expr(1)),
+            end_line: 0,
+            end_col: 0,
         }];
         if let Some(x) = extra {
             items.push(x);
@@ -1924,12 +2020,18 @@ mod tests {
                 body: Box::new(AstStmt {
                     kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
                     data: AstStmtData::Compound(items),
+                    end_line: 0,
+                    end_col: 0,
                 }),
             },
+            end_line: 0,
+            end_col: 0,
         };
         let body = AstStmt {
             kind: jeti_ast::AstStmtKind::Compound, line: 0, col: 0,
             data: AstStmtData::Compound(vec![while_stmt]),
+            end_line: 0,
+            end_col: 0,
         };
         let func = AstDecl {
             kind: jeti_ast::AstDeclKind::Function, name: Some("probe".into()), line: 1, col: 1,
@@ -1939,6 +2041,8 @@ mod tests {
                 has_variadic: false, throws: None, async_marker: false,
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         };
         AstUnit { decls: vec![func], filename: "probe.jeti".into() }
     }

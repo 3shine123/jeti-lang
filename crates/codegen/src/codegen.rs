@@ -4669,14 +4669,14 @@ pub fn ast_to_cg_unit_with_slots_ext(
                     let getter_return_expr = AstExpr {
                         kind: AstExprKind::IvarRef,
                         expr_type: prop_type.clone(),
-                        line: 0, col: 0,
+                        line: 0, col: 0, end_line: 0, end_col: 0,
                         data: AstExprData::IvarRef {
                             ivar: Some(ivar_name.clone()),
                             cls: Some(cls_name_for_synth.clone()),
                             obj: Box::new(AstExpr {
                                 kind: AstExprKind::Cast,
                                 expr_type: None,
-                                line: 0, col: 0,
+                                line: 0, col: 0, end_line: 0, end_col: 0,
                                 data: AstExprData::Cast {
                                     target_type: AstType {
                                         prim: jeti_cst::TypePrim::Named,
@@ -4690,6 +4690,8 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                         expr_type: None,
                                         line: 0, col: 0,
                                         data: AstExprData::VarRef { sym: None, name: "self".into() },
+                                        end_line: 0,
+                                        end_col: 0,
                                     }),
                                 },
                             }),
@@ -4703,8 +4705,12 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                 kind: AstStmtKind::Return,
                                 line: 0, col: 0,
                                 data: AstStmtData::Return(Some(Box::new(getter_return_expr))),
+                                end_line: 0,
+                                end_col: 0,
                             }
                         ]),
+                        end_line: 0,
+                        end_col: 0,
                     };
 
                     let getter_params = vec![("NPObject *".to_string(), "self".to_string()), ("SEL".to_string(), "_cmd".to_string())];
@@ -4750,19 +4756,19 @@ pub fn ast_to_cg_unit_with_slots_ext(
                         let setter_assign_expr = AstExpr {
                             kind: AstExprKind::Assign,
                             expr_type: None,
-                            line: 0, col: 0,
+                            line: 0, col: 0, end_line: 0, end_col: 0,
                             data: AstExprData::Assign {
                                 target: Box::new(AstExpr {
                                     kind: AstExprKind::IvarRef,
                                     expr_type: None,
-                                    line: 0, col: 0,
+                                    line: 0, col: 0, end_line: 0, end_col: 0,
                                 data: AstExprData::IvarRef {
                                     ivar: Some(ivar_name.clone()),
                                     cls: Some(cls_name_for_synth.clone()),
                                     obj: Box::new(AstExpr {
                                         kind: AstExprKind::Cast,
                                         expr_type: None,
-                                        line: 0, col: 0,
+                                        line: 0, col: 0, end_line: 0, end_col: 0,
                                         data: AstExprData::Cast {
                                             target_type: AstType {
                                                 prim: jeti_cst::TypePrim::Named,
@@ -4776,6 +4782,8 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                                 expr_type: None,
                                                 line: 0, col: 0,
                                                 data: AstExprData::VarRef { sym: None, name: "self".into() },
+                                                end_line: 0,
+                                                end_col: 0,
                                             }),
                                         },
                                     }),
@@ -4786,6 +4794,8 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                     expr_type: None,
                                     line: 0, col: 0,
                                     data: AstExprData::VarRef { sym: None, name: "value".into() },
+                                    end_line: 0,
+                                    end_col: 0,
                                 }),
                             },
                         };
@@ -4797,8 +4807,12 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                     kind: AstStmtKind::Expr,
                                     line: 0, col: 0,
                                     data: AstStmtData::Expr(setter_assign_expr),
+                                    end_line: 0,
+                                    end_col: 0,
                                 }
                             ]),
+                            end_line: 0,
+                            end_col: 0,
                         };
 
                         let mut setter_params = vec![("NPObject *".to_string(), "self".to_string()), ("SEL".to_string(), "_cmd".to_string())];

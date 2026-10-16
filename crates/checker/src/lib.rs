@@ -1670,6 +1670,8 @@ impl Checker {
             receiver: Box::new(AstExpr {
                 kind: AstExprKind::VarRef, expr_type: None, line, col,
                 data: AstExprData::VarRef { sym: None, name: "NPNumber".to_string() },
+                end_line: 0,
+                end_col: 0,
             }),
             method: None,
             vtable_index: -1,
@@ -1911,6 +1913,8 @@ impl Checker {
                 callee: None,
                 args: vec![*left, *right],
             },
+            end_line: 0,
+            end_col: 0,
         };
         let boxed = Box::new(call);
         e.data = if is_eq {
@@ -1927,6 +1931,8 @@ impl Checker {
                     line,
                     col,
                     data: AstExprData::Int(0),
+                    end_line: 0,
+                    end_col: 0,
                 }),
             }
         };
@@ -3561,8 +3567,12 @@ mod tests {
                 obj: Box::new(AstExpr {
                     kind: AstExprKind::Self_, expr_type: None, line: 1, col: 1,
                     data: AstExprData::VarRef { sym: None, name: "self".into() },
+                    end_line: 0,
+                    end_col: 0,
                 }),
             },
+            end_line: 0,
+            end_col: 0,
         }
     }
 
@@ -3571,6 +3581,8 @@ mod tests {
         let body = AstStmt {
             kind: AstStmtKind::Expr, line: 1, col: 1,
             data: AstStmtData::Expr(self_ivar_expr()),
+            end_line: 0,
+            end_col: 0,
         };
         let method = AstDecl {
             kind: AstDeclKind::Method, name: Some("foo".into()), line: 1, col: 1,
@@ -3583,6 +3595,8 @@ mod tests {
                 body: Some(Box::new(body)),
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         };
         let mut unit = AstUnit { decls: vec![method], filename: String::new() };
         let mut c = Checker::new(None);
@@ -3617,6 +3631,8 @@ mod tests {
         let mut e = AstExpr {
             kind: AstExprKind::VarRef, expr_type: None, line: 1, col: 1,
             data: AstExprData::VarRef { sym: None, name: "__jeti_eh_tmp_0".into() },
+            end_line: 0,
+            end_col: 0,
         };
         let got = c.check_expr(&mut e).expect("hoisted temp must have a type");
         assert_eq!(got.name.as_deref(), Some("NPString"),
@@ -3633,6 +3649,8 @@ mod tests {
         let mut e = AstExpr {
             kind: AstExprKind::VarRef, expr_type: None, line: 1, col: 1,
             data: AstExprData::VarRef { sym: None, name: "__LINE__".into() },
+            end_line: 0,
+            end_col: 0,
         };
         let got = c.check_expr(&mut e).expect("builtin must resolve");
         assert_eq!(got.prim, TypePrim::Int,
@@ -3645,6 +3663,8 @@ mod tests {
         let mut call_args = vec![AstExpr {
             kind: AstExprKind::AtString, expr_type: None, line: 1, col: 1,
             data: AstExprData::AtString(fmt.into()),
+            end_line: 0,
+            end_col: 0,
         }];
         call_args.extend(args);
         let call = AstExpr {
@@ -3652,10 +3672,14 @@ mod tests {
             data: AstExprData::FuncCall {
                 func: None, name: "NPLog".into(), callee: None, args: call_args,
             },
+            end_line: 0,
+            end_col: 0,
         };
         let body = AstStmt {
             kind: AstStmtKind::Expr, line: 1, col: 1,
             data: AstStmtData::Expr(call),
+            end_line: 0,
+            end_col: 0,
         };
         let method = AstDecl {
             kind: AstDeclKind::Method, name: Some("foo".into()), line: 1, col: 1,
@@ -3668,6 +3692,8 @@ mod tests {
                 body: Some(Box::new(body)),
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         };
         let mut unit = AstUnit { decls: vec![method], filename: String::new() };
         let mut c = Checker::new(None);
@@ -3676,11 +3702,11 @@ mod tests {
     }
 
     fn lit_int(v: i64) -> AstExpr {
-        AstExpr { kind: AstExprKind::Int, expr_type: None, line: 1, col: 1, data: AstExprData::Int(v) }
+        AstExpr { kind: AstExprKind::Int, expr_type: None, line: 1, col: 1, data: AstExprData::Int(v), end_line: 0, end_col: 0 }
     }
 
     fn lit_atstr(s: &str) -> AstExpr {
-        AstExpr { kind: AstExprKind::AtString, expr_type: None, line: 1, col: 1, data: AstExprData::AtString(s.into()) }
+        AstExpr { kind: AstExprKind::AtString, expr_type: None, line: 1, col: 1, data: AstExprData::AtString(s.into()), end_line: 0, end_col: 0 }
     }
 
     #[test]

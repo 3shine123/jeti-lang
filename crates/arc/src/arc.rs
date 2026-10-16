@@ -56,7 +56,11 @@ fn make_release_stmt(target: &AstExpr) -> AstStmt {
             data: AstExprData::FuncCall {
                 func: None, name: "jeti_release".to_string(), callee: None, args: vec![target.clone()],
             },
+            end_line: 0,
+            end_col: 0,
         }),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -76,6 +80,8 @@ fn var_ref_expr(name: &str) -> AstExpr {
     AstExpr {
         kind: AstExprKind::VarRef, expr_type: None, line: 0, col: 0,
         data: AstExprData::VarRef { sym: None, name: name.to_string() },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -387,7 +393,7 @@ fn walk_labels_gotos_stmt(s: &AstStmt, idx: usize, path: &mut Vec<usize>,
     match &s.data {
         AstStmtData::Compound(v) => walk_labels_gotos(v, path, labels, gotos),
         other => {
-            let single = AstStmt { kind: s.kind, line: s.line, col: s.col, data: other.clone() };
+            let single = AstStmt { kind: s.kind, line: s.line, col: s.col, data: other.clone(), end_line: s.end_line, end_col: s.end_col };
             walk_labels_gotos(std::slice::from_ref(&single), path, labels, gotos);
             // NOTE: the clone above is only used for traversal; nothing here
             // mutates the AST (the rewriting pass walks separately).
@@ -511,7 +517,11 @@ fn make_tmp_decl(name: &str, init: AstExpr) -> AstStmt {
                 next: None,
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         }),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -569,11 +579,15 @@ fn insert_exit_cleanup(
         AstStmt {
             kind: AstStmtKind::Throw, line: 0, col: 0,
             data: AstStmtData::Throw(Some(Box::new(var_ref_expr(&tmp)))),
+            end_line: 0,
+            end_col: 0,
         }
     } else {
         AstStmt {
             kind: AstStmtKind::Return, line: 0, col: 0,
             data: AstStmtData::Return(Some(Box::new(var_ref_expr(&tmp)))),
+            end_line: 0,
+            end_col: 0,
         }
     };
 
@@ -775,11 +789,11 @@ pub fn arc_local_analyze(body: &mut AstStmt, _cfg: &Cfg, method_name: &str) -> A
 
             // ── Handle if/else: recurse into branches ──
             if stmts[i].kind == AstStmtKind::If {
-                let if_taken = std::mem::replace(&mut stmts[i].data, AstStmtData::Expr(AstExpr { kind: AstExprKind::Int, expr_type: None, line: 0, col: 0, data: AstExprData::Int(0) }));
+                let if_taken = std::mem::replace(&mut stmts[i].data, AstStmtData::Expr(AstExpr { kind: AstExprKind::Int, expr_type: None, line: 0, col: 0, data: AstExprData::Int(0), end_line: 0, end_col: 0 }));
                 if let AstStmtData::If { cond, mut then, mut else_ } = if_taken {
                     if !matches!(then.data, AstStmtData::Compound(_)) {
                         let body = std::mem::replace(&mut then.data, AstStmtData::Compound(vec![]));
-                        then.data = AstStmtData::Compound(vec![AstStmt { kind: then.kind, line: then.line, col: then.col, data: body }]);
+                        then.data = AstStmtData::Compound(vec![AstStmt { kind: then.kind, line: then.line, col: then.col, data: body, end_line: then.end_line, end_col: then.end_col }]);
                     }
                     if let AstStmtData::Compound(ref mut inner) = then.data {
                         analyze_scope(inner, res, stack, false, throw_floor);
@@ -787,7 +801,7 @@ pub fn arc_local_analyze(body: &mut AstStmt, _cfg: &Cfg, method_name: &str) -> A
                     if let Some(ref mut el) = else_ {
                         if !matches!(el.data, AstStmtData::Compound(_)) {
                             let body = std::mem::replace(&mut el.data, AstStmtData::Compound(vec![]));
-                            el.data = AstStmtData::Compound(vec![AstStmt { kind: el.kind, line: el.line, col: el.col, data: body }]);
+                            el.data = AstStmtData::Compound(vec![AstStmt { kind: el.kind, line: el.line, col: el.col, data: body, end_line: el.end_line, end_col: el.end_col }]);
                         }
                         if let AstStmtData::Compound(ref mut inner) = el.data {
                             analyze_scope(inner, res, stack, false, throw_floor);
@@ -802,7 +816,7 @@ pub fn arc_local_analyze(body: &mut AstStmt, _cfg: &Cfg, method_name: &str) -> A
             // ── Handle while, for, for-in: recurse into body (loop scope) ──
             let is_loop = matches!(stmts[i].kind, AstStmtKind::While | AstStmtKind::For | AstStmtKind::ForIn);
             if is_loop {
-                let loop_taken = std::mem::replace(&mut stmts[i].data, AstStmtData::Expr(AstExpr { kind: AstExprKind::Int, expr_type: None, line: 0, col: 0, data: AstExprData::Int(0) }));
+                let loop_taken = std::mem::replace(&mut stmts[i].data, AstStmtData::Expr(AstExpr { kind: AstExprKind::Int, expr_type: None, line: 0, col: 0, data: AstExprData::Int(0), end_line: 0, end_col: 0 }));
                 match loop_taken {
                     AstStmtData::While { cond, mut body } => {
                         recurse_loop_body(&mut body, res, stack, throw_floor);
@@ -840,7 +854,7 @@ pub fn arc_local_analyze(body: &mut AstStmt, _cfg: &Cfg, method_name: &str) -> A
 
             // ── Handle @try/@catch/@finally ──
             if stmts[i].kind == AstStmtKind::Try {
-                let try_taken = std::mem::replace(&mut stmts[i].data, AstStmtData::Expr(AstExpr { kind: AstExprKind::Int, expr_type: None, line: 0, col: 0, data: AstExprData::Int(0) }));
+                let try_taken = std::mem::replace(&mut stmts[i].data, AstStmtData::Expr(AstExpr { kind: AstExprKind::Int, expr_type: None, line: 0, col: 0, data: AstExprData::Int(0), end_line: 0, end_col: 0 }));
                 if let AstStmtData::Try { mut try_block, mut catches, mut finally_block } = try_taken {
                     // Everything analyzed from here on is inside this @try (or
                     // its handlers): a `@throw` unwinds no further than this
@@ -933,7 +947,7 @@ pub fn arc_local_analyze(body: &mut AstStmt, _cfg: &Cfg, method_name: &str) -> A
             _ => {
                 let wrapped = std::mem::replace(&mut body.data, AstStmtData::Compound(vec![]));
                 if let AstStmtData::Compound(ref mut v) = body.data {
-                    v.push(AstStmt { kind: body.kind, line: body.line, col: body.col, data: wrapped });
+                    v.push(AstStmt { kind: body.kind, line: body.line, col: body.col, data: wrapped, end_line: body.end_line, end_col: body.end_col });
                 }
                 match body.data {
                     AstStmtData::Compound(ref mut inner) => inner as *mut Vec<AstStmt>,

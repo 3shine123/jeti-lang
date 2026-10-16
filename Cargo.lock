@@ -232,6 +232,7 @@ dependencies = [
  "jeti-ast",
  "jeti-binder",
  "jeti-cst",
+ "jeti-parser",
  "jeti-symbol",
 ]
 

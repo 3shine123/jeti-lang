@@ -3918,6 +3918,8 @@ line: pri_line,
                 guard,
                 body,
                 line: stmt_line, column: stmt_col,
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
             };
             return Some(CstStmt {
                 kind: CstStmtKind::Switch,
@@ -6915,6 +6917,8 @@ fn collect_arm_node(node: &CstStmt, rest: &[CstStmt], st: &mut PatternArms) {
                     guard: None,
                     body: grouped(innermost),
                     line, column,
+                    end_line: innermost.end_line,
+                    end_column: innermost.end_column,
                 });
             } else {
                 st.has_const_arm = true;

@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地，见各阶段标注）；阶段 5–6 仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `doc/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；阶段 5–6 仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `doc/architecture.md` 为准。
 
 ## 目标
 
@@ -20,8 +20,9 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 
 ## 当前基线
 
-- CST、AST 的表达式、语句和声明主要保存预处理后 buffer 的 `line` / `col`，没有统一的文件 ID、结束位置或字节 offset。
-- `crates/cst/src/source_map.rs` 以逐行表把预处理展开行映射到 `(文件, 行)`；列位置不映射，导入来源也没有稳定 source ID。
+- CST、AST 的表达式、语句、声明统一携带半开区间 `[start, end)`：`line` 是预处理展开行，`col` 已经是**源列**（parser 读入 token 时完成重映射），并成对保存 `end_line` / `end_col`。编译器合成的节点 end 记为 `0`，含义是“无源来源”。
+- `crates/cst/src/source_map.rs` 把展开行映射到 `(文件, 行, origin)` 并给出带字节 offset 的 `SourceSpan`：`span_from_inline`（原始 lexer 位置，套用宏列修正）与 `span_from_node`（节点位置，列已是源列，**不**再修正）；`SourceFile::offset_to_lsp` / `lsp_to_offset` 负责 byte ↔ UTF-16 转换，`line_col_to_offset` / `offset_to_line_col` 负责行列 ↔ offset。
+- `-np-map` sidecar 改用 serde/serde_json 序列化（磁盘 schema 不变，仍为版本化 JSON），并补上 `from_json`（拒绝未知 `version`）。
 - Parser、binder、EH、defer、async、checker 等诊断已通过 pipeline 的 `translate_lines` 映射部分行号。
 - codegen 已按 Jeti 节点边界发射 `#line`（阶段 2，默认开，`-fno-line-directives` 关闭）；CLI 把生成 C 通过 stdin 交给 Clang，clang 诊断指向 `.jeti`/`.hje` 源位置。
 - jetic 已有 `-g` 调试构建选项（传 `-g -O0` 给 C 编译器）；`-np-map` 可输出版本化 sidecar source map。
@@ -38,12 +39,13 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 
 ## 分阶段实施
 
-### 阶段 1：统一 SourceFile / SourceSpan / SourceMap
+### 阶段 1：统一 SourceFile / SourceSpan / SourceMap —— ✅ 已实施
 
-- 为每个读取或导入的源文件分配稳定 `SourceId`，记录规范化路径、显示路径和源文本/行起始 offset。
-- 将当前逐行 `SourceMap` 扩展成预处理映射：展开 buffer 的区间映射到原文件的区间，至少保留起止行列；对不能精确归属的 C passthrough、宏替换或合成文本标为 synthetic/unknown。
-- CST 和 AST 节点逐步使用 `SourceSpan`，先覆盖表达式、语句、声明及 parser/checker 诊断触点；降级 pass 克隆节点时必须保留原 span，新增辅助节点要带 synthetic origin。
-- 保持兼容访问器以减少一次性大改；禁止继续新增只存裸 `line`、却丢失文件来源的跨阶段节点。
+- **表示方式（记录在此，避免后来者另立机制）**：CST/AST 节点**不内嵌已解析的 `SourceSpan`**，而是保存与 CST 同构的裸位置 `line/col + end_line/end_col`；`SourceMap::span_from_node` 是唯一解析点，在消费边界（诊断、LSP、debugger adapter）把节点位置解析成 `file + 行列 + byte offset`。好处：elaborator 与各 lowering pass 对“文件”无感知，只做位置拷贝，SourceMap 无需穿过 20+ crate；这与既有诊断渲染器“边界解析”的做法一致，也不构成第二套映射机制。
+- 载体：`crates/cst/src/source_map.rs`（`SourceSpan` / `LspPosition` / `LspRange` / `SourceFile`）、`crates/cst/src/cst.rs`（`CstExpr` / `CstStmt` / `CstDecl` / `CstArm` 的 `end_*`）、`crates/lexer`（`Token` 的 `end_line` / `end_col`）、`crates/ast/src/ast.rs`（`AstExpr` / `AstStmt` / `AstDecl` / `AstArm` 的 `end_*`）。
+- **起点在构造解析函数入口捕获**：parser 原先在节点字面量所在处读 `self.previous`（构造点快照，类/函数因此会落在 `@end` / `}` 上），现改为入口捕获；`parse_function_decl_or_definition` / `parse_typedef` 的起点由调用方传入。语句、声明、函数体、typedef/enum/property/class/protocol/method/namespace/using/块字面量/初始化列表均已覆盖；逗号链后续声明符、ivar、枚举成员等“按名构造”的细节节点保留名字 token 作起点。
+- 降级 pass 克隆节点时按同一规则（`X.line → X.end_line`）保留原 span；新增辅助节点 end 记为 `0`（synthetic）。
+- 回归：`crates/parser/tests/cst_spans.rs`（CST 区间）、`crates/elaborator/tests/ast_spans.rs`（AST 区间）；`-np-map` 端到端 schema 不变。
 
 验收：包含多层 `#import` 的诊断能得到正确文件、行、列；非 ASCII 源码列位置稳定；parser 恢复和既有诊断不退化。
 

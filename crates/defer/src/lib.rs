@@ -229,6 +229,8 @@ fn splice_before(s: &mut AstStmt, pending: &[AstStmt]) {
     *s = AstStmt {
         kind: AstStmtKind::Compound, line, col,
         data: AstStmtData::Compound(stmts),
+        end_line: 0,
+        end_col: 0,
     };
 }
 
@@ -236,6 +238,8 @@ fn empty_stmt() -> AstStmt {
     AstStmt {
         kind: AstStmtKind::Compound, line: 0, col: 0,
         data: AstStmtData::Compound(Vec::new()),
+        end_line: 0,
+        end_col: 0,
     }
 }
 

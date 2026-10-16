@@ -166,6 +166,13 @@ pub struct AstExpr {
     pub expr_type: Option<Box<AstType>>,
     pub line: usize,
     pub col: usize,
+    /// Exclusive end of the node's extent, same convention as `line` / `col`
+    /// (flattened-buffer line, source column). `0` = no source origin — a node
+    /// the compiler synthesized. Resolve the pair with
+    /// `SourceMap::span_from_node`; this is the shared position model, not a
+    /// second one (`docs/plans/source_locations_debug_lsp_plan.md`).
+    pub end_line: usize,
+    pub end_col: usize,
     pub data: AstExprData,
 }
 
@@ -256,6 +263,9 @@ pub struct AstStmt {
     pub kind: AstStmtKind,
     pub line: usize,
     pub col: usize,
+    /// Exclusive end of the node's extent (see [`AstExpr::end_line`]).
+    pub end_line: usize,
+    pub end_col: usize,
     pub data: AstStmtData,
 }
 
@@ -269,6 +279,9 @@ pub struct AstArm {
     pub body: Box<AstStmt>,
     pub line: usize,
     pub col: usize,
+    /// Exclusive end of the node's extent (see [`AstExpr::end_line`]).
+    pub end_line: usize,
+    pub end_col: usize,
 }
 
 /// Case pattern kinds (M1). `Const` covers plain constants AND ObjC object
@@ -349,6 +362,9 @@ pub struct AstDecl {
     pub name: Option<String>,
     pub line: usize,
     pub col: usize,
+    /// Exclusive end of the node's extent (see [`AstExpr::end_line`]).
+    pub end_line: usize,
+    pub end_col: usize,
     pub data: AstDeclData,
     /// Raw `__attribute__((...))` spellings carried from CST.
     pub attributes: Vec<String>,

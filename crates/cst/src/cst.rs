@@ -315,6 +315,9 @@ pub struct CstArm {
     pub body: Box<CstStmt>,
     pub line: usize,
     pub column: usize,
+    /// Exclusive end of the arm's extent (see `CstStmt::end_line`).
+    pub end_line: usize,
+    pub end_column: usize,
 }
 
 /// Case pattern kinds (M1). `Const` covers plain constants AND ObjC object

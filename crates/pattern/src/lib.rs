@@ -134,11 +134,11 @@ pub fn lower_stmt(s: &mut AstStmt) {
 }
 
 fn make_compound() -> AstStmt {
-    AstStmt { kind: AstStmtKind::Compound, line: 0, col: 0, data: AstStmtData::Compound(Vec::new()) }
+    AstStmt { kind: AstStmtKind::Compound, line: 0, col: 0, data: AstStmtData::Compound(Vec::new()), end_line: 0, end_col: 0 }
 }
 
 fn make_goto(label: &str, line: usize, col: usize) -> AstStmt {
-    AstStmt { kind: AstStmtKind::Goto, line, col, data: AstStmtData::Goto(label.to_string()) }
+    AstStmt { kind: AstStmtKind::Goto, line, col, data: AstStmtData::Goto(label.to_string()), end_line: 0, end_col: 0 }
 }
 
 fn make_label_wrap(label: &str, body: AstStmt, line: usize, col: usize) -> AstStmt {
@@ -147,9 +147,11 @@ fn make_label_wrap(label: &str, body: AstStmt, line: usize, col: usize) -> AstSt
     AstStmt {
         kind: AstStmtKind::Compound, line, col,
         data: AstStmtData::Compound(vec![
-            AstStmt { kind: AstStmtKind::Label, line, col, data: AstStmtData::Label(label.to_string()) },
+            AstStmt { kind: AstStmtKind::Label, line, col, data: AstStmtData::Label(label.to_string()), end_line: 0, end_col: 0 },
             body,
         ]),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -231,6 +233,8 @@ fn lower_switch_pat(sw: AstStmt) -> AstStmt {
             cond = AstExpr {
                 kind: AstExprKind::Binary, expr_type: None, line: gline, col: gcol,
                 data: AstExprData::Binary { op: 17, left: Box::new(cond), right: g.clone() },
+                end_line: 0,
+                end_col: 0,
             };
         }
         // `if (cond) goto lbl;` — an unmatched arm must keep testing the next
@@ -242,6 +246,8 @@ fn lower_switch_pat(sw: AstStmt) -> AstStmt {
                 then: Box::new(make_goto(&lbl, line, col)),
                 else_: None,
             },
+            end_line: 0,
+            end_col: 0,
         });
     }
     // Default / no-default.
@@ -253,7 +259,7 @@ fn lower_switch_pat(sw: AstStmt) -> AstStmt {
 
     // 3. Arm bodies as adjacent labeled blocks (natural fallthrough like C).
     for (i, arm) in arms.into_iter().enumerate() {
-        let AstArm { pattern, guard: _, body, line: aline, col: acol } = &arm;
+        let AstArm { pattern, guard: _, body, line: aline, col: acol, .. } = &arm;
         let (aline, acol) = (*aline, *acol);
         let mut body = (**body).clone();
         let pattern = pattern.clone();
@@ -270,7 +276,7 @@ fn lower_switch_pat(sw: AstStmt) -> AstStmt {
                     inner.insert(0, alias);
                 } else {
                     let inner = vec![alias, body.clone()];
-                    body = AstStmt { kind: AstStmtKind::Compound, line: aline, col: acol, data: AstStmtData::Compound(inner) };
+                    body = AstStmt { kind: AstStmtKind::Compound, line: aline, col: acol, data: AstStmtData::Compound(inner), end_line: 0, end_col: 0 };
                 }
             }
         }
@@ -293,7 +299,7 @@ fn lower_switch_pat(sw: AstStmt) -> AstStmt {
     }
 
     out.push(make_label_wrap(&end_label, make_compound(), line, col));
-    AstStmt { kind: AstStmtKind::Compound, line, col, data: AstStmtData::Compound(out) }
+    AstStmt { kind: AstStmtKind::Compound, line, col, data: AstStmtData::Compound(out), end_line: 0, end_col: 0 }
 }
 
 /// Unique tag source for one lowered switch (see `lower_switch_pat`).
@@ -323,12 +329,16 @@ fn arm_test(arm: &AstArm, subj: &str) -> AstExpr {
                         selector: "isEqual:".to_string(),
                         args: vec![(**e).clone()],
                     },
+                    end_line: 0,
+                    end_col: 0,
                 }
             } else {
                 // subj == <const>
                 AstExpr {
                     kind: AstExprKind::Binary, expr_type: None, line, col,
                     data: AstExprData::Binary { op: 12, left: Box::new(ident(subj, line, col)), right: Box::new((**e).clone()) },
+                    end_line: 0,
+                    end_col: 0,
                 }
             }
         }
@@ -347,9 +357,13 @@ fn arm_test(arm: &AstArm, subj: &str) -> AstExpr {
                         AstExpr {
                             kind: AstExprKind::VarRef, expr_type: None, line, col,
                             data: AstExprData::VarRef { sym: None, name: format!("&JETI_CLASS_$_{}", flat) },
+                            end_line: 0,
+                            end_col: 0,
                         },
                     ],
                 },
+                end_line: 0,
+                end_col: 0,
             }
         }
     }
@@ -421,6 +435,8 @@ fn ident(name: &str, line: usize, col: usize) -> AstExpr {
     AstExpr {
         kind: AstExprKind::VarRef, expr_type: None, line, col,
         data: AstExprData::VarRef { sym: None, name: name.to_string() },
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -436,7 +452,7 @@ fn npobject_type() -> AstType {
 fn cast_to_npobject(e: AstExpr) -> AstExpr {
     let t = npobject_type();
     let (l, c) = (e.line, e.col);
-    AstExpr { kind: AstExprKind::Cast, expr_type: None, line: l, col: c, data: AstExprData::Cast { target_type: t, expr: Box::new(e) } }
+    AstExpr { kind: AstExprKind::Cast, expr_type: None, line: l, col: c, data: AstExprData::Cast { target_type: t, expr: Box::new(e) }, end_line: 0, end_col: 0 }
 }
 
 /// `__auto_type` — GNU type-inference; leaves downstream type handling
@@ -464,7 +480,11 @@ fn var_decl(name: &str, ty: AstType, init: Option<AstExpr>, line: usize, col: us
                 next: None,
             },
             attributes: Vec::new(),
+            end_line: 0,
+            end_col: 0,
         }),
+        end_line: 0,
+        end_col: 0,
     }
 }
 
@@ -477,6 +497,8 @@ fn bind_alias_decl(ty: &AstType, name: &str, subj: &str, line: usize, col: usize
     let cast = AstExpr {
         kind: AstExprKind::Cast, expr_type: None, line, col,
         data: AstExprData::Cast { target_type: t.clone(), expr: Box::new(cast_to_npobject(subj_e)) },
+        end_line: 0,
+        end_col: 0,
     };
     var_decl(name, t, Some(cast), line, col)
 }
