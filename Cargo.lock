@@ -245,6 +245,15 @@ name = "jeti-lexer"
 version = "0.1.0"
 
 [[package]]
+name = "jeti-lsp"
+version = "0.1.0"
+dependencies = [
+ "jeti-cst",
+ "jetic",
+ "serde_json",
+]
+
+[[package]]
 name = "jeti-ownership"
 version = "0.1.0"
 dependencies = [

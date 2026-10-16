@@ -1,0 +1,18 @@
+[package]
+name = "jeti-lsp"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "jeti_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jeti-lsp"
+path = "src/main.rs"
+
+[dependencies]
+jeti-cst = { path = "../cst" }
+jetic = { path = "../jetic" }
+serde_json = "1.0.154"
