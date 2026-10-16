@@ -303,6 +303,22 @@ async function main() {
     assert.ok(!collection().has('file:///tmp/other.txt'), 'non-jeti documents must not be sent');
     console.log('ok  non-jeti document ignored');
 
+    // A syntax error and a type error on the *same* expression both reach VS
+    // Code. The server reports both; the editor's hover shows one marker at a
+    // time (the type error's range covers the missing `;`), but the collection -
+    // what the Problems panel reads - carries the whole list.
+    const nested = 'int main(void) {\n    [self release]\n    return 0;\n}\n';
+    fire('open', documentFor(file, nested));
+    const both = await waitUntil(() => {
+      const entries = collection().get(uri);
+      return entries && entries.length >= 2 ? entries : null;
+    }, 'the syntax and the type diagnostic for one expression');
+    const messages = both.map((diagnostic) => diagnostic.message);
+    assert.ok(messages.some((m) => /expected ';'/.test(m)), `syntax error dropped: ${JSON.stringify(messages)}`);
+    assert.ok(messages.some((m) => /ARC mode/.test(m)), `type error dropped: ${JSON.stringify(messages)}`);
+    console.log(`ok  nested diagnostics → collection has ${both.length}: syntax + type`);
+    fire('close', documentFor(file, nested));
+
     // Outline and definition go through the registered providers, convert to VS
     // Code types, and answer from the server's index.
     const program = [

@@ -186,5 +186,7 @@ node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue
   stages/fatality rules must be mirrored there, not duplicated — the one deliberate
   difference is a **parse error**: the editor hands the recovered CST to the later
   stages (fix one error, see them all, and the AST still answers outline/definition),
-  while `transpile` refuses to emit code at all.
+  while `transpile` refuses to emit code at all. It runs the same analysis first, so
+  the terminal prints the same list the editor publishes (ordered by source position,
+  not by stage).
 - **Destructive git ops need user approval.**

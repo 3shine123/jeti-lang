@@ -42,7 +42,9 @@ pub struct Prepared {
 /// What [`Pipeline::analyze_document`] produced: the diagnostics plus the
 /// artifacts a consumer needs to answer questions about the code itself.
 pub struct Analysis {
-    /// Front-end diagnostics, in stage order.
+    /// Front-end diagnostics, ordered by source position (files in the order
+    /// they first appear); ties keep the order the stages produced them in.
+    /// See `sort_by_position` for why discovery order is not the reading order.
     pub diagnostics: Vec<Diagnostic>,
     /// The elaborated AST once every stage that can decide anything has run
     /// (`None` when an earlier stage failed). Post-desugar, so a consumer sees
@@ -390,6 +392,7 @@ impl Pipeline {
             }
             diags.extend(checker.warnings_as_diagnostics());
         }
+        sort_by_position(&mut diags);
         Analysis {
             diagnostics: diags,
             ast: Some(ast),
@@ -399,7 +402,8 @@ impl Pipeline {
 
     /// Exit of [`Pipeline::analyze_document`] when a stage failed: the later
     /// stages had nothing sound to work on, so there is no AST to hand out.
-    fn stopped(diagnostics: Vec<Diagnostic>, source_map: jeti_cst::source_map::SourceMap) -> Analysis {
+    fn stopped(mut diagnostics: Vec<Diagnostic>, source_map: jeti_cst::source_map::SourceMap) -> Analysis {
+        sort_by_position(&mut diagnostics);
         Analysis { diagnostics, ast: None, source_map }
     }
 
@@ -789,6 +793,25 @@ fn prefix_lines(stage: &str, msg: &str) -> String {
 /// Render checker diagnostics clang-style (source line + `~~~~^~~~~`
 /// annotation) when the source text is available on disk; diagnostics whose
 /// file cannot be read fall back to the plain `file:line:col:` line.
+/// Order diagnostics the way a reader wants them: by source position, files in
+/// the order they first appear. Discovery order is *stage* order — a parse error
+/// is found before any type error — which puts the syntax error on line 317
+/// ahead of type errors on line 48 and makes the terminal list look like it was
+/// grouped by message. Sorting is stable, so diagnostics at the same position
+/// keep the order the stages produced them in.
+fn sort_by_position(diags: &mut [Diagnostic]) {
+    let mut files: Vec<String> = Vec::new();
+    for d in diags.iter() {
+        if !files.iter().any(|f| *f == d.file) {
+            files.push(d.file.clone());
+        }
+    }
+    diags.sort_by_key(|d| {
+        let file = files.iter().position(|f| *f == d.file).unwrap_or(usize::MAX);
+        (file, d.line, d.col)
+    });
+}
+
 fn render_checker_diags(
     diags: &[jeti_cst::diagnostic::Diagnostic],
     sm: &jeti_cst::source_map::SourceMap,

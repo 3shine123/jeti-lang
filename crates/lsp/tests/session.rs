@@ -134,10 +134,13 @@ fn a_syntax_error_does_not_hide_later_diagnostics() {
     let dir = std::env::temp_dir().join("jeti_lsp_session_test");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join("mixed.jeti");
+    // The type error comes *first* in the file and the syntax error later: the
+    // list must still read top to bottom, even though the parser runs first and
+    // discovers its error first.
     let mixed = "\
 int main(void) {
-    int a = 1
     [self release];
+    int a = 1
     return 0;
 }
 ";
@@ -173,6 +176,20 @@ int main(void) {
     assert!(
         messages.iter().any(|m| m.contains("release") && m.contains("ARC")),
         "the ARC error below it must not be swallowed: {published}"
+    );
+    let positions: Vec<(u64, u64)> = diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d["range"]["start"]["line"].as_u64().unwrap(),
+                d["range"]["start"]["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        positions,
+        vec![(1, 4), (2, 12)],
+        "diagnostics must read in source order: {published}"
     );
 
     // The recovered AST still answers what an editor asks about the code.
