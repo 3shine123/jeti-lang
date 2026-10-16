@@ -89,6 +89,11 @@ async function main() {
     assert.strictEqual(init.capabilities.definitionProvider, true, 'expected a definition provider');
     assert.strictEqual(init.capabilities.hoverProvider, true, 'expected a hover provider');
     assert.strictEqual(init.capabilities.completionProvider.resolveProvider, false, 'expected inline completions');
+    assert.deepStrictEqual(
+      init.capabilities.signatureHelpProvider.triggerCharacters,
+      [':'],
+      'expected signature help on the keyword colon',
+    );
     assert.strictEqual(init.serverInfo.name, 'jeti-lsp');
     console.log('ok  initialize handshake');
 

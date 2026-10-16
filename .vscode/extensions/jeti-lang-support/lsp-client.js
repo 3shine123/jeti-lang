@@ -154,6 +154,18 @@ class JetiLanguageClient {
       .then((list) => list?.items || []);
   }
 
+  /**
+   * `textDocument/signatureHelp` → the signature of the call at `position`, or
+   * `null` when the cursor is not inside a call this server can type.
+   *
+   * @param {string} uri
+   * @param {{line: number, character: number}} position
+   * @returns {Promise<object | null>}
+   */
+  signatureHelp(uri, position) {
+    return this.request('textDocument/signatureHelp', { textDocument: { uri }, position });
+  }
+
   /** `shutdown` + `exit`, then resolve with the server's exit code. */
   async stop({ timeoutMs = 10000 } = {}) {
     const proc = this.process;

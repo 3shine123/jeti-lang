@@ -56,6 +56,25 @@ const vscode = {
       this.detail = undefined;
     }
   },
+  ParameterInformation: class ParameterInformation {
+    constructor(label) {
+      this.label = label;
+    }
+  },
+  SignatureInformation: class SignatureInformation {
+    constructor(label, documentation, parameters) {
+      this.label = label;
+      this.documentation = documentation;
+      this.parameters = parameters || [];
+    }
+  },
+  SignatureHelp: class SignatureHelp {
+    constructor() {
+      this.signatures = [];
+      this.activeSignature = 0;
+      this.activeParameter = 0;
+    }
+  },
   SymbolKind: {
     Namespace: 3,
     Class: 5,
@@ -123,6 +142,7 @@ const vscode = {
     registerDefinitionProvider: (selector, provider) => registerProvider('definition', provider),
     registerHoverProvider: (selector, provider) => registerProvider('hover', provider),
     registerCompletionItemProvider: (selector, provider) => registerProvider('completion', provider),
+    registerSignatureHelpProvider: (selector, provider) => registerProvider('signatureHelp', provider),
   },
   window: {
     createOutputChannel: (name) => ({
@@ -287,12 +307,12 @@ async function main() {
       '#import <Foundation/Foundation.hje>',
       '',
       '@interface Greeter : NPObject',
-      '- (void)greet:(NPString *)name;',
+      '- (void)greet:(NPString *)name from:(NPString *)where;',
       '@end',
       '',
       '@implementation Greeter',
-      '- (void)greet:(NPString *)name {',
-      '    [self greet:name];',
+      '- (void)greet:(NPString *)name from:(NPString *)where {',
+      '    [self greet:name from:name];',
       '}',
       '@end',
       '',
@@ -317,17 +337,17 @@ async function main() {
     assert.strictEqual(symbols[1].kind, vscode.SymbolKind.Class);
     assert.strictEqual(symbols[1].detail, '@implementation:jeti_root');
     assert.strictEqual(symbols[1].children.length, 1);
-    assert.strictEqual(symbols[1].children[0].name, 'greet:');
+    assert.strictEqual(symbols[1].children[0].name, 'greet:from:');
     assert.strictEqual(symbols[1].children[0].kind, vscode.SymbolKind.Method);
     console.log('ok  documentSymbol provider → outline with methods');
 
     const definitionProvider = providers.get('definition');
     assert.ok(definitionProvider, 'expected a definition provider');
     const programDocument = documentFor(file, program);
-    const local = await definitionProvider.provideDefinition(programDocument, positionOf(program, 'greet:name'));
+    const local = await definitionProvider.provideDefinition(programDocument, positionOf(program, 'greet:name from'));
     assert.strictEqual(local.length, 2, JSON.stringify(local));
     assert.strictEqual(local[0].uri.toString(), uri);
-    assert.strictEqual(local[0].range.start.line, positionOf(program, '- (void)greet:(NPString *)name;').line);
+    assert.strictEqual(local[0].range.start.line, positionOf(program, '- (void)greet:(NPString *)name from:(NPString *)where;').line);
 
     const imported = await definitionProvider.provideDefinition(programDocument, positionOf(program, 'NPString *s'));
     assert.strictEqual(imported.length, 1);
@@ -375,6 +395,26 @@ async function main() {
     assert.deepStrictEqual(members.map((item) => item.label), ['UTF8String']);
     assert.strictEqual(members[0].kind, vscode.CompletionItemKind.Method);
     console.log('ok  completion provider → receiver members inside a send');
+
+    // Signature help: the parameter the cursor is filling in comes from the
+    // server's argument ranges, and the label is shown as-is.
+    const signatureProvider = providers.get('signatureHelp');
+    assert.ok(signatureProvider, 'expected a signature help provider');
+    const help = await signatureProvider.provideSignatureHelp(
+      programDocument,
+      positionOf(program, '[self greet:name from:name', 22),
+    );
+    assert.ok(help instanceof vscode.SignatureHelp, 'expected a SignatureHelp');
+    assert.strictEqual(help.activeParameter, 1);
+    assert.strictEqual(help.signatures.length, 1);
+    assert.strictEqual(help.signatures[0].label, '- (void)greet:(NPString *)name from:(NPString *)where');
+    assert.deepStrictEqual(help.signatures[0].parameters.map((p) => p.label), [
+      '(NPString *)name',
+      '(NPString *)where',
+    ]);
+    const noHelp = await signatureProvider.provideSignatureHelp(programDocument, new vscode.Position(1, 0));
+    assert.strictEqual(noHelp, undefined, 'outside a call there is no signature');
+    console.log('ok  signatureHelp provider → label, parameters, active parameter');
 
     // A missing server must not throw: it warns, stays inert, and a settings
     // change brings it back without reloading the window.

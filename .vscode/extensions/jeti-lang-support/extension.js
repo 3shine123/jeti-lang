@@ -146,6 +146,21 @@ function toCompletionItems(items) {
   });
 }
 
+/** LSP `SignatureHelp | null` → VS Code's `SignatureHelp | undefined`. */
+function toSignatureHelp(help) {
+  if (!help || !Array.isArray(help.signatures) || help.signatures.length === 0) return undefined;
+  const converted = new vscode.SignatureHelp();
+  converted.signatures = help.signatures.map((signature) => {
+    const parameters = (signature.parameters || []).map(
+      (parameter) => new vscode.ParameterInformation(parameter.label),
+    );
+    return new vscode.SignatureInformation(signature.label, undefined, parameters);
+  });
+  converted.activeSignature = help.activeSignature ?? 0;
+  converted.activeParameter = help.activeParameter ?? 0;
+  return converted;
+}
+
 function publish(uriString, diagnostics) {
   const uri = vscode.Uri.parse(uriString);
   collection?.set(uri, (diagnostics || []).map(toDiagnostic));
@@ -242,6 +257,19 @@ function restart() {
         return toCompletionItems(items);
       },
     }),
+    vscode.languages.registerSignatureHelpProvider(
+      LANGUAGE_ID,
+      {
+        provideSignatureHelp: async (document, position) => {
+          if (!client) return undefined;
+          return toSignatureHelp(await client.signatureHelp(document.uri.toString(), {
+            line: position.line,
+            character: position.character,
+          }));
+        },
+      },
+      ':',
+    ),
     vscode.workspace.onDidOpenTextDocument((document) => {
       if (client && isJetiDocument(document)) {
         client.openDocument(document.uri.toString(), document.getText());
