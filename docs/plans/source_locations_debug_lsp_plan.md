@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停与全局名字补全**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的成员补全/rename 等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停与补全（全局名字 + 接收者成员）**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的 signature help/rename 等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -108,8 +108,8 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
-- 未做（后续阶段）：**成员补全**（按接收者类型过滤）、signature help、rename、incremental sync、
-  workspace folders、ARC 专属诊断、`-Werror` 之外的设置协商（`workspace/configuration`）。
+- 未做（后续阶段）：signature help、rename、incremental sync、workspace folders、ARC 专属诊断、
+  `-Werror` 之外的设置协商（`workspace/configuration`），以及成员补全里的协议/泛型细化。
 
 **进展（大纲 + 定义跳转 —— 已落地）**
 
@@ -150,12 +150,32 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   `setObject:atIndex:`），索引里按前缀筛（大小写敏感，与语言一致），去重（同一个类声明两处只给一条）、
   按字母排序、上限 2000 条兜底。**kind 用的是 `CompletionItemKind` 而不是 `SymbolKind`** —— 两套枚举编号不同，
   编辑器图标看的是前者，索引里显式转换（class→7、method→2…）。
-- 局限（明确写在这里）：**没有成员补全**（`obj.` / `[obj ` 之后按接收者类型过滤）——那需要"光标前的表达式节点"
-  这种按位置查 AST 的能力；也还没有 signature help 与 rename。全局名字补全（类、方法 selector、函数、
-  typedef、enum、全局变量）已经可用。
-- 回归：`cargo test -p jeti-lsp` 现为 20 个单测 + 会话测试（会话里覆盖 hover 读到头文件 markdown、
-  前缀 `NPS` 给出 `NPString` 且 kind=7）；`test/extension.test.js` 覆盖 hover 的 MarkdownString 换算与
-  补全项的 kind/detail 换算。
+- 局限（明确写在这里）：**成员补全已落地**（见下）；signature help 与 rename 还没有。
+
+**进展（成员补全 —— 已落地）**
+
+- 成员补全要先回答两件事：光标处的接收者是什么类型，以及光标在 **selector 位**还是**实参位**。
+  纯文本答不了后者（`[a do:x |]` 与 `[a do:thing|]` 长得一样），所以索引在构建时（只对被编辑的文件）
+  为每个消息发送记录一个 `SendSite`：整条 `[...]` 的范围、接收者范围、接收者名字（`VarRef`/`self`）、
+  **接收者静态类型**（checker 填好的 `expr_type` —— 所以 `[[a make] |]` 这种嵌套接收者也解析得出）、
+  以及每个实参的范围。光标落在 receiver 或任一实参里 → 不是 selector 位，不给成员（退回全局名字）；
+  否则用接收者类型查类成员表。
+- 作用域：每个方法/函数一个 `Scope`（参数、`self` 类型、所属类的 ivar、体内声明的局部变量；块级作用域被压平，
+  后声明者胜）。接收者优先按**名字**查作用域（局部/`self` → 实例方法），查不到再当**类名**（→ 类方法），
+  最后才用 `expr_type`。
+- 类成员表覆盖**参与编译的全部文件**（局部变量的类型通常在头文件里），沿 `super_name` 向上收集，
+  区分 method / property / ivar；对象接收者只给实例成员，类接收者只给类方法。
+- 一个实测到的坑：类名接收者的 receiver 节点被 elaborator 重写成覆盖**整条 send** 的范围（不含接收者独有信息），
+  于是"光标在 receiver 上"的判定只在 receiver 范围确实窄于 send 时才生效——否则 `[Widget make]` 永远被判成
+  "光标在接收者上"，类方法一条都给不出。
+- `obj.` / `obj->` 是唯一 AST 答不了的成员位（成员名没打出来时节点还不存在），这一路退化为**文本**取值：
+  读光标前的标识符，再走同一套作用域解析。
+- 遍历用 `BodyWalk` 显式列出 `AstStmtData` / `AstExprData` 的**全部**变体（不用 `_ =>`），
+  所以 AST 新增变体会编译失败，而不是悄悄少收集；没有源位置的合成节点跳过。
+- 未做：协议成员（`id<P>`）与泛型参数替换（`NPArray<T>` 的 `T` 具体化）。
+- 回归：`cargo test -p jeti-lsp` 现为 23 个单测 + 会话测试（会话里断言 `[s UTF8S` 只给出 `UTF8String`；
+  单测钉住"receiver/实参位不给成员"、"类接收者只给类方法"、"继承成员可见"、"标量接收者无成员"）；
+  `test/extension.test.js` 覆盖同一路径经 VS Code provider 的换算。
 
 **进展（编辑器客户端 —— 已接线）**
 

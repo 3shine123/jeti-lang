@@ -274,14 +274,18 @@ counts as one name) and returns every declaration of it, including ones in an
 imported header, so `NPString` in your code jumps into
 `Foundation/NPString.hje`. Hover shows the declaration's own source text, and
 completion offers every name the index knows — classes, methods (including whole
-selectors), functions, typedefs, enums and globals — filtered by what you typed.
+selectors), functions, typedefs, enums and globals — plus the **members of the
+receiver** you are sending to: inside `[str ` you get `NPString`'s own methods
+and its ancestors', `[Widget ` gives that class's class methods, and `obj.`
+works too. Argument positions are not treated as selector positions, which the
+AST — not the text — decides.
 
 Scope today: the lifecycle handshake, full-document sync
 (`didOpen`/`didChange`/`didClose` → `publishDiagnostics`),
 `textDocument/documentSymbol`, `textDocument/definition`, `textDocument/hover`
-and `textDocument/completion` (global names; member completion after `[obj ` is
-not in yet). Rename, signature help, incremental sync and ARC-only diagnostics
-are not in yet.
+and `textDocument/completion` (global names plus receiver members; protocol
+members for `id<P>` and generic argument substitution are not in yet). Rename,
+signature help, incremental sync and ARC-only diagnostics are not in yet.
 
 ### VS Code
 
@@ -289,7 +293,7 @@ The bundled extension (`.vscode/extensions/jeti-lang-support`) adds syntax
 highlighting **and** the language client: it spawns `jeti-lsp` and renders the
 diagnostics as squiggles in the editor, fills the Outline view and the
 breadcrumb bar, answers Go to Definition, shows hovers with the declaration's
-source text, and offers completion. Try it in a throwaway window (nothing is
+source text, and completes both global names and receiver members. Try it in a throwaway window (nothing is
 installed into your own setup):
 
 ```bash

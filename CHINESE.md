@@ -264,17 +264,19 @@ jeti-lsp --include include        # 在 stdin/stdout 上说 LSP
 请求不会重新解析缓冲区。跳转定义先认出光标下的名字（`setObject:atIndex:` 这样的整条 selector 算一个名字），
 再返回它的全部声明，包括导入头文件里的，所以在自己代码里点 `NPString` 会跳进 `Foundation/NPString.hje`；
 悬停显示该声明的原文；补全给出索引里的全部名字（类、方法 selector、函数、typedef、enum、全局变量），
-按已输入的前缀过滤。
+以及**接收者的成员**：在 `[str ` 之后给你 `NPString` 自己的方法与继承来的方法，`[Widget ` 给该类方法，
+`obj.` 同样可用；实参位置不会被当成 selector 位置（由 AST 判断，不是靠文本猜）。
 
 当前范围：生命周期握手、全量文档同步（`didOpen`/`didChange`/`didClose` → `publishDiagnostics`）、
 `textDocument/documentSymbol`、`textDocument/definition`、`textDocument/hover`、`textDocument/completion`
-（全局名字；`[obj ` 之后的**成员补全**还没做）。rename、signature help、incremental sync、ARC 专属诊断尚未实现。
+（全局名字 + 接收者成员；`id<P>` 的协议成员与泛型参数替换还没做）。rename、signature help、incremental sync、
+ARC 专属诊断尚未实现。
 
 ### VS Code
 
 仓库自带的扩展（`.vscode/extensions/jeti-lang-support`）除语法高亮外，还包含了 language client：
-它会拉起 `jeti-lsp`，把诊断渲染成编辑器里的波浪线，填充大纲视图与面包屑，支持跳转定义、悬停（显示声明原文）
-与补全。用一个临时窗口试（不会装进你自己的编辑器配置）：
+它会拉起 `jeti-lsp`，把诊断渲染成编辑器里的波浪线，填充大纲视图与面包屑，支持跳转定义、悬停（显示声明原文）、
+全局名字补全与接收者成员补全。用一个临时窗口试（不会装进你自己的编辑器配置）：
 
 ```bash
 ./tools/run-vscode-extension.sh                 # 本仓库
