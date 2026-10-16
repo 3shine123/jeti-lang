@@ -73,14 +73,54 @@ pub struct Symbol {
     pub children: Vec<Symbol>,
 }
 
-/// A declaration that can be jumped to.
+/// A declaration that can be jumped to, hovered, or completed with.
 #[derive(Debug, Clone)]
 pub struct Location {
+    /// Declared name as the index keys it (a selector for methods).
+    pub name: String,
+    /// LSP `SymbolKind` number.
+    pub kind: u8,
+    /// Short signature line, LSP `detail`.
+    pub detail: String,
+    pub container: Option<String>,
     pub path: String,
     pub range: LspRange,
-    pub kind: u8,
-    pub container: Option<String>,
 }
+
+/// One completion candidate: a name the index knows, with what it is.
+///
+/// `kind` is an **LSP `CompletionItemKind`**, not the `SymbolKind` used by
+/// out/definitions — the two enums number their entries differently, and the
+/// editor picks its icon from the completion one.
+#[derive(Debug, Clone)]
+pub struct Completion {
+    pub label: String,
+    pub kind: u8,
+    pub detail: String,
+}
+
+/// `SymbolKind` → `CompletionItemKind`, so completions carry the icon kind the
+/// completion protocol expects.
+fn completion_kind(symbol_kind: u8) -> u8 {
+    match symbol_kind {
+        kind::NAMESPACE => 9,  // Module
+        kind::CLASS => 7,      // Class
+        kind::METHOD => 2,     // Method
+        kind::PROPERTY => 10,  // Property
+        kind::FIELD => 5,      // Field
+        kind::ENUM => 13,      // Enum
+        kind::INTERFACE => 8,  // Interface
+        kind::FUNCTION => 3,   // Function
+        kind::VARIABLE => 6,   // Variable
+        kind::STRUCT => 22,    // Struct
+        _ => 1,                // Text
+    }
+}
+
+/// Upper bound on a `textDocument/completion` answer. Real Jeti programs sit far
+/// below it (the whole Foundation surface is a few hundred names); the cap only
+/// stops a pathological index from producing a megabyte of JSON.
+const COMPLETION_LIMIT: usize = 2000;
 
 /// The declaration index of one analysis run.
 #[derive(Debug, Default)]
@@ -133,21 +173,42 @@ impl SymbolIndex {
         let mut found: Vec<Location> = self
             .by_name
             .get(name)
-            .map(|symbols| {
-                symbols
-                    .iter()
-                    .map(|symbol| Location {
-                        path: symbol.path.clone(),
-                        range: symbol.range,
-                        kind: symbol.kind,
-                        container: symbol.container.clone(),
-                    })
-                    .collect()
-            })
+            .map(|symbols| symbols.iter().map(Symbol::to_location).collect())
             .unwrap_or_default();
         found.sort_by(|a, b| (&a.path, a.range.start).cmp(&(&b.path, b.range.start)));
         found.dedup_by(|a, b| a.path == b.path && a.range.start == b.range.start);
         found
+    }
+
+    /// Completion candidates whose name starts with `prefix` (case-sensitive, as
+    /// the language is). An empty prefix offers everything the index knows.
+    ///
+    /// Names are deduplicated: a class declared in a header and implemented in
+    /// this file is one entry, not two. Ordering is alphabetical so the editor's
+    /// own ranking (and fuzzy matching) starts from a stable list.
+    pub fn complete(&self, prefix: &str) -> Vec<Completion> {
+        let mut seen: Vec<(&str, u8)> = Vec::new();
+        let mut completions: Vec<Completion> = Vec::new();
+        for symbol in self.by_name.values().flatten() {
+            if !symbol.lookup.starts_with(prefix) {
+                continue;
+            }
+            let key = (symbol.lookup.as_str(), symbol.kind);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            completions.push(Completion {
+                label: symbol.lookup.clone(),
+                kind: completion_kind(symbol.kind),
+                detail: symbol.detail.clone(),
+            });
+            if completions.len() >= COMPLETION_LIMIT {
+                break;
+            }
+        }
+        completions.sort_by(|a, b| a.label.cmp(&b.label));
+        completions
     }
 
     // -- building ------------------------------------------------------------
@@ -230,6 +291,17 @@ impl SymbolIndex {
 }
 
 impl Symbol {
+    fn to_location(&self) -> Location {
+        Location {
+            name: self.lookup.clone(),
+            kind: self.kind,
+            detail: self.detail.clone(),
+            container: self.container.clone(),
+            path: self.path.clone(),
+            range: self.range,
+        }
+    }
+
     fn to_json(&self) -> Value {
         let mut value = json!({
             "name": self.name,

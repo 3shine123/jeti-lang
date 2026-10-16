@@ -354,6 +354,10 @@ impl Server {
                         "textDocumentSync": 1,
                         "documentSymbolProvider": true,
                         "definitionProvider": true,
+                        "hoverProvider": true,
+                        // No `resolveProvider`: everything a completion item
+                        // needs (label, kind, detail) is in the same answer.
+                        "completionProvider": { "resolveProvider": false },
                     },
                     "serverInfo": {
                         "name": "jeti-lsp",
@@ -431,21 +435,8 @@ impl Server {
             // the client shows the list; no match is `null` rather than a
             // guess.
             "textDocument/definition" => {
-                let uri = message
-                    .pointer("/params/textDocument/uri")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let position = message.pointer("/params/position");
-                let position = LspPosition {
-                    line: position
-                        .and_then(|p| p.get("line"))
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0) as u32,
-                    character: position
-                        .and_then(|p| p.get("character"))
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0) as u32,
-                };
+                let uri = request_uri(message);
+                let position = request_position(message);
                 let locations = self.definitions(uri, position);
                 let result = if locations.is_empty() {
                     Value::Null
@@ -453,6 +444,57 @@ impl Server {
                     Value::Array(locations)
                 };
                 vec![response(id, result)]
+            }
+            // What the symbol under the cursor *is*, with its declaration text.
+            "textDocument/hover" => {
+                let position = request_position(message);
+                let uri = request_uri(message);
+                let mut hover = Value::Null;
+                if let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
+                    if let Some(name) = symbol_at(&doc.text, position) {
+                        let locations = index.definitions(&name);
+                        if let Some(first) = locations.first() {
+                            let text_of = self.text_of();
+                            let resolve = |path: &str| text_or_disk(&text_of, path);
+                            hover = json!({
+                                "contents": {
+                                    "kind": "markdown",
+                                    "value": hover_markdown(first, locations.len(), &resolve),
+                                },
+                            });
+                        }
+                    }
+                }
+                vec![response(id, hover)]
+            }
+            // Names the index knows, filtered by what has been typed.
+            "textDocument/completion" => {
+                let position = request_position(message);
+                let uri = request_uri(message);
+                let mut items: Vec<Value> = Vec::new();
+                if let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
+                    // The name under the cursor is the prefix; a trailing colon
+                    // is dropped so `setOb` and `setObject:` both offer
+                    // `setObject:atIndex:`.
+                    let prefix = symbol_at(&doc.text, position)
+                        .map(|name| name.trim_end_matches(':').to_string())
+                        .unwrap_or_default();
+                    items = index
+                        .complete(&prefix)
+                        .iter()
+                        .map(|completion| {
+                            let mut item = json!({
+                                "label": completion.label,
+                                "kind": completion.kind,
+                            });
+                            if !completion.detail.is_empty() {
+                                item["detail"] = json!(completion.detail);
+                            }
+                            item
+                        })
+                        .collect();
+                }
+                vec![response(id, json!({ "isIncomplete": false, "items": items }))]
             }
             "" => Vec::new(),
             other => match id {
@@ -536,6 +578,108 @@ fn publish_empty(uri: &str) -> Value {
 
 fn response(id: Option<Value>, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id.unwrap_or(Value::Null), "result": result })
+}
+
+/// `params.textDocument.uri` of a request, or `""` when absent.
+fn request_uri(message: &Value) -> &str {
+    message
+        .pointer("/params/textDocument/uri")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
+
+/// `params.position` of a request, or the document start when absent.
+fn request_position(message: &Value) -> LspPosition {
+    let position = message.pointer("/params/position");
+    let coordinate = |name: &str| {
+        position
+            .and_then(|p| p.get(name))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32
+    };
+    LspPosition { line: coordinate("line"), character: coordinate("character") }
+}
+
+/// Markdown hover: what the declaration is, its own source text, and where it
+/// lives. `declarations` is how many the name resolved to, so a selector with a
+/// declaration and an implementation says so instead of hiding one.
+fn hover_markdown(
+    location: &Location,
+    declarations: usize,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    let mut markdown = format!("**{}** `{}`", kind_name(location.kind), location.name);
+    if !location.detail.is_empty() && location.detail != location.name {
+        markdown.push_str(&format!(" · {}", location.detail));
+    }
+    markdown.push('\n');
+    if let Some(container) = &location.container {
+        markdown.push_str(&format!("in `{container}`\n"));
+    }
+    if let Some(text) = resolve(&location.path) {
+        if let Some(snippet) = declaration_text(&text, location.range) {
+            markdown.push_str(&format!("\n```jeti\n{snippet}\n```\n"));
+        }
+    }
+    markdown.push_str(&format!(
+        "\n_Declared in {}:{}_",
+        display_path(&location.path),
+        location.range.start.line + 1
+    ));
+    if declarations > 1 {
+        markdown.push_str(&format!(" · _{declarations} declarations_"));
+    }
+    markdown
+}
+
+/// The declaration's own lines, so a hover shows the signature rather than only
+/// a name. Capped so a whole class body cannot flood the popup.
+fn declaration_text(text: &str, range: LspRange) -> Option<String> {
+    const MAX_LINES: u32 = 10;
+    let start = range.start.line;
+    let end = range.end.line.min(start + MAX_LINES - 1);
+    let mut lines: Vec<&str> = Vec::new();
+    for line in text.lines().skip(start as usize) {
+        if lines.len() as u32 > end - start {
+            break;
+        }
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    Some(lines.join("\n"))
+}
+
+/// Path as a reader wants it: relative to the server's working directory (the
+/// workspace root) when it is inside it, absolute otherwise.
+fn display_path(path: &str) -> String {
+    std::env::current_dir()
+        .ok()
+        .and_then(|cwd| {
+            Path::new(path)
+                .strip_prefix(&cwd)
+                .ok()
+                .map(|relative| relative.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| path.to_string())
+}
+
+/// Human word for an LSP symbol kind (the numbers in [`index::kind`]).
+fn kind_name(kind: u8) -> &'static str {
+    match kind {
+        index::kind::NAMESPACE => "namespace",
+        index::kind::CLASS => "class",
+        index::kind::METHOD => "method",
+        index::kind::PROPERTY => "property",
+        index::kind::FIELD => "instance variable",
+        index::kind::ENUM => "enum",
+        index::kind::INTERFACE => "protocol",
+        index::kind::FUNCTION => "function",
+        index::kind::VARIABLE => "variable",
+        index::kind::STRUCT => "struct",
+        _ => "declaration",
+    }
 }
 
 fn error_response(id: Value, code: i64, message: &str) -> Value {
@@ -669,7 +813,7 @@ mod tests {
     #[test]
     fn unhandled_request_gets_method_not_found() {
         let mut server = Server::new(Vec::new());
-        let req = json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/hover", "params": {}});
+        let req = json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/rename", "params": {}});
         let out = server.handle(&req);
         assert_eq!(out[0]["error"]["code"], -32601);
     }
@@ -766,6 +910,72 @@ int helper(int value) { return value; }
         assert!(analyzed.index.definitions("where").is_empty());
         assert!(!analyzed.index.definitions(&name).is_empty());
         let _ = path;
+    }
+
+    #[test]
+    fn completion_offers_names_by_prefix() {
+        let analyzed = analyze(PROGRAM);
+        let label = |completions: Vec<index::Completion>| -> Vec<String> {
+            completions.into_iter().map(|c| c.label).collect()
+        };
+        assert_eq!(label(analyzed.index.complete("Thing")), vec!["Thing"]);
+        // A selector with its colon, so a keyword send can be completed.
+        assert_eq!(label(analyzed.index.complete("run")), vec!["run:"]);
+        // Everything the index knows, when nothing has been typed.
+        let all = label(analyzed.index.complete(""));
+        assert!(all.contains(&"Point".to_string()), "{all:?}");
+        assert!(all.contains(&"helper".to_string()), "{all:?}");
+        assert!(all.contains(&"run:".to_string()), "{all:?}");
+        // A class is offered as a Class completion item (the completion enum
+        // numbers Class 7, not the SymbolKind's 5).
+        let thing = analyzed.index.complete("Thing");
+        assert_eq!(thing[0].kind, 7);
+        assert_eq!(thing[0].detail, "@interface:jeti_root");
+        // A class declared twice is one candidate, not two.
+        assert_eq!(label(analyzed.index.complete("Thing")).len(), 1);
+    }
+
+    #[test]
+    fn hover_describes_the_declaration() {
+        let mut server = Server::new(Vec::new());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/hover.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": PROGRAM,
+            }},
+        }));
+
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 6, "method": "textDocument/hover",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 2, "character": 11 } },
+        }));
+        let contents = &out[0]["result"]["contents"];
+        assert_eq!(contents["kind"], "markdown");
+        let value = contents["value"].as_str().unwrap();
+        assert!(value.starts_with("**class** `Thing`"), "{value}");
+        assert!(value.contains("@interface:jeti_root"), "{value}");
+        assert!(value.contains("```jeti\n@interface Thing : jeti_root"), "{value}");
+        assert!(value.contains("_Declared in "), "{value}");
+        assert!(value.contains("_2 declarations_"), "{value}");
+
+        // A position with no symbol has no hover, rather than an empty one.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 7, "method": "textDocument/hover",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 1, "character": 0 } },
+        }));
+        assert!(out[0]["result"].is_null());
+
+        // Completion answers from the same cached index, and carries the
+        // completion kind (Class = 7).
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 8, "method": "textDocument/completion",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 2, "character": 11 } },
+        }));
+        let items = out[0]["result"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0]["label"], "Thing");
+        assert_eq!(items[0]["kind"], 7);
     }
 
     #[test]

@@ -206,6 +206,39 @@ fn server_answers_editors_requests_end_to_end() {
     let definition = read_frame(&mut stdout);
     assert!(definition["result"].is_null(), "{definition}");
 
+    // hover on the imported type → markdown with the declaration and its file.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 6, "method": "textDocument/hover",
+            "params": { "textDocument": { "uri": uri }, "position": position_of(PROGRAM, "NPString *s") },
+        })).as_bytes())
+        .expect("write hover");
+    stdin.flush().expect("flush");
+    let hover = read_frame(&mut stdout);
+    let markdown = hover["result"]["contents"]["value"].as_str().expect("markdown hover");
+    assert!(markdown.starts_with("**class** `NPString`"), "{markdown}");
+    assert!(markdown.contains("```jeti"), "{markdown}");
+    assert!(markdown.contains("NPString.hje"), "{markdown}");
+
+    // completion with a prefix typed inside a word: `NPS…` offers the class.
+    let mut position = position_of(PROGRAM, "NPString *s");
+    position["character"] = json!(position["character"].as_u64().unwrap() + 3);
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 7, "method": "textDocument/completion",
+            "params": { "textDocument": { "uri": uri }, "position": position },
+        })).as_bytes())
+        .expect("write completion");
+    stdin.flush().expect("flush");
+    let completion = read_frame(&mut stdout);
+    let items = completion["result"]["items"].as_array().expect("items");
+    let labels: Vec<&str> = items.iter().map(|item| item["label"].as_str().unwrap()).collect();
+    assert!(labels.contains(&"NPString"), "{labels:?}");
+    assert!(labels.iter().all(|label| label.starts_with("NPS")), "{labels:?}");
+    let npstring = items.iter().find(|item| item["label"] == "NPString").expect("NPString item");
+    // CompletionItemKind.Class = 7 (SymbolKind numbers are different).
+    assert_eq!(npstring["kind"], 7);
+
     // shutdown → response, exit → process ends with status 0
     stdin
         .write_all(frame(&json!({"jsonrpc": "2.0", "id": 9, "method": "shutdown"})).as_bytes())
