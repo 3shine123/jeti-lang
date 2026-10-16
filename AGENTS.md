@@ -154,6 +154,10 @@ node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue
 - **Parser discipline:** a failed `consume()` must not advance (it would eat the next
   declaration's first token); avoid positional line-number surgery when editing
   `parser.rs` (stale line numbers cut files — match content or diff against git).
+  A `[` after an expression is a **subscript** unless two adjacent words sit inside
+  it — that shape is a message send (`[recv sel]`), which is what lets a missing
+  `;` on the previous line report *that* mistake instead of a subscript cascade
+  (`bracket_opens_a_message_send`).
 - **Do not resurrect deleted things:** `Foundation.decl.hje`, `make-decl-headers.sh`,
   and `-fstrong-metadata` are gone on purpose. `Foundation.hje` = declarations only,
   `Foundation.jeti` = self-contained umbrella.

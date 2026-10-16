@@ -130,9 +130,11 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 - **裸泛型只有 warning**：裸容器拼写是擦除兼容行为（无元素类型检查），真正的元素检查需要显式 type args。
 - 类别追加协议要求类别方法声明位于共享 `.hje`；类别 TU 通过启动期注册补入 owner metadata（详见 `tests/multi_tu/16_category_protocol`）。
 - **泛型类方法返回类型的实例化**不完整（`ROADMAP.md`）。
-- **无 debug info**（不生成 DWARF）。
+- **无 Jeti 自己的 DWARF**：调试信息由 clang 的 `-g -O0` 生成，Jeti 侧提供的是 `#line` 映射与 `-np-map` sidecar。
 
-源码位置当前只由预处理器逐行 `SourceMap` 支持部分诊断回映；AST 尚无统一文件级完整 span，codegen 也未发射 `#line`。因此上面的“无 debug info”仍是现状。SourceSpan、source map、Clang DWARF、LSP/debugger 的目标与阶段计划见 `docs/plans/source_locations_debug_lsp_plan.md`。
+源码位置已统一：CST/AST 节点带半开区间 `[start, end)`，codegen 发射 `#line`，`-g` 调试构建与 `-np-map` sidecar 均已落地；
+诊断、LSP（诊断/大纲/跳转定义/悬停/补全/签名提示）、生成 C 的映射都消费同一套 SourceSpan/SourceMap 模型。
+细节与阶段计划见 `docs/plans/source_locations_debug_lsp_plan.md`。
 
 ## 11. 推荐命令示例
 

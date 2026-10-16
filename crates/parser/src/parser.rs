@@ -2538,8 +2538,11 @@ line: pri_line,
                     break;
                 }
             }
-            // Subscript: expr[key]
-            else if self.match_token(TokenKind::LBracket) {
+            // Subscript: expr[key] — unless the brackets hold a message send,
+            // which is the common shape after a statement that forgot its `;`
+            // (see `bracket_opens_a_message_send`).
+            else if self.check(TokenKind::LBracket) && !self.bracket_opens_a_message_send() {
+                self.advance();
                 let key = self.parse_expression();
                 self.consume(TokenKind::RBracket, "expected ']' after subscript");
                 expr = CstExpr {
@@ -3118,13 +3121,54 @@ line: pri_line,
 
     // ─── Statement parsing ──────────────────────────────────────────────
 
+    /// Does the `[` the parser is looking at open a **message send** rather than
+    /// a subscript?
+    ///
+    /// `[receiver selector]` is the dominant bracketed form in Jeti. After a
+    /// statement that forgot its `;`, the next line's send would otherwise be
+    /// read as `expr[…]`, and the cascade it produces — "expected ']' after
+    /// subscript" on the *next* line plus a missing-`;` error reported at a stale
+    /// token — buries the mistake the user actually made. clang reports just the
+    /// missing `;`, on the line missing it, at the end of the statement.
+    ///
+    /// Two adjacent words inside the brackets are never a valid subscript key, so
+    /// only that shape is left to the statement level. The scan reads the source
+    /// text (the parser has a single-token lookahead): everything else — `[0]`,
+    /// `[i + 1]`, `[f(x)]`, `[b[0]]`, a string, a comment — keeps the subscript
+    /// path exactly as before.
+    fn bracket_opens_a_message_send(&self) -> bool {
+        let is_word_start = |c: char| c.is_alphabetic() || c == '_' || c == '$';
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+        let mut chars = self.source[self.current.start + self.current.length..].chars().peekable();
+        let skip_space = |chars: &mut std::iter::Peekable<std::str::Chars>| {
+            while matches!(chars.peek(), Some(c) if c.is_whitespace()) {
+                chars.next();
+            }
+        };
+        // The receiver.
+        skip_space(&mut chars);
+        if !matches!(chars.peek(), Some(&c) if is_word_start(c)) {
+            return false;
+        }
+        while matches!(chars.peek(), Some(&c) if is_word_char(c)) {
+            chars.next();
+        }
+        // A second word right after it: a selector.
+        skip_space(&mut chars);
+        matches!(chars.peek(), Some(&c) if is_word_start(c))
+    }
+
     fn parse_expression_statement(&mut self) -> Option<CstStmt> {
-        let expr = self.parse_expression();
+        // No expression at all means recovery landed mid-expression (on a `]`, a
+        // stray word, …). Reporting a missing `;` here would point at the
+        // *previous* token — an earlier statement — which is how one real error
+        // used to surface twice at one position. The caller resynchronizes.
+        let expr = self.parse_expression()?;
         self.consume(TokenKind::Semicolon, "expected ';' after expression");
-        expr.map(|e| CstStmt {
+        Some(CstStmt {
             kind: CstStmtKind::Expr,
-            line: e.line, column: e.col,
-            data: CstStmtData::Expr(e),
+            line: expr.line, column: expr.col,
+            data: CstStmtData::Expr(expr),
         
             end_line: self.previous.end_line,
             end_column: self.previous.end_col,
