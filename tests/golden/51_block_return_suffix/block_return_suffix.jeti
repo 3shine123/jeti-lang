@@ -1,0 +1,32 @@
+// Golden: integer-suffix return-type inference in block literals.
+// 2026-10-15 regression: the lexer dropped the integer suffix from the token
+// text and the checker annotated every Int literal as `int`, so an elided
+// block return `7L` inferred `int` (`^int()`) — wrong width and wrong type.
+// The lexer now records the suffix (Token.int_suffix), the parser annotates
+// the literal (long / long long / unsigned), and the checker preserves it.
+// Expected:
+//   L=7 LL=7 U=7 plain=7 hex=16 multi=7 big=2147483648 async=7
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+int main(void) {
+    long l = ^{ return 7L; }();
+    long long ll = ^{ return 7LL; }();
+    unsigned u = ^{ return 7U; }();
+    int plain = ^{ return 7; }();
+    long hex = ^{ return 0x10L; }();
+
+    int cond = 1;
+    long multi = ^{
+        if (cond) { return 7L; }
+        return 9L;
+    }();
+
+    long big = ^{ return 2147483648L; }();
+
+    long async_r = [NPTask blockOn:(async ^{ return 7L; })];
+
+    printf("L=%lld LL=%lld U=%u plain=%d hex=%ld multi=%ld big=%ld async=%ld\n",
+           (long long)l, ll, u, plain, hex, multi, big, async_r);
+    return 0;
+}

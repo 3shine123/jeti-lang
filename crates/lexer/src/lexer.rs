@@ -1,4 +1,4 @@
-use crate::token::{KeywordKind, Token, TokenKind};
+use crate::token::{KeywordKind, Token, TokenKind, INT_SUFFIX_L, INT_SUFFIX_LL, INT_SUFFIX_U};
 
 const KW_TABLE: &[(&str, KeywordKind)] = &[
     ("@interface", KeywordKind::AtInterface),
@@ -249,6 +249,7 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column.saturating_sub(length),
             char_val: 0,
+            int_suffix: 0,
         }
     }
 
@@ -261,6 +262,7 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column,
             char_val: 0,
+            int_suffix: 0,
         }
     }
 
@@ -284,6 +286,7 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column.saturating_sub(end - start + 1),
             char_val: 0,
+            int_suffix: 0,
         }
     }
 
@@ -307,6 +310,7 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column.saturating_sub(end - start + 1),
             char_val: 0,
+            int_suffix: 0,
         }
     }
 
@@ -360,6 +364,7 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        int_suffix: 0,
                     };
                 }
                 Some(b'{') => {
@@ -372,6 +377,7 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        int_suffix: 0,
                     };
                 }
                 Some(b'(') => {
@@ -384,6 +390,7 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        int_suffix: 0,
                     };
                 }
                 Some(b'\'') => {
@@ -432,6 +439,7 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: val,
+                        int_suffix: 0,
                     };
                 }
                 Some(nc) if nc.is_ascii_alphabetic() || nc == b'_' => {
@@ -463,6 +471,7 @@ impl<'a> Lexer<'a> {
                                 line,
                                 column: col,
                                 char_val: v,
+                                int_suffix: 0,
                             };
                         }
                         return self.make_token(TokenKind::Error, start, self.pos - start, KeywordKind::None);
@@ -502,14 +511,32 @@ impl<'a> Lexer<'a> {
                             self.pos = save; // not actually an exponent
                         }
                     }
+                    // Integer suffix (u/U/l/L, `@7L`): consumed and recorded in
+                    // int_suffix, stripped from the token text — same rule as
+                    // bare integer literals, so the boxed literal keeps its
+                    // width instead of degrading to `int`.
+                    let mut suf = 0;
+                    let mut suf_bits: u8 = 0;
+                    while let Some(n) = self.peek() {
+                        match n {
+                            b'u' | b'U' => { self.advance(); suf += 1; suf_bits |= INT_SUFFIX_U; }
+                            b'l' | b'L' => {
+                                self.advance(); suf += 1;
+                                if suf_bits & (INT_SUFFIX_L | INT_SUFFIX_LL) != 0 { suf_bits |= INT_SUFFIX_LL; }
+                                else { suf_bits |= INT_SUFFIX_L; }
+                            }
+                            _ => break,
+                        }
+                    }
                     return Token {
                         kind: TokenKind::AtNumber,
                         keyword: KeywordKind::None,
                         start: start + 1, // exclude the leading '@'
-                        length: self.pos - (start + 1),
+                        length: self.pos - (start + 1) - suf,
                         line,
                         column: col,
                         char_val: 0,
+                        int_suffix: suf_bits,
                     };
                 }
                 _ => {
@@ -591,6 +618,7 @@ impl<'a> Lexer<'a> {
                 line,
                 column: col,
                 char_val: val,
+                int_suffix: 0,
             };
         }
 
@@ -606,14 +634,22 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 let mut suf = 0;
+                let mut suf_bits: u8 = 0;
                 while let Some(n) = self.peek() {
                     match n {
-                        b'u' | b'U' | b'l' | b'L' => { self.advance(); suf += 1; }
+                        b'u' | b'U' => { self.advance(); suf += 1; suf_bits |= INT_SUFFIX_U; }
+                        b'l' | b'L' => {
+                            self.advance(); suf += 1;
+                            if suf_bits & (INT_SUFFIX_L | INT_SUFFIX_LL) != 0 { suf_bits |= INT_SUFFIX_LL; }
+                            else { suf_bits |= INT_SUFFIX_L; }
+                        }
                         _ => break,
                     }
                 }
                 let end = self.pos;
-                return self.make_token(TokenKind::Integer, start, end - start - suf, KeywordKind::None);
+                let mut tok = self.make_token(TokenKind::Integer, start, end - start - suf, KeywordKind::None);
+                tok.int_suffix = suf_bits;
+                return tok;
             }
 
             if c == b'.' {
@@ -638,14 +674,22 @@ impl<'a> Lexer<'a> {
                     }
                     Some(b'u') | Some(b'U') | Some(b'l') | Some(b'L') => {
                         let mut suf = 0;
+                        let mut suf_bits: u8 = 0;
                         while let Some(n) = self.peek() {
                             match n {
-                                b'u' | b'U' | b'l' | b'L' => { self.advance(); suf += 1; }
+                                b'u' | b'U' => { self.advance(); suf += 1; suf_bits |= INT_SUFFIX_U; }
+                                b'l' | b'L' => {
+                                    self.advance(); suf += 1;
+                                    if suf_bits & (INT_SUFFIX_L | INT_SUFFIX_LL) != 0 { suf_bits |= INT_SUFFIX_LL; }
+                                    else { suf_bits |= INT_SUFFIX_L; }
+                                }
                                 _ => break,
                             }
                         }
                         let end = self.pos;
-                        return self.make_token(TokenKind::Integer, start, end - start - suf, KeywordKind::None);
+                        let mut tok = self.make_token(TokenKind::Integer, start, end - start - suf, KeywordKind::None);
+                        tok.int_suffix = suf_bits;
+                        return tok;
                     }
                     Some(b'f') | Some(b'F') => {
                         // Float suffix: the token kind is already known, so the

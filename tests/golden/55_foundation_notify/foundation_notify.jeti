@@ -1,0 +1,58 @@
+// Golden: Foundation 批次3 通知与容器扩展（2026-10-16）。
+// 新增类：NPNotificationCenter（块回调观察者总线，name/object 任一可通配，
+// 倒序投递使块内 removeObserver 安全）、NPCountedSet（多重集合计数，
+// 移除为自含实现——NPSet 基类无 removeObject: 槽）、NPCache
+// （countLimit + LRU 淘汰，命中提升最近使用）。
+// Expected:
+//   notify=n=2 wildcard got=hello n=1
+//   counted=count=2 a=3 in=1 gone=0 count=1
+//   cache=k1=v1 k2=0 k3=v3 count=2
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+int main(void) {
+    // NPNotificationCenter: 精确匹配 + 通配观察者，注销后计数减一。
+    NPNotificationCenter *nc = [NPNotificationCenter defaultCenter];
+    NPObject *token = [[NPObject alloc] init];
+    [nc addObserver:token forName:[NPString stringWithUTF8String:"evt"] object:NULL
+         usingBlock:^(NPString *name, id object) {
+            printf("got=%s ", [(NPString *)object UTF8String]);
+        }];
+    [nc addObserver:NULL forName:NULL object:NULL
+         usingBlock:^(NPString *name, id object) {
+            printf("wildcard ");
+        }];
+    printf("notify=n=%zu ", [nc observerCount]);
+    [nc postNotificationName:[NPString stringWithUTF8String:"evt"] object:@"hello"];
+    [nc removeObserver:token];
+    printf("n=%zu\n", [nc observerCount]);
+
+    // NPCountedSet: 重复 add 累加计数，值语义成员，移除递减。
+    NPCountedSet *cs = [NPCountedSet countedSet];
+    [cs addObject:@"a"];
+    [cs addObject:@"a"];
+    [cs addObject:@"a"];
+    [cs addObject:@"b"];
+    BOOL in = [cs containsObject:@"a"];
+    printf("counted=count=%zu a=%zu in=%d ", [cs count], [cs countForObject:@"a"], in);
+    [cs removeObject:@"a"];
+    [cs removeObject:@"a"];
+    [cs removeObject:@"a"];
+    BOOL gone = [cs containsObject:@"a"];
+    printf("gone=%d count=%zu\n", gone, [cs count]);
+
+    // NPCache: 容量 2，命中提升 LRU，插入淘汰最旧（k2）。
+    NPCache *cache = [NPCache cache];
+    [cache setCountLimit:2];
+    [cache setObject:@"v1" forKey:@"k1"];
+    [cache setObject:@"v2" forKey:@"k2"];
+    NPString *hit = [cache objectForKey:@"k1"];   // k1 → 最近使用
+    [cache setObject:@"v3" forKey:@"k3"];         // 淘汰 k2
+    BOOL k2 = [cache objectForKey:@"k2"] != NULL;
+    printf("cache=k1=%s k2=%d k3=%s count=%zu\n",
+           [(NPString *)[cache objectForKey:@"k1"] UTF8String],
+           k2,
+           [(NPString *)[cache objectForKey:@"k3"] UTF8String],
+           [cache count]);
+    return 0;
+}

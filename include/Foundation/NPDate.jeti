@@ -1,0 +1,66 @@
+#import <Foundation/NPDate.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPObject.jeti>
+#include <stdio.h>
+#include <time.h>
+#include <math.h>
+
+@implementation NPDate
+
++ (NPDate *)date {
+    return [self dateWithTimeIntervalSince1970:(double)time(NULL)];
+}
+
++ (NPDate *)dateWithTimeIntervalSince1970:(double)seconds {
+    return [[self alloc] initWithTimeIntervalSince1970:seconds];
+}
+
+- (NPDate *)initWithTimeIntervalSince1970:(double)seconds {
+    self = [super init];
+    if (self) {
+        _seconds = seconds;
+    }
+    return self;
+}
+
+- (double)timeIntervalSince1970 {
+    return _seconds;
+}
+
+- (double)timeIntervalSinceDate:(NPDate *)other {
+    if (!other) return 0.0;
+    return _seconds - other->_seconds;
+}
+
+- (int)compare:(NPDate *)other {
+    if (!other) return 1;
+    if (_seconds < other->_seconds) return -1;
+    if (_seconds > other->_seconds) return 1;
+    return 0;
+}
+
+- (BOOL)isEqual:(id)object {
+    if (self == (NPObject *)object) return YES;
+    if (!object) return NO;
+    if ([object isKindOfClass:[NPDate class]]) {
+        return [self isEqualToDate:(NPDate *)object];
+    }
+    return [super isEqual:object];
+}
+
+- (int)isEqualToDate:(NPDate *)other {
+    if (!other) return 0;
+    return _seconds == other->_seconds;
+}
+
+- (NPString *)description {
+    char buf[64];
+    if (_seconds == floor(_seconds)) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)_seconds);
+    } else {
+        snprintf(buf, sizeof(buf), "%g", _seconds);
+    }
+    return [NPString stringWithUTF8String:buf];
+}
+
+@end

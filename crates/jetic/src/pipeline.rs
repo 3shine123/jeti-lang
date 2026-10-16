@@ -384,7 +384,14 @@ impl Pipeline {
         // `hosted` gates the entry auto-pump (doc/async_nptask_plan.md
         // §静态分析 3): a hosted chain drives itself, bare metal pumps from
         // its own main loop.
-        let async_desugar_warnings = jeti_async::desugar_unit_m2(&mut ast);
+        let (async_desugar_errors, async_desugar_warnings) = jeti_async::desugar_unit_m2(&mut ast);
+        // Rule C (elided-return inference): a value-carrying `async ^{…}`
+        // block whose returns mix an object and a scalar result is a hard
+        // error — same channel/format as the checker's async errors.
+        if !async_desugar_errors.is_empty() {
+            self.error_msg = format!("Async check failed:\n{}", prefix_lines("[async]", &translate_lines(&async_desugar_errors.join("\n"), &pre.source_map)));
+            return Err(self.error_msg.clone());
+        }
         // §8-①: warnings the desugar's elided-return inference produced — same
         // channel/format as the check warnings above (positions are
         // inline-buffer ones, translated through the SourceMap).

@@ -1,0 +1,183 @@
+#import <Foundation/NPData.hje>
+#import <Foundation/NPObject.jeti>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+@implementation NPData
+
+- (void)dealloc {
+    if (_bytes) {
+        free(_bytes);
+        _bytes = NULL;
+    }
+    _length = 0;
+    _capacity = 0;
+    [super dealloc];
+}
+
++ (NPData *)data {
+    return [[self alloc] initWithBytes:NULL length:0];
+}
+
++ (NPData *)dataWithBytes:(const void *)bytes length:(size_t)length {
+    return [[self alloc] initWithBytes:bytes length:length];
+}
+
+// 内部读文件主体：成功返回缓冲区，失败置 errno 语义消息。
+// 纯 C 累积缓冲 —— Foundation 实现内部避免 `[[NPMutableData alloc] init]`
+// 嵌套消息：自包含伞内类方法链的接收者解析不可靠（ROADMAP 已知项，
+// 探针实证降成非法 C）。
+static NPData *npdata_read_file(const char *path, NPString **out_msg) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        if (out_msg) { *out_msg = [NPString stringWithUTF8String:"cannot open file"]; }
+        return nil;
+    }
+    size_t cap = 8192, len = 0;
+    unsigned char *acc = (unsigned char *)malloc(cap);
+    if (!acc) {
+        fclose(f);
+        if (out_msg) { *out_msg = [NPString stringWithUTF8String:"out of memory"]; }
+        return nil;
+    }
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (len + n > cap) {
+            size_t next = cap * 2;
+            unsigned char *grown = (unsigned char *)realloc(acc, next);
+            if (!grown) {
+                free(acc);
+                fclose(f);
+                if (out_msg) { *out_msg = [NPString stringWithUTF8String:"out of memory"]; }
+                return nil;
+            }
+            acc = grown;
+            cap = next;
+        }
+        memcpy(acc + len, buf, n);
+        len += n;
+    }
+    BOOL bad = ferror(f) ? YES : NO;
+    fclose(f);
+    if (bad) {
+        free(acc);
+        if (out_msg) { *out_msg = [NPString stringWithUTF8String:"read error"]; }
+        return nil;
+    }
+    NPData *d = [NPData dataWithBytes:acc length:len];
+    free(acc);
+    return d;
+}
+
++ (NPData *)dataWithContentsOfFile:(NPString *)path {
+    if (!path) return nil;
+    return npdata_read_file([path UTF8String], NULL);
+}
+
++ (NPData *)dataWithContentsOfFile:(NPString *)path error:(NPError **)outError {
+    if (!path) {
+        if (outError) { *outError = [NPError fileIOErrorWithMessage:[NPString stringWithUTF8String:"nil path"]]; }
+        return nil;
+    }
+    NPString *msg = NULL;
+    NPData *d = npdata_read_file([path UTF8String], &msg);
+    if (!d && outError) {
+        *outError = [NPError fileIOErrorWithMessage:
+            [[NPString stringWithUTF8String:[path UTF8String]] stringByAppendingString:msg]];
+    }
+    return d;
+}
+
+- (BOOL)writeToFile:(NPString *)path atomically:(BOOL)atomically {
+    if (!path) return NO;
+    const char *p = [path UTF8String];
+    if (!atomically) {
+        FILE *f = fopen(p, "wb");
+        if (!f) return NO;
+        BOOL ok = YES;
+        if (_length > 0 && fwrite(_bytes, 1, _length, f) != _length) ok = NO;
+        if (fclose(f) != 0) ok = NO;
+        if (!ok) unlink(p);   // 失败不留半成品
+        return ok;
+    }
+    // atomically：先写 "path.tmpXXXX"，全量落盘后 rename 原子替换。
+    char tmp[4200];
+    snprintf(tmp, sizeof(tmp), "%s.tmp%d", p, (int)getpid());
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return NO;
+    BOOL ok = YES;
+    if (_length > 0 && fwrite(_bytes, 1, _length, f) != _length) ok = NO;
+    if (fclose(f) != 0) ok = NO;
+    if (!ok) {
+        unlink(tmp);
+        return NO;
+    }
+    if (rename(tmp, p) != 0) {
+        unlink(tmp);
+        return NO;
+    }
+    return YES;
+}
+
+- (NPData *)initWithBytes:(const void *)bytes length:(size_t)length {
+    self = [super init];
+    if (self) {
+        _bytes = NULL;
+        _length = 0;
+        _capacity = 0;
+        if (length > 0 && bytes) {
+            _bytes = (unsigned char *)malloc(length);
+            if (_bytes) {
+                memcpy(_bytes, bytes, length);
+                _length = length;
+                _capacity = length;
+            }
+        }
+    }
+    return self;
+}
+
+- (size_t)length { return _length; }
+
+- (const unsigned char *)bytes { return _bytes; }
+
+- (unsigned char)byteAtIndex:(size_t)index {
+    if (index < _length) return _bytes[index];
+    return 0;
+}
+
+- (NPData *)subdataWithRange:(NPRange)range {
+    if (range.location > _length || range.location + range.length > _length) {
+        return nil;
+    }
+    return [NPData dataWithBytes:_bytes + range.location length:range.length];
+}
+
+// 按字节内容判等（与 ObjC NSData 的 isEqual: 一致；也使 NPData 可作
+// 字典键）。空与 NULL 视为相等。
+- (BOOL)isEqual:(id)object {
+    if (self == (NPObject *)object) return YES;
+    if (!object) return NO;
+    if (![object isKindOfClass:[NPData class]]) {
+        return [super isEqual:object];
+    }
+    NPData *o = (NPData *)object;
+    if (_length != o->_length) return NO;
+    if (_length == 0) return YES;
+    return memcmp(_bytes, o->_bytes, _length) == 0;
+}
+
+- (NPString *)description {
+    char buf[64];
+    size_t show = _length < 8 ? _length : 8;
+    size_t off = (size_t)snprintf(buf, sizeof(buf), "<%zu bytes>", _length);
+    for (size_t i = 0; i < show && off + 3 < sizeof(buf); i++) {
+        snprintf(buf + off, sizeof(buf) - off, " %02x", _bytes[i]);
+    }
+    return [NPString stringWithUTF8String:buf];
+}
+
+@end

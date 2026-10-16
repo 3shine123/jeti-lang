@@ -31,3 +31,21 @@
 #import "NPNumber.hje"
 #import "NPError.hje"
 #import "NPTask.hje"
+#import "NPNull.hje"
+#import "NPValue.hje"
+#import "NPDate.hje"
+#import "NPData.hje"
+#import "NPMutableData.hje"
+#import "NPEnumerator.hje"
+#import "NPProcessInfo.hje"
+#import "NPFileManager.hje"
+#import "NPNotificationCenter.hje"
+#import "NPCountedSet.hje"
+#import "NPCache.hje"
+
+// NPAssert — Jeti 断言宏（定参拼写；预处理器尚无 __VA_ARGS__，
+// 变参格式串版本待预处理器支持后补）。断言失败抛 NPError：
+//     NPAssert(x > 0, "x must be positive");
+// `desc` 必须是 C 字符串（字面量或 const char *）。
+#define NPAssert(cond, desc) \
+    do { if (!(cond)) { @throw([NPError errorWithCode:1 domain:[NPString stringWithUTF8String:desc]]); } } while (0)

@@ -1,0 +1,27 @@
+#ifndef NPDATE_NH
+#define NPDATE_NH
+
+#include <stdint.h>
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+
+// NPDate — 时间点，double 秒自 1970-01-01 UTC（对应 ObjC 的 NSDate）。
+// v1 只做绝对时间点：取当前、构造、间隔、比较、字典键值语义。
+// 时区/日历格式化不属于 NPDate（对应 NSCalendar/NSDateFormatter，后续批次）。
+@interface NPDate : NPObject {
+@public
+    double _seconds;   // 自 1970-01-01 UTC 的秒数
+}
++ (NPDate *)date;                                   // 当前时刻
++ (NPDate *)dateWithTimeIntervalSince1970:(double)seconds;
+- (NPDate *)initWithTimeIntervalSince1970:(double)seconds;
+- (double)timeIntervalSince1970;
+- (double)timeIntervalSinceDate:(NPDate *)other;    // self - other
+- (int)compare:(NPDate *)other;                     // <0 / 0 / >0
+- (BOOL)isEqual:(id)object;
+- (int)isEqualToDate:(NPDate *)other;
+- (NPString *)description;                          // Unix 秒（整数则无小数点）
+@end
+
+#endif

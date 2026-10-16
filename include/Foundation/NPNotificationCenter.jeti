@@ -1,0 +1,121 @@
+#import <Foundation/NPNotificationCenter.hje>
+#import <Foundation/NPObject.jeti>
+#include <string.h>
+#include <stdlib.h>
+
+@implementation NPNotificationCenter
+
+- (void)dealloc {
+    // 注册项不持有 observer（ObjC 同款：观察者自管生命周期）；
+    // name 归本表所有。块不 retain/release —— 本 codegen 的块字面量是
+    // clang 块（_{__block_impl} 布局、模块级静态结构），按 NPObject
+    // 布局 refcount 会写坏内存（Bus error，探针实证）。
+    for (size_t i = 0; i < _count; i++) {
+        if (_names[i]) jeti_release(_names[i]);
+        if (_objects[i]) jeti_release(_objects[i]);
+    }
+    free(_observers);
+    free(_names);
+    free(_objects);
+    free(_blocks);
+    _observers = NULL;
+    _names = NULL;
+    _objects = NULL;
+    _blocks = NULL;
+    _count = 0;
+    _capacity = 0;
+    [super dealloc];
+}
+
++ (NPNotificationCenter *)defaultCenter {
+    static NPNotificationCenter *shared = NULL;
+    if (!shared) {
+        shared = [[self alloc] init];
+        jeti_retain(shared); // 常驻：单例永不释放
+    }
+    return shared;
+}
+
+// 注册表倍增扩容；失败静默忽略本次注册（与容器的 malloc 失败路径一致）。
+- (void)npc_reserve {
+    if (_count < _capacity) return;
+    size_t next = _capacity ? _capacity * 2 : 16;
+    NPObject **o2 = (NPObject **)realloc(_observers, next * sizeof(NPObject *));
+    if (!o2) return;
+    NPString **n2 = (NPString **)realloc(_names, next * sizeof(NPString *));
+    if (!n2) return;
+    NPObject **j2 = (NPObject **)realloc(_objects, next * sizeof(NPObject *));
+    if (!j2) return;
+    NPObject **b2 = (NPObject **)realloc(_blocks, next * sizeof(NPObject *));
+    if (!b2) return;
+    _observers = o2;
+    _names = n2;
+    _objects = j2;
+    _blocks = b2;
+    _capacity = next;
+}
+
+- (void)addObserver:(id)observer forName:(NPString *)name object:(id)object
+              usingBlock:(void (^)(NPString *name, id object))block {
+    if (!block) return;
+    [self npc_reserve];
+    if (_count >= _capacity) return;   // 扩容失败：放弃注册
+    // observer 是身份标记（可能为 NULL），不 retain；name retain 归表所有。
+    // 块按裸指针存：clang 块不能走 NPObject refcount（Bus error，探针实证），
+    // 且本 codegen 的块字面量是模块级静态结构，生命周期即程序生命周期。
+    _observers[_count] = observer;
+    _names[_count] = name ? (NPString *)jeti_retain(name) : NULL;
+    _objects[_count] = object ? (NPObject *)jeti_retain(object) : NULL;
+    _blocks[_count] = (NPObject *)block;
+    _count++;
+}
+
+// 按 observer + 可选 name + block 身份移除首个匹配项。
+static void npnc_remove_matching(NPNotificationCenter *self, id observer,
+                                 NPString *name, void *block) {
+    for (size_t i = 0; i < self->_count; i++) {
+        BOOL obs_match = (self->_observers[i] == observer)
+            || (observer == NULL && self->_observers[i] == NULL);
+        if (!obs_match) continue;
+        if (name && self->_names[i] != name) continue;
+        if (block && self->_blocks[i] != block) continue;
+        if (self->_names[i]) jeti_release(self->_names[i]);
+        if (self->_objects[i]) jeti_release(self->_objects[i]);
+        // 尾元素前移填补（顺序无关语义）。
+        self->_observers[i] = self->_observers[self->_count - 1];
+        self->_names[i] = self->_names[self->_count - 1];
+        self->_objects[i] = self->_objects[self->_count - 1];
+        self->_blocks[i] = self->_blocks[self->_count - 1];
+        self->_count--;
+        return;
+    }
+}
+
+- (void)removeObserver:(id)observer {
+    npnc_remove_matching(self, observer, NULL, NULL);
+}
+
+- (void)removeObserver:(id)observer forName:(NPString *)name {
+    npnc_remove_matching(self, observer, name, NULL);
+}
+
+- (void)postNotificationName:(NPString *)name object:(id)object {
+    if (!name) return;
+    // 倒序遍历：块内 removeObserver 安全（ObjC 同款保证）。
+    for (size_t i = _count; i > 0; i--) {
+        size_t idx = i - 1;
+        // name 维：注册名 NULL = 通配，否则要求值相等。
+        if (_names[idx] && ![_names[idx] isEqual:name]) continue;
+        // object 维：注册对象 NULL = 通配，否则要求指针相等（身份过滤）。
+        if (_objects[idx] && _objects[idx] != object) continue;
+        // 块按对象存，调用点强转为块类型（clang 块即指针，合法）。
+        void (^blk)(NPString *, id) = (void (^)(NPString *, id))_blocks[idx];
+        if (blk) blk(name, object);
+    }
+}
+
+- (size_t)observerCount {
+    return _count;
+}
+
+@end

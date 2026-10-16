@@ -224,7 +224,17 @@ pub struct Token {
     pub line: usize,
     pub column: usize,
     pub char_val: u8,
+    /// Integer-literal suffix flags, recorded by the lexer and stripped from
+    /// the token text (text stays `7` for `7L`, so every text-based consumer
+    /// is unaffected). Bit 1 = `u`/`U`, bit 2 = `l`/`L`, bit 4 = `ll`/`LL`.
+    /// The parser reads this to annotate the literal's type — without it the
+    /// suffix was silently dropped and `^{ return 7L; }` inferred `int`.
+    pub int_suffix: u8,
 }
+
+pub const INT_SUFFIX_U: u8 = 1;
+pub const INT_SUFFIX_L: u8 = 2;
+pub const INT_SUFFIX_LL: u8 = 4;
 
 impl Token {
     pub fn text<'a>(&self, source: &'a str) -> &'a str {

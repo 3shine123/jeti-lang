@@ -22,7 +22,7 @@
    return 位/同步方法内）一律 error（负例 `tests/negative/async_call_must_await.jeti`）。
    旧的"语句位入口就地驱动 / `[t start]` 语句位驱动 / 同步调 async void 自动 wrapper"
    三套特殊行为已全部拆除。
-2. **同步 → 异步唯一显式桥：`[NPTask blockOn:async T ^{ … }]`**——`main`/同步方法里
+2. **同步 → 异步唯一显式桥：`[NPTask blockOn:async ^ void { … }]`**——`main`/同步方法里
    只用它；块内 `await` 驱动子任务。
 3. **async 体内无 await 合法**（规则 1：`async` = 允许挂起的能力；37 的 `compute:` 就是
    缓存命中形态）。反向（无标记含 `await`）仍是硬错误。

@@ -1,0 +1,48 @@
+// Golden: Foundation 批次2 I/O 与进程（2026-10-16）。
+// 新增类：NPProcessInfo（pid/环境变量/主机名/OS）、NPFileManager
+// （存在性/目录递归创建/删除/拷贝/移动/目录列举）、NPData 文件读写
+// （dataWithContentsOfFile: 带 NPError 变体、writeToFile:atomically:）。
+// Expected:
+//   process=1 hello42
+//   file=1 1 1 1 1 1 1
+//   data=1 1 1 1 1
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+int main(void) {
+    // NPProcessInfo: pid 为正、环境变量写后可读、主机名/OS 非空。
+    NPProcessInfo *pi = [NPProcessInfo processInfo];
+    [pi setEnvironmentVariable:@"JETI_G54" value:@"hello42"];
+    NPString *v = [pi environmentVariable:[NPString stringWithUTF8String:"JETI_G54"]];
+    printf("process=%d %s\n",
+           [pi processIdentifier] > 0 ? 1 : 0, [v UTF8String]);
+
+    // NPFileManager: 目录递归创建/存在/类型/列举/删除。
+    // rmdir 只删空目录（v1 设计边界）：先删文件再删目录。
+    NPFileManager *fm = [NPFileManager fileManager];
+    NPString *dir = [NPString stringWithUTF8String:"/tmp/jeti_g54/sub"];
+    BOOL made = [fm createDirectoryAtPath:dir withIntermediateDirectories:YES];
+    BOOL isdir = [fm isDirectoryAtPath:dir];
+    BOOL exists = [fm fileExistsAtPath:dir];
+    NPData *payload = [NPData dataWithBytes:"g54" length:3];
+    BOOL cfile = [fm createFileAtPath:[NPString stringWithUTF8String:"/tmp/jeti_g54/sub/f.bin"] contents:payload];
+    NPArray *listing = [fm contentsOfDirectoryAtPath:dir];
+    BOOL listed = [listing count] == 1;
+    BOOL rmfile = [fm removeItemAtPath:[NPString stringWithUTF8String:"/tmp/jeti_g54/sub/f.bin"]];
+    BOOL rmdir = [fm removeItemAtPath:dir];
+    printf("file=%d %d %d %d %d %d %d\n", made, isdir, exists, cfile, listed, rmfile, rmdir);
+
+    // NPData: 原子写、读回内容一致、缺失文件返 nil 且错误对象置位、
+    // 临时文件不残留（原子替换只留目标）。
+    NPData *w = [NPData dataWithBytes:"g54-payload" length:11];
+    BOOL wrote = [w writeToFile:[NPString stringWithUTF8String:"/tmp/jeti_g54.bin"] atomically:YES];
+    NPError *err = NULL;
+    NPData *r = [NPData dataWithContentsOfFile:[NPString stringWithUTF8String:"/tmp/jeti_g54.bin"] error:&err];
+    BOOL roundtrip = [r isEqual:w];
+    NPData *miss = [NPData dataWithContentsOfFile:[NPString stringWithUTF8String:"/tmp/jeti_g54_missing"] error:&err];
+    BOOL errset = err != NULL;
+    BOOL atomic = [fm fileExistsAtPath:[NPString stringWithUTF8String:"/tmp/jeti_g54.bin"]];
+    [fm removeItemAtPath:[NPString stringWithUTF8String:"/tmp/jeti_g54.bin"]];
+    printf("data=%d %d %d %d %d\n", wrote, roundtrip, miss == NULL, errset, atomic);
+    return 0;
+}

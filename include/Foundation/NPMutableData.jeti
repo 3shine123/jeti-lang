@@ -1,0 +1,98 @@
+#import <Foundation/NPMutableData.hje>
+#import <Foundation/NPObject.jeti>
+#include <string.h>
+#include <stdlib.h>
+
+@implementation NPMutableData
+
++ (NPMutableData *)dataWithCapacity:(size_t)capacity {
+    return [[self alloc] initWithCapacity:capacity];
+}
+
+- (NPMutableData *)initWithCapacity:(size_t)capacity {
+    self = [super init];
+    if (self) {
+        _bytes = NULL;
+        _length = 0;
+        _capacity = 0;
+        if (capacity > 0) {
+            _bytes = (unsigned char *)malloc(capacity);
+            if (_bytes) {
+                _capacity = capacity;
+            }
+        }
+    }
+    return self;
+}
+
+- (unsigned char *)mutableBytes { return _bytes; }
+
+// 确保至少能容纳 want 字节；容量按倍增策略增长。
+static int npdata_reserve(NPData *self, size_t want) {
+    if (want <= self->_capacity) return 1;
+    size_t next = self->_capacity ? self->_capacity : 16;
+    while (next < want) next *= 2;
+    unsigned char *grown = (unsigned char *)realloc(self->_bytes, next);
+    if (!grown) return 0;
+    self->_bytes = grown;
+    self->_capacity = next;
+    return 1;
+}
+
+- (void)appendBytes:(const void *)bytes length:(size_t)length {
+    if (!bytes || length == 0) return;
+    if (!npdata_reserve(self, _length + length)) return;
+    memcpy(_bytes + _length, bytes, length);
+    _length += length;
+}
+
+- (void)appendData:(NPData *)other {
+    if (!other) return;
+    [self appendBytes:other->_bytes length:other->_length];
+}
+
+- (void)replaceBytesInRange:(NPRange)range withBytes:(const void *)bytes length:(size_t)length {
+    if (range.location > _length) return;
+    if (range.location + range.length > _length) return;   // 越界整段拒绝（与 subdataWithRange: 一致）
+    size_t tail = _length - range.location - range.length;
+    long long delta = (long long)length - (long long)range.length;
+    size_t newlen = (size_t)((long long)_length + delta);
+    if (delta > 0 && !npdata_reserve(self, newlen)) return;
+    if (delta != 0) {
+        memmove(_bytes + range.location + length, _bytes + range.location + range.length, tail);
+    }
+    if (bytes && length > 0) {
+        memcpy(_bytes + range.location, bytes, length);
+    }
+    _length = newlen;
+}
+
+- (void)deleteBytesInRange:(NPRange)range {
+    if (range.location > _length) return;
+    if (range.location + range.length > _length) {
+        range.length = _length - range.location;
+    }
+    if (range.length == 0) return;
+    memmove(_bytes + range.location, _bytes + range.location + range.length,
+            _length - range.location - range.length);
+    _length -= range.length;
+}
+
+- (void)setData:(NPData *)other {
+    _length = 0;
+    if (other) {
+        [self appendBytes:other->_bytes length:other->_length];
+    }
+}
+
+- (void)setLength:(size_t)length {
+    if (length <= _length) {
+        _length = length;
+        return;
+    }
+    if (!npdata_reserve(self, length)) return;
+    memset(_bytes + _length, 0, length - _length);
+    _length = length;
+}
+
+@end

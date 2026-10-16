@@ -1,0 +1,99 @@
+#import <Foundation/NPCache.hje>
+#import <Foundation/NPObject.jeti>
+#import <Foundation/NPNumber.hje>
+
+@implementation NPCache
+
++ (NPCache *)cache {
+    return [[self alloc] initWithCountLimit:0];
+}
+
+- (NPCache *)initWithCountLimit:(size_t)limit {
+    self = [super init];
+    if (self) {
+        _store = [NPMutableDictionary dictionary];
+        _order = [[NPMutableArray alloc] init];
+        _countLimit = limit;
+    }
+    return self;
+}
+
+- (void)setCountLimit:(size_t)limit {
+    _countLimit = limit;
+}
+
+- (size_t)countLimit {
+    return _countLimit;
+}
+
+// 访问序表内按键值定位（键值语义）；未含返回 (size_t)-1。
+static size_t npcache_index_of(NPCache *self, id key) {
+    size_t n = [_order count];
+    for (size_t i = 0; i < n; i++) {
+        id k = [_order objectAtIndex:i];
+        if (k && key && [k isEqual:key]) return i;
+        if (k == key) return i;
+    }
+    return (size_t)-1;
+}
+
+// 提升为最近使用：从原位移除并追加到尾。未在表中则追加。
+static void npcache_touch(NPCache *self, id key) {
+    size_t idx = npcache_index_of(self, key);
+    if (idx != (size_t)-1) {
+        id k = [_order objectAtIndex:idx];
+        jeti_retain(k);
+        [_order removeObjectAtIndex:idx];
+        [_order addObject:k];
+        jeti_release(k);
+    } else {
+        [_order addObject:key];
+    }
+}
+
+// 淘汰最旧条目直至条数不超上限（countLimit=0 = 不限）。
+static void npcache_evict(NPCache *self) {
+    if (self->_countLimit == 0) return;
+    while ([_order count] > self->_countLimit) {
+        id oldest = [_order firstObject];
+        if (!oldest) break;
+        [_store removeObjectForKey:oldest];
+        [_order removeObjectAtIndex:0];
+    }
+}
+
+- (id)objectForKey:(id)key {
+    if (!key) return nil;
+    id value = [_store objectForKey:key];
+    if (value) {
+        npcache_touch(self, key);
+    }
+    return value;
+}
+
+- (void)setObject:(id)object forKey:(id)key {
+    if (!key || !object) return;
+    [_store setObject:object forKey:key];
+    npcache_touch(self, key);
+    npcache_evict(self);
+}
+
+- (void)removeObjectForKey:(id)key {
+    if (!key) return;
+    size_t idx = npcache_index_of(self, key);
+    if (idx != (size_t)-1) {
+        [_order removeObjectAtIndex:idx];
+    }
+    [_store removeObjectForKey:key];
+}
+
+- (void)removeAllObjects {
+    [_order removeAllObjects];
+    [_store removeAllObjects];
+}
+
+- (size_t)count {
+    return [_order count];
+}
+
+@end

@@ -1,0 +1,40 @@
+#ifndef Npdata_NH
+#define Npdata_NH
+
+#include <stdint.h>
+#include <stddef.h>
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPError.hje>
+
+// NPRange 复用 NPString.hje 的定义（本头已导入，勿重复 typedef）。
+
+// NPData — 不可变二进制缓冲区（对应 ObjC 的 NSData）。
+// 字节归实例所有：dataWithBytes:length: 会拷贝一份；
+// bytes 返回内部指针，只读借用，生命周期不超出 self。
+@interface NPData : NPObject {
+@public
+    unsigned char *_bytes;
+    size_t         _length;
+    size_t         _capacity;
+}
++ (NPData *)data;
++ (NPData *)dataWithBytes:(const void *)bytes length:(size_t)length;
+
+// 文件 I/O（对应 ObjC NSData 的同名方法）。读取失败返回 nil；
+// atomically=YES 先写临时文件再 rename，失败不留半成品。
++ (NPData *)dataWithContentsOfFile:(NPString *)path;
++ (NPData *)dataWithContentsOfFile:(NPString *)path error:(NPError **)outError;
+- (BOOL)writeToFile:(NPString *)path atomically:(BOOL)atomically;
+
+- (NPData *)initWithBytes:(const void *)bytes length:(size_t)length;
+- (size_t)length;
+- (const unsigned char *)bytes;
+- (unsigned char)byteAtIndex:(size_t)index;      // 越界返回 0
+- (NPData *)subdataWithRange:(NPRange)range;     // 越界返回 nil
+- (BOOL)isEqual:(id)object;                      // 按字节内容判等
+- (NPString *)description;                       // 长度 + 前 8 字节十六进制
+@end
+
+#endif

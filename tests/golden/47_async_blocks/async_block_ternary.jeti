@@ -30,7 +30,7 @@ int main(void) {
     // v1 rule 2/3: statement-position entry is gone — blockOn: bridge. The
     // receiver lives inside the block (thunks capture params + self only
     // until stage 3).
-    [NPTask blockOn:async void ^ {
+    [NPTask blockOn:async ^ void {
         Svc *s = [[Svc alloc] init];
         await [s run];
     }];

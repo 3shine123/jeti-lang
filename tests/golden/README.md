@@ -52,6 +52,12 @@
 47_async_blocks/    async 块字面量（IIFE + 三元混合；负例 async_block_ternary_mix-F）
 48_async_throws_await/ 裸 `throws`/`throws(T)`（同步+异步同一拼写）+ 消息内括号 await（实参位/接收者位）
 49_soft_keywords/   软关键字矩阵：async/await/throws/when/in/nullable/nonnull 七词 × 字段/局部/ivar/方法名/选择子位 + 关键字位 + `id` 各名字位（README 含三列消歧表）
+50_blockon_paren_async/ 括号包裹的 blockOn 实参：`[NPTask blockOn:(async ^…)]` 三种拼写（裸/括号/括号+体内 await）均过桥执行（2026-10-15 M3 回归）
+51_block_return_suffix/ 整数后缀返回类型推导：块字面量省略返回时 `7L`/`7LL`/`7U`/十六进制后缀落正确宽度（2026-10-15 P0 回归，lexer int_suffix → parser expr_type → checker 保留）
+52_foundation_extras/ Foundation 补全：字典键下标 `d[@"k"]` 读（objectForKey:）/写（setObject:forKey:）重写、NPAssert 断言宏、数组下标回归（2026-10-16）
+53_foundation_values/ Foundation 批次1 值/数据核心：NPNull（单例占位）/ NPValue（装箱标量+Range，类型标签判等）/ NPDate（时间点）/ NPData·NPMutableData（二进制缓冲区）/ NPEnumerator（枚举适配）（2026-10-16）
+54_foundation_io/ Foundation 批次2 I/O 与进程：NPProcessInfo（pid/环境变量/主机名）/ NPFileManager（目录递归创建·列举·删除·拷贝·移动）/ NPData 文件读写（带 NPError 变体、原子写）（2026-10-16，连带修复 C 八进制字面量被当十进制的编译器 Bug）
+55_foundation_notify/ Foundation 批次3 通知与容器扩展：NPNotificationCenter（块回调总线，通配+倒序投递）/ NPCountedSet（多重集合计数，自含移除）/ NPCache（countLimit + LRU 淘汰）（2026-10-16，连带记录 `(^ *` 块指针类型解析死循环缺口）
 ```
 
 > 每个目录的 `README.md` 记录该特性的**实现要点、判据表、M1 限制与踩过的坑**——排查问题时先看它，比读 `.jeti` 快得多。

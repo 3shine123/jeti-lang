@@ -640,7 +640,7 @@ skip_hit:
     // Async Semantics v1 rule 3: blockOn: is the only sync→async bridge —
     // the blocking join pumps the task to completion (no manual handle +
     // start + sched_run pump).
-    [NPTask blockOn:async void ^ { await [Metal::Widget awaitMake]; }];
+    [NPTask blockOn:async ^ void { await [Metal::Widget awaitMake]; }];
 
     // ── 17. new-syntax batch (Sep 2026): defer / pattern switch / async
     //        marker / weak re-registration / parent-chain catch / macros ──
@@ -722,7 +722,7 @@ skip_hit:
     // The widget is rebuilt inside the block (block thunks capture params +
     // self only until the stage-3 spawn work): same uid=7/weight=30 state,
     // so the printed sum is unchanged.
-    [NPTask blockOn:async void ^ {
+    [NPTask blockOn:async ^ void {
         Metal::Widget *wsum = [[Metal::Widget alloc] initWithUid:7 weight:30];
         await [Metal::Widget awaitSum:wsum];
     }];

@@ -1,0 +1,68 @@
+#import <Foundation/NPEnumerator.hje>
+#import <Foundation/NPDictionary.hje>
+#import <Foundation/NPSet.hje>
+#import <Foundation/NPObject.jeti>
+
+@implementation NPEnumerator
+
+- (void)dealloc {
+    if (_items) {
+        jeti_release(_items);   // ARC 模式下显式消息 send 被禁，走 runtime C API
+        _items = NULL;
+    }
+    _index = 0;
+    [super dealloc];
+}
+
++ (NPEnumerator *)enumeratorWithArray:(NPArray *)array {
+    return [[self alloc] initWithArray:array];
+}
+
++ (NPEnumerator *)keyEnumeratorWithDictionary:(id)dictionary {
+    if (![dictionary isKindOfClass:[NPDictionary class]]) return nil;
+    return [[self alloc] initWithArray:[(NPDictionary *)dictionary allKeys]];
+}
+
++ (NPEnumerator *)objectEnumeratorWithDictionary:(id)dictionary {
+    if (![dictionary isKindOfClass:[NPDictionary class]]) return nil;
+    return [[self alloc] initWithArray:[(NPDictionary *)dictionary allValues]];
+}
+
++ (NPEnumerator *)objectEnumeratorWithSet:(id)set {
+    if (![set isKindOfClass:[NPSet class]]) return nil;
+    return [[self alloc] initWithArray:[(NPSet *)set allObjects]];
+}
+
+- (NPEnumerator *)initWithArray:(NPArray *)array {
+    self = [super init];
+    if (self) {
+        // nil 源 → 空枚举器（nextObject 恒 nil），而不是 nil 枚举器：
+        // 调用方无需对枚举器本身判空。copy 按 ObjC 约定返回 +1，归 self 所有。
+        _items = array ? [array copy] : NULL;
+        _index = 0;
+    }
+    return self;
+}
+
+- (id)nextObject {
+    if (!_items || _index >= [_items count]) return nil;
+    id obj = [_items objectAtIndex:_index];
+    _index++;
+    return obj;
+}
+
+- (NPArray *)allObjects {
+    if (!_items) return [NPArray array];
+    if (_index == 0) return [_items copy];   // copy 已是 +1，直接交出
+    size_t remain = [_items count] - _index;
+    NPObject **buf = (NPObject **)malloc(remain * sizeof(NPObject *));
+    if (!buf) return [NPArray array];
+    for (size_t i = 0; i < remain; i++) {
+        buf[i] = [_items objectAtIndex:_index + i];
+    }
+    NPArray *result = [NPArray arrayWithObjects:buf count:remain];
+    free(buf);
+    return result;
+}
+
+@end

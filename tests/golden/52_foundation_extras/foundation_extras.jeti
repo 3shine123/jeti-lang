@@ -1,0 +1,42 @@
+// Golden: Foundation extras shipped 2026-10-16.
+// 1. Dictionary keyed subscripting — `d[@"k"]` reads via objectForKey:, and
+//    `md[@"k"] = v` writes via setObject:forKey: (previously `d[@"k"]` was
+//    deliberately not wired; the checker only knew objectAtIndex:).
+// 2. NPAssert (fixed-arity macro in Foundation.hje) — passes silently when
+//    the condition holds, throws an NPError otherwise.
+// 3. Array subscript stays the indexed rewrite (regression guard).
+// Expected:
+//   greet=hello n=42 size=2
+//   arr=20
+//   ok caught(x too small)
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+int main(void) {
+    // Keyed subscript read + write.
+    NPMutableDictionary *md = [[NPMutableDictionary alloc] init];
+    md[@"greet"] = @"hello";
+    md[@"n"] = @42;
+    NPString *v = md[@"greet"];
+    NPNumber *n = md[@"n"];
+    printf("greet=%s n=%lld size=%zu\n", [v UTF8String], [n longLongValue], [md count]);
+
+    // Indexed subscript unchanged.
+    NPMutableArray *ma = [[NPMutableArray alloc] init];
+    [ma addObject:@10];
+    [ma addObject:@20];
+    NPNumber *x = ma[1];
+    printf("arr=%lld\n", [x longLongValue]);
+
+    // NPAssert pass path and throw path.
+    int a = 5;
+    NPAssert(a > 0, "a must be positive");
+    printf("ok ");
+    @try {
+        NPAssert(a > 10, "a too small");
+    } @catch (NPError *e) {
+        printf("caught(%s)", [[e domain] UTF8String]);
+    }
+    printf("\n");
+    return 0;
+}

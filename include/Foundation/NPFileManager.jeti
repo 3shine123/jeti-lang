@@ -1,0 +1,225 @@
+#import <Foundation/NPFileManager.hje>
+#import <Foundation/NPData.hje>
+#import <Foundation/NPObject.jeti>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <errno.h>
+
+@implementation NPFileManager
+
++ (NPFileManager *)fileManager {
+    static NPFileManager *shared = NULL;
+    if (!shared) {
+        shared = [[NPFileManager alloc] init];
+        jeti_retain(shared); // 常驻：单例永不释放
+    }
+    return shared;
+}
+
+- (BOOL)fileExistsAtPath:(NPString *)path {
+    if (!path) return NO;
+    struct stat st;
+    return stat([path UTF8String], &st) == 0;
+}
+
+- (BOOL)isDirectoryAtPath:(NPString *)path {
+    if (!path) return NO;
+    struct stat st;
+    if (stat([path UTF8String], &st) != 0) return NO;
+    return S_ISDIR(st.st_mode) ? YES : NO;
+}
+
+- (BOOL)isReadableAtPath:(NPString *)path {
+    if (!path) return NO;
+    return access([path UTF8String], R_OK) == 0 ? YES : NO;
+}
+
+- (BOOL)isWritableAtPath:(NPString *)path {
+    if (!path) return NO;
+    return access([path UTF8String], W_OK) == 0 ? YES : NO;
+}
+
+- (BOOL)createDirectoryAtPath:(NPString *)path {
+    return [self createDirectoryAtPath:path withIntermediateDirectories:NO];
+}
+
+- (BOOL)createDirectoryAtPath:(NPString *)path withIntermediateDirectories:(BOOL)intermediates {
+    if (!path) return NO;
+    const char *p = [path UTF8String];
+    if (!intermediates) {
+        return mkdir(p, 0755) == 0 || errno == EEXIST ? YES : NO;
+    }
+    // 可递归：逐段 mkdir，已存在的段跳过（等价 mkdir -p）。
+    size_t len = strlen(p);
+    char *tmp = (char *)malloc(len + 1);
+    if (!tmp) return NO;
+    memcpy(tmp, p, len + 1);
+    BOOL ok = YES;
+    for (size_t i = 1; i <= len; i++) {
+        if (tmp[i] == '/' || tmp[i] == '\0') {
+            char saved = tmp[i];
+            tmp[i] = '\0';
+            if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+                ok = NO;
+            }
+            tmp[i] = saved;
+            if (!ok) break;
+        }
+    }
+    free(tmp);
+    return ok;
+}
+
+- (BOOL)removeItemAtPath:(NPString *)path {
+    if (!path) return NO;
+    const char *p = [path UTF8String];
+    struct stat st;
+    if (stat(p, &st) != 0) return NO;
+    if (S_ISDIR(st.st_mode)) {
+        return rmdir(p) == 0 ? YES : NO;   // 仅空目录；递归删除待批次3再议
+    }
+    return unlink(p) == 0 ? YES : NO;
+}
+
+- (BOOL)copyItemAtPath:(NPString *)src toPath:(NPString *)dst {
+    if (!src || !dst) return NO;
+    // 走 stdio 双缓冲拷贝：文件与目录内容一视同仁地拒绝（目录用 rename 族）。
+    FILE *in = fopen([src UTF8String], "rb");
+    if (!in) return NO;
+    FILE *out = fopen([dst UTF8String], "wb");
+    if (!out) {
+        fclose(in);
+        return NO;
+    }
+    char buf[8192];
+    size_t n;
+    BOOL ok = YES;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            ok = NO;
+            break;
+        }
+    }
+    if (ferror(in)) ok = NO;
+    fclose(in);
+    if (fclose(out) != 0) ok = NO;
+    if (!ok) unlink([dst UTF8String]);   // 失败不留半成品
+    return ok;
+}
+
+- (BOOL)moveItemAtPath:(NPString *)src toPath:(NPString *)dst {
+    if (!src || !dst) return NO;
+    if (rename([src UTF8String], [dst UTF8String]) == 0) return YES;
+    // 跨设备 rename 失败：回退到拷贝+删除。
+    if ([self copyItemAtPath:src toPath:dst]) {
+        if ([self removeItemAtPath:src]) return YES;
+        unlink([dst UTF8String]);   // 删除失败则回滚副本
+    }
+    return NO;
+}
+
+- (NPString *)currentDirectoryPath {
+    char buf[4096];
+    if (!getcwd(buf, sizeof(buf))) return nil;
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (BOOL)changeCurrentDirectoryAtPath:(NPString *)path {
+    if (!path) return NO;
+    return chdir([path UTF8String]) == 0 ? YES : NO;
+}
+
+- (NPArray *)contentsOfDirectoryAtPath:(NPString *)path {
+    if (!path) return nil;
+    DIR *dir = opendir([path UTF8String]);
+    if (!dir) return nil;
+    // 先收集到 C 数组，再经 arrayWithObjects:（autoreleased，符合
+    // 非 init 方法的 +0 返回约定）。直接返回 [[alloc] init] 的 +1 对象
+    // 会撞 ARC 返回约定——探针实证 listing 变 nil。
+    NPObject **buf = (NPObject **)malloc(64 * sizeof(NPObject *));
+    if (!buf) {
+        closedir(dir);
+        return nil;
+    }
+    size_t cap = 64, stored = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        // "." ".." 不含，对齐 NSFileManager contentsOfDirectoryAtPath:。
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+        if (stored == cap) {
+            size_t next = cap * 2;
+            NPObject **grown = (NPObject **)realloc(buf, next * sizeof(NPObject *));
+            if (!grown) break;
+            buf = grown;
+            cap = next;
+        }
+        buf[stored] = (NPObject *)[NPString stringWithUTF8String:ent->d_name];
+        stored++;
+    }
+    closedir(dir);
+    NPArray *result = [NPArray arrayWithObjects:buf count:stored];
+    free(buf);
+    return result;
+}
+
+- (NPData *)contentsAtPath:(NPString *)path {
+    if (!path) return nil;
+    // 纯 C 读入（见 NPData.jeti npdata_read_file 的说明：伞内避免
+    // [[NPMutableData alloc] init] 嵌套消息链）。
+    FILE *f = fopen([path UTF8String], "rb");
+    if (!f) return nil;
+    size_t cap = 8192, len = 0;
+    unsigned char *acc = (unsigned char *)malloc(cap);
+    if (!acc) {
+        fclose(f);
+        return nil;
+    }
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (len + n > cap) {
+            size_t next = cap * 2;
+            unsigned char *grown = (unsigned char *)realloc(acc, next);
+            if (!grown) {
+                free(acc);
+                fclose(f);
+                return nil;
+            }
+            acc = grown;
+            cap = next;
+        }
+        memcpy(acc + len, buf, n);
+        len += n;
+    }
+    BOOL bad = ferror(f) ? YES : NO;
+    fclose(f);
+    if (bad) {
+        free(acc);
+        return nil;
+    }
+    NPData *result = [NPData dataWithBytes:acc length:len];
+    free(acc);
+    return result;
+}
+
+- (BOOL)createFileAtPath:(NPString *)path contents:(NPData *)data {
+    if (!path) return NO;
+    FILE *f = fopen([path UTF8String], "wb");
+    if (!f) return NO;
+    BOOL ok = YES;
+    if (data && [data length] > 0) {
+        ok = fwrite([data bytes], 1, [data length], f) == [data length] ? YES : NO;
+    }
+    if (fclose(f) != 0) ok = NO;
+    if (!ok) unlink([path UTF8String]);   // 失败不留半成品
+    return ok;
+}
+
+@end

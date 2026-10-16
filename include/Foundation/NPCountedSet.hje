@@ -1,0 +1,28 @@
+#ifndef NPCOUNTEDSET_NH
+#define NPCOUNTEDSET_NH
+
+#import <Foundation/NPSet.hje>
+#import <Foundation/NPDictionary.hje>
+
+// NPCountedSet — 多重集合（对应 ObjC 的 NSCountedSet）：成员唯一，
+// 每个成员带出现次数。继承 NPSet 的成员存储（isEqual: 值语义），
+// 计数存于内嵌 NPMutableDictionary（对象→NPNumber）。
+//
+// 覆盖 add/remove 维护计数；countForObject: 对未含成员返回 0。
+// set 语义使重复 addObject: 同一（值相等）对象计数累加。
+@interface NPCountedSet : NPSet {
+@public
+    NPMutableDictionary *_counts;   // 成员对象 → NPNumber(次数)
+}
++ (NPCountedSet *)countedSet;
++ (NPCountedSet *)countedSetWithArray:(NPArray *)array;
+- (NPCountedSet *)initWithArray:(NPArray *)array;
+- (size_t)countForObject:(id)object;
+- (NPArray *)allObjects;   // 覆盖：每成员一份（计数不展开）
+// NPSet 基类不声明移除变长操作（removeObject:/removeAllObjects 在
+// NPMutableSet）—— 计数集自含实现，不派发到空槽。
+- (void)removeObject:(id)object;
+- (void)removeAllObjects;
+@end
+
+#endif

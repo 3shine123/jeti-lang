@@ -1693,7 +1693,15 @@ impl Checker {
             return None;
         }
         let cls = Self::class_name_of(&t)?;
-        self.class_has_instance_method(&cls, "objectAtIndex:").then_some(cls)
+        // Two container families opt in: indexed (objectAtIndex:) and keyed
+        // (objectForKey: — dictionaries). The rewrite below picks the actual
+        // selector from what the class declares.
+        if self.class_has_instance_method(&cls, "objectAtIndex:")
+            || self.class_has_instance_method(&cls, "objectForKey:")
+        {
+            return Some(cls);
+        }
+        None
     }
 
     /// Static type of a subscript receiver. Falls back to the scope table when
@@ -1721,13 +1729,20 @@ impl Checker {
     fn maybe_rewrite_object_subscript(&mut self, e: &mut AstExpr) -> Option<AstType> {
         if !matches!(&e.data, AstExprData::Subscript { .. }) { return None; }
         // Judge the receiver's class *before* taking ownership of it.
-        {
+        let cls = {
             let AstExprData::Subscript { object, .. } = &e.data else { return None };
-            self.subscript_receiver_class(object)?;
-        }
+            self.subscript_receiver_class(object)?
+        };
         let (object, key) = match std::mem::replace(&mut e.data, AstExprData::Int(0)) {
             AstExprData::Subscript { object, key } => (object, key),
             _ => unreachable!("matched Subscript above"),
+        };
+        // Keyed containers (dictionaries) spell the read `objectForKey:`;
+        // everything else keeps `objectAtIndex:`.
+        let selector = if self.class_has_instance_method(&cls, "objectForKey:") {
+            "objectForKey:"
+        } else {
+            "objectAtIndex:"
         };
         let mut id_ty = AstType::new(TypePrim::Id);
         id_ty.is_pointer = true;
@@ -1740,7 +1755,7 @@ impl Checker {
             is_class_method: false,
             is_super: false,
             super_name: None,
-            selector: "objectAtIndex:".to_string(),
+            selector: selector.to_string(),
             args: vec![*key],
         };
         Some(id_ty)
@@ -1754,7 +1769,7 @@ impl Checker {
     /// otherwise an immutable `NPArray` keeps the loud C error.
     fn maybe_rewrite_object_assign(&mut self, e: &mut AstExpr) -> Option<AstType> {
         if !matches!(&e.data, AstExprData::Assign { .. }) { return None; }
-        {
+        let cls = {
             let AstExprData::Assign { target, .. } = &e.data else { return None };
             let is_sub = matches!(&target.data, AstExprData::Subscript { .. });
             if !is_sub { return None; }
@@ -1764,8 +1779,15 @@ impl Checker {
             let t = self.receiver_static_type(object)?;
             if t.prim != TypePrim::Named || !t.is_pointer || t.is_array { return None; }
             let cls = Self::class_name_of(&t)?;
-            if !self.class_has_instance_method(&cls, "setObject:atIndex:") { return None; }
-        }
+            // Indexed (setObject:atIndex:) or keyed (setObject:forKey:)
+            // setter — the family decides the selector spelled below.
+            if !self.class_has_instance_method(&cls, "setObject:atIndex:")
+                && !self.class_has_instance_method(&cls, "setObject:forKey:")
+            {
+                return None;
+            }
+            cls
+        };
         let (target, value) = match std::mem::replace(&mut e.data, AstExprData::Int(0)) {
             AstExprData::Assign { target, value } => (target, value),
             _ => unreachable!("matched Assign above"),
@@ -1775,6 +1797,15 @@ impl Checker {
             AstExprData::Subscript { object, key } => (object, key),
             _ => unreachable!("matched Subscript above"),
         };
+        // Keyed containers spell the write `setObject:forKey:` (same
+        // value-first arg order as `setObject:atIndex:`).
+        let selector = if self.class_has_instance_method(&cls, "setObject:forKey:")
+            && !self.class_has_instance_method(&cls, "setObject:atIndex:")
+        {
+            "setObject:forKey:"
+        } else {
+            "setObject:atIndex:"
+        };
         e.kind = AstExprKind::MsgSend;
         e.data = AstExprData::MsgSend {
             receiver: object,
@@ -1783,7 +1814,7 @@ impl Checker {
             is_class_method: false,
             is_super: false,
             super_name: None,
-            selector: "setObject:atIndex:".to_string(),
+            selector: selector.to_string(),
             args: vec![*value, *key],
         };
         // `setObject:atIndex:` returns void.
@@ -1905,8 +1936,18 @@ impl Checker {
     }
 
     fn check_expr_inner(&mut self, e: &mut AstExpr) -> Option<AstType> {
+        // An integer literal may arrive with a suffix-derived type (`7L` ->
+        // long, annotated by the parser) — do not downgrade it to int.
+        let int_pre_typed = match &e.data {
+            AstExprData::Int(_) => e.expr_type.clone().filter(|t| {
+                matches!(t.prim, TypePrim::Long | TypePrim::LongLong | TypePrim::Unsigned)
+                    || t.is_unsigned
+            }),
+            _ => None,
+        };
         match &mut e.data {
-            AstExprData::Int(_) => Some(AstType::new(TypePrim::Int)),
+            AstExprData::Int(_) => Some(*int_pre_typed
+                .unwrap_or_else(|| Box::new(AstType::new(TypePrim::Int)))),
             AstExprData::Float(_) => Some(AstType::new(TypePrim::Double)),
             // Imaginary literal (`2.0i`) — the static type carries the complex
             // flag so `check_decl` can flag implicit narrowing into a real

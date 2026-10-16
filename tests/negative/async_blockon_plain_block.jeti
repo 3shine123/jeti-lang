@@ -1,0 +1,11 @@
+// Negative (Async Semantics v1 rule 3, 2026-10-15): `+[NPTask blockOn:]`
+// requires exactly one async block argument. A paren-wrapped PLAIN block is
+// synchronous and cannot be driven by the bridge — this used to fall through
+// to codegen and emit `NPTask->blockOn_`, which clang rejected with an
+// unrelated-looking error; it now fails cleanly in the async check.
+#import <Foundation/Foundation.hje>
+
+int main(void) {
+    long r = [NPTask blockOn:(^{ return 7; })];
+    return (int)r;
+}

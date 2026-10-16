@@ -1,0 +1,38 @@
+#ifndef NPVALUE_NH
+#define NPVALUE_NH
+
+#include <stdint.h>
+#include <stddef.h>
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+
+// NPRange — 与 NPString 的 rangeOfString: 返回值同形（字符串侧已定义；
+// 此处仅在 NPValue 未导入 NPString.hje 时兜底——伞头下两个定义来自同一处）。
+// NPValue — 装箱任意标量（对应 ObjC 的 NSValue）：
+// 64 位整数 / double / 指针 / NPRange。判等按载荷 + 类型标签，
+// 不同类型标签永不相等（装箱 int 1 与装箱 double 1.0 不相等）。
+typedef struct { size_t location, length; } NPValueRange;
+
+@interface NPValue : NPObject {
+@public
+    int         _kind;        // 0=int64 1=double 2=pointer 3=range
+    long long   _int64;
+    double      _double;
+    void       *_pointer;
+    size_t      _range_location;
+    size_t      _range_length;
+}
++ (NPValue *)valueWithLongLong:(long long)value;
++ (NPValue *)valueWithDouble:(double)value;
++ (NPValue *)valueWithPointer:(void *)pointer;
++ (NPValue *)valueWithRange:(NPValueRange)range;
+- (long long)longLongValue;
+- (double)doubleValue;
+- (void *)pointerValue;
+- (NPValueRange)rangeValue;
+- (BOOL)isEqual:(id)object;
+- (NPString *)description;
+@end
+
+#endif

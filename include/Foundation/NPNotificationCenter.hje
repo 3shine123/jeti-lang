@@ -1,0 +1,43 @@
+#ifndef NPNOTIFICATIONCENTER_NH
+#define NPNOTIFICATIONCENTER_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPArray.hje>
+
+// NPNotificationCenter — 同步观察者总线（对应 ObjC 的
+// NSNotificationCenter）。
+//
+// Jeti 无动态派发（vtable 静态索引，无 performSelector），回调采用
+// 块模型：观察者注册 `void (^)(NPString *name, id object)` 块，
+// post 时同步调用。注册表是线性表（add/remove/post 全线性扫描），
+// 与 NPDictionary 的"小集合无线性哈希"取舍一致。
+//
+// 匹配规则（对齐 ObjC）：post 的 (name, object) 与注册项逐项比对，
+// 注册时 name/object 任一为 nil 视为通配该维。
+@interface NPNotificationCenter : NPObject {
+@public
+    NPObject **_observers;        // 观察者（仅身份标记，可为任意对象或 NULL）
+    NPString **_names;            // 注册名；NULL = 通配
+    NPObject **_objects;          // 过滤对象；NULL = 通配
+    // 回调块按对象存储（块即对象，retain/release 适用）。
+    // 已知解析器缺口：(^ *形态（指向块的指针）令类型解析死循环，
+    // 故不声明 `void (^ *_blocks)(…)`，调用点做强转（clang 块语义下合法）。
+    NPObject **_blocks;
+    size_t _count;
+    size_t _capacity;
+}
++ (NPNotificationCenter *)defaultCenter;   // 共享单例
+// 注册：block 为 nil 则忽略。object 传 NULL 表示不按对象过滤。
+- (void)addObserver:(id)observer forName:(NPString *)name object:(id)object
+              usingBlock:(void (^)(NPString *name, id object))block;
+// 精确注销：observer/name/block 三者都匹配的项被移除（name NULL 只按
+// observer+block 匹配）。
+- (void)removeObserver:(id)observer;
+- (void)removeObserver:(id)observer forName:(NPString *)name;
+// 发布：同步逐个调用匹配的块；name 不可为 nil（ObjC 同规则）。
+- (void)postNotificationName:(NPString *)name object:(id)object;
+- (size_t)observerCount;
+@end
+
+#endif

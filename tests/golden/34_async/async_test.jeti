@@ -37,7 +37,7 @@ int main() {
     // is +[NPTask blockOn:], with the awaited call inside the block.
     // (The receiver is allocated inside the block: block thunks capture
     // params + self only until the stage-3 spawn work lands.)
-    [NPTask blockOn:async void ^ {
+    [NPTask blockOn:async ^ void {
         Fetcher *f = [[Fetcher alloc] init];
         await [f runAll];
     }];

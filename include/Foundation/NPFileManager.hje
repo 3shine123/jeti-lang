@@ -1,0 +1,45 @@
+#ifndef NPFILEMANAGER_NH
+#define NPFILEMANAGER_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPArray.hje>
+
+// NPFileManager — 文件系统操作（对应 ObjC 的 NSFileManager）。
+//
+// 约定：路径为 UTF-8 C 字符串包装（NPString * 或 const char *，两个拼写
+// 都给）。查询失败返回 NO/nil，不入错误对象 —— 需要错误详情的场景用
+// contentsAtPath: 的 outError 变体（对齐 NPError.fileIOErrorWithMessage:）。
+// 单例：fileManager 恒返回同一实例，无状态。
+@interface NPFileManager : NPObject {
+@public
+    // 无 ivar —— 每次调用直连 OS。
+}
++ (NPFileManager *)fileManager;                     // 共享单例
+
+// 存在性与类型
+- (BOOL)fileExistsAtPath:(NPString *)path;
+- (BOOL)isDirectoryAtPath:(NPString *)path;
+- (BOOL)isReadableAtPath:(NPString *)path;
+- (BOOL)isWritableAtPath:(NPString *)path;
+
+// 目录与创建/删除
+- (BOOL)createDirectoryAtPath:(NPString *)path;             // 不递归
+- (BOOL)createDirectoryAtPath:(NPString *)path withIntermediateDirectories:(BOOL)intermediates; // 可递归
+- (BOOL)removeItemAtPath:(NPString *)path;                  // 文件或空目录
+- (BOOL)copyItemAtPath:(NPString *)src toPath:(NPString *)dst;
+- (BOOL)moveItemAtPath:(NPString *)src toPath:(NPString *)dst;
+
+// 当前目录
+- (NPString *)currentDirectoryPath;
+- (BOOL)changeCurrentDirectoryAtPath:(NPString *)path;
+
+// 目录内容（不递归；名字不含路径前缀；"." ".." 不含）
+- (NPArray *)contentsOfDirectoryAtPath:(NPString *)path;    // NPString * 数组，失败 nil
+
+// 便捷读写（内容走 NPData）
+- (NPData *)contentsAtPath:(NPString *)path;
+- (BOOL)createFileAtPath:(NPString *)path contents:(NPData *)data;
+@end
+
+#endif

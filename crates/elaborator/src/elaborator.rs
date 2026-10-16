@@ -185,7 +185,7 @@ impl Elaborator {
                 kind: AstExprKind::Boxed, expr_type: None, line, col,
                 data: AstExprData::Boxed(Box::new(self.convert_expr(inner).unwrap_or_else(make_int_expr))),
             },
-            CstExprData::Integer(val) => AstExpr { kind: AstExprKind::Int, expr_type: None, line, col, data: AstExprData::Int(*val) },
+            CstExprData::Integer(val) => AstExpr { kind: AstExprKind::Int, expr_type: ce.expr_type.as_ref().and_then(|t| self.convert_type(t)).map(Box::new), line, col, data: AstExprData::Int(*val) },
             CstExprData::Float(val) => AstExpr { kind: AstExprKind::Float, expr_type: None, line, col, data: AstExprData::Float(*val) },
             CstExprData::FloatRaw(raw) => AstExpr { kind: AstExprKind::Float, expr_type: None, line, col, data: AstExprData::FloatRaw(raw.clone()) },
             CstExprData::String(s) => AstExpr { kind: AstExprKind::String, expr_type: None, line, col, data: AstExprData::String(s.clone()) },
@@ -342,7 +342,17 @@ impl Elaborator {
                     _ => String::new(),
                 };
                 let converted_callee = self.convert_expr(callee);
-                if let Some(ref ce) = converted_callee {
+                // `(block)(args)` — a Paren-wrapped callee: look through the
+                // paren so a parenthesized block literal (or member target)
+                // still keeps its callee here. Without this the call loses
+                // its target and renders as `(args)` — probe-verified silent
+                // miscompile (the block never ran; with args the arg echoed
+                // back as the "result", with none it emitted `()`).
+                let callee_for_call = converted_callee.map(|ce| match &ce.data {
+                    AstExprData::Paren(inner) => inner.as_ref().clone(),
+                    _ => ce.clone(),
+                });
+                if let Some(ref ce) = callee_for_call {
                     // Renderable call targets: member expressions (ivar access,
                     // struct fields via dot/arrow — `w.cb(3)` where cb is a
                     // fn-ptr, C-superset member call) and the block literal

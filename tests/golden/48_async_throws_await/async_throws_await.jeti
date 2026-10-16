@@ -81,7 +81,7 @@
 
 int main(void) {
     // v1 rule 2/3: blockOn: is the only sync→async bridge.
-    [NPTask blockOn:async void ^ {
+    [NPTask blockOn:async ^ void {
         Api *api = [[Api alloc] init];
         await [api run];
     }];

@@ -1,0 +1,66 @@
+#import <Foundation/NPProcessInfo.hje>
+#import <Foundation/NPObject.jeti>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/utsname.h>
+
+@implementation NPProcessInfo
+
++ (NPProcessInfo *)processInfo {
+    static NPProcessInfo *shared = NULL;
+    if (!shared) {
+        shared = [[NPProcessInfo alloc] init];
+        jeti_retain(shared); // 常驻：单例永不释放
+    }
+    return shared;
+}
+
+- (int)processIdentifier {
+    return (int)getpid();
+}
+
+- (NPString *)environmentVariable:(NPString *)name {
+    if (!name) return nil;
+    const char *v = getenv([name UTF8String]);
+    if (!v) return nil;
+    return [NPString stringWithUTF8String:v];
+}
+
+- (int)setEnvironmentVariable:(NPString *)name value:(NPString *)value {
+    if (!name || !value) return -1;
+    return setenv([name UTF8String], [value UTF8String], 1);
+}
+
+- (int)unsetEnvironmentVariable:(NPString *)name {
+    if (!name) return -1;
+    return unsetenv([name UTF8String]);
+}
+
+- (NPString *)hostName {
+    char buf[256];
+    if (gethostname(buf, sizeof(buf) - 1) != 0) return nil;
+    buf[sizeof(buf) - 1] = '\0';
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (NPString *)userName {
+    const char *v = getenv("USER");
+    if (!v) v = getenv("LOGNAME");
+    if (!v) return nil;
+    return [NPString stringWithUTF8String:v];
+}
+
+- (NPString *)operatingSystem {
+    struct utsname u;
+    if (uname(&u) != 0) return nil;
+    return [NPString stringWithUTF8String:u.sysname];
+}
+
+- (NPString *)machine {
+    struct utsname u;
+    if (uname(&u) != 0) return nil;
+    return [NPString stringWithUTF8String:u.machine];
+}
+
+@end

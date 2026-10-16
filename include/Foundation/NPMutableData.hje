@@ -1,0 +1,24 @@
+#ifndef NPMUTABLEDATA_NH
+#define NPMUTABLEDATA_NH
+
+#import <Foundation/NPData.hje>
+
+// NPMutableData — 可变二进制缓冲区（对应 ObjC 的 NSMutableData）。
+// 追加/替换/删除按需扩缩容；所有操作失效既有 bytes 指针的假定
+// （realloc 可能搬移），调用方每次重新取 mutableBytes。
+@interface NPMutableData : NPData {
+@public
+    // 布局完全继承 NPData（_bytes/_length/_capacity）。
+}
++ (NPMutableData *)dataWithCapacity:(size_t)capacity;
+- (NPMutableData *)initWithCapacity:(size_t)capacity;
+- (unsigned char *)mutableBytes;
+- (void)appendBytes:(const void *)bytes length:(size_t)length;
+- (void)appendData:(NPData *)other;
+- (void)replaceBytesInRange:(NPRange)range withBytes:(const void *)bytes length:(size_t)length;
+- (void)deleteBytesInRange:(NPRange)range;
+- (void)setData:(NPData *)other;
+- (void)setLength:(size_t)length;                // 缩小截断，扩大补零
+@end
+
+#endif

@@ -584,7 +584,7 @@ int main() {
     // v1 rule 3: blockOn: is the only sync→async bridge — a bare async call
     // is an error everywhere (rule 2). The receiver lives inside the block
     // (block thunks capture params + self until the stage-3 spawn work).
-    [NPTask blockOn:async void ^ {
+    [NPTask blockOn:async ^ void {
         Fetcher *f = [[Fetcher alloc] init];
         await [f runAll];             // rule 2: an async call MUST be awaited
     }];
@@ -1204,7 +1204,7 @@ The body's awaits decide the truth, and the checker reconciles both directions:
 - `async` takes the business type directly (`async int` / `async NPString *` / `async void`); the legacy `(async NPTask<T>)` spelling produces a migration error (see `tests/negative/async_nptask_*.jeti`).
 - Task handles are not user-capturable under v1: `NPTask<T> *t = [f compute];` is an error (rule 2 removed "bare call creates a task"); handles will be born only at the explicit `+[NPTask spawn:…]` (stage 3, planned). `await` remains the only way to read a result, and awaiting the same task twice is legal (the result is cached).
 - `NPTask` is a reserved class name.
-- **One bridge, no entry positions** — `[NPTask blockOn:async T ^{ … }]` pumps an async block to completion at the call site (lowered to `jeti_task_await`); it is the only sync→async path, in `main`, sync methods, and freestanding code alike. The old statement-position entry (`[f runAll];` auto-drive, statement-position `[t start];`) is gone — a statement-position `[t start];` now merely enqueues, and bare task-yielding statements are checker errors. There is still no pump at `main`'s exit — ARC's scope-end release lands later.
+- **One bridge, no entry positions** — `[NPTask blockOn:async ^ void { … }]` pumps an async block to completion at the call site (lowered to `jeti_task_await`); it is the only sync→async path, in `main`, sync methods, and freestanding code alike. The old statement-position entry (`[f runAll];` auto-drive, statement-position `[t start];`) is gone — a statement-position `[t start];` now merely enqueues, and bare task-yielding statements are checker errors. There is still no pump at `main`'s exit — ARC's scope-end release lands later.
 
 Golden: `tests/golden/37_async_modifier/`.
 

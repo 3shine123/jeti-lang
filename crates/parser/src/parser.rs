@@ -1,4 +1,4 @@
-use jeti_lexer::{KeywordKind, Lexer, Token, TokenKind};
+use jeti_lexer::{KeywordKind, Lexer, Token, TokenKind, INT_SUFFIX_L, INT_SUFFIX_LL, INT_SUFFIX_U};
 use jeti_cst::*;
 
 pub struct Parser<'a> {
@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
             current,
             previous: Token {
                 kind: TokenKind::Eof, keyword: KeywordKind::None,
-                start: 0, length: 0, line: 0, column: 0, char_val: 0,
+                start: 0, length: 0, line: 0, column: 0, char_val: 0, int_suffix: 0,
             },
             has_error: false,
             error_count: 0,
@@ -1142,6 +1142,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 bt.is_block = true;
                 bt.nulls = t.nulls;   // same carry-up as the pointer case above
                 bt.subtype = Some(Box::new(t));
+                // `T (^ *name)(params)` — pointer to block: clang accepts the
+                // `*` between the caret paren and the optional name. Without
+                // this the `*` was left unconsumed, which both lost the
+                // pointer level and deadlocked the ivar loop (failed consume
+                // → zero-progress, probe-verified).
+                while self.match_token(TokenKind::Star) {
+                    bt.is_pointer = true;
+                }
                 if self.current.kind == TokenKind::Identifier {
                     bt.block_name = Some(self.current_text().to_string());
                     self.advance();
@@ -1385,16 +1393,23 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 data: CstExprData::Await { inner: Box::new(inner) },
             });
         }
-        // Async block literal: `async ReturnType? ^...` (§5.1). In EXPRESSION
-        // position `async` followed by a type start or `^` is always an async
-        // block (a fn decl can't start here); `at_async_modifier` covers both.
-        // Return type sits BETWEEN `async` and `^`; anything else (`async = 5;`,
-        // `async(x)`) stays a plain C identifier. Must precede the generic
-        // Identifier arm below.
+        // Async block literal (§5.1): `async ^…` — the flag sits BEFORE `^`,
+        // and the block layout is exactly the plain block's (`^` Return-type?
+        // Params? Body). The modifier lives OUTSIDE the block structure, so a
+        // user typedef named `async` still works as a `^async(...)` return
+        // type — the two never share a slot. Jeti extension syntax: `async`
+        // followed by `^` is always the async-block start (no XOR fallback —
+        // a variable named `async` combined with `^` is not supported). The
+        // removed `async T ^…` layout (return type between flag and `^`)
+        // reports a migration error and is recovered as-is so diagnostics
+        // don't cascade.
         if self.current.kind == TokenKind::Identifier
             && self.current_text() == "async"
             && self.at_async_modifier()
         {
+            if !self.at_async_block_start() {
+                self.error("async block syntax changed: the return type now goes after '^' — write 'async ^int (int x) { … }'; the 'async int ^…' spelling was removed");
+            }
             self.advance(); // consume `async`
             return self.parse_async_block_literal();
         }
@@ -1491,13 +1506,33 @@ else if self.match_keyword(KeywordKind::Typeof) {
         }
         if self.match_token(TokenKind::Integer) {
             let text = self.previous_text();
+            // C literal bases: 0x/0X hex, leading-0 octal, decimal otherwise.
+            // Octal was parsed as decimal (0755 → 755): the generated C lost
+            // the radix, so `mkdir(p, 0755)` opened the directory with a
+            // wrong mode — a silent C-superset break caught by the
+            // NPFileManager probes.
             let val = if text.len() > 2 && (text.starts_with("0x") || text.starts_with("0X")) {
                 i64::from_str_radix(&text[2..], 16).unwrap_or_else(|_| u64::from_str_radix(&text[2..], 16).unwrap_or(0) as i64)
+            } else if text.len() > 1 && text.starts_with('0') && text[1..].bytes().all(|c| (b'0'..=b'7').contains(&c)) {
+                i64::from_str_radix(&text[1..], 8).unwrap_or(0)
             } else {
                 text.parse::<i64>().unwrap_or_else(|_| text.parse::<u64>().unwrap_or(0) as i64)
             };
+            // The lexer strips the integer suffix from the token text but
+            // records it in `int_suffix`. Annotate the literal's type here —
+            // downstream return-type inference (block literals) reads this;
+            // without it `^{ return 7L; }` inferred `int`.
+            let suf = self.previous.int_suffix;
+            let expr_type = if suf != 0 {
+                let prim = if suf & INT_SUFFIX_LL != 0 { TypePrim::LongLong }
+                    else if suf & INT_SUFFIX_L != 0 { TypePrim::Long }
+                    else { TypePrim::Unsigned };
+                let mut t = CstType::new(prim);
+                if suf & INT_SUFFIX_U != 0 { t.is_unsigned = true; }
+                Some(t)
+            } else { None };
             return Some(CstExpr {
-                kind: CstExprKind::Integer, expr_type: None,
+                kind: CstExprKind::Integer, expr_type: expr_type.map(Box::new),
                 line: self.previous.line, col: self.previous.column,
                 data: CstExprData::Integer(val),
             });
@@ -1544,10 +1579,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
             });
         }
         // `@123` / `@1.5` — NPNumber boxing literal. Desugared to a normal
-        // class-method send `[NPNumber numberWithInt:123]` so all downstream
+        // class-method send (`[NPNumber numberWithInt:123]` /
+        // `numberWithLongLong:` / `numberWithDouble:`) so all downstream
         // resolution (binder/checker/codegen) reuses the message-send path.
+        // The suffix decides the width: `@7L` must box as long long —
+        // `numberWithInt:` would truncate past 32 bits.
         if self.match_token(TokenKind::AtNumber) {
             let text = self.previous_text().to_string();
+            let suf = self.previous.int_suffix;
             let line = self.previous.line;
             let col = self.previous.column;
             let is_float = text.contains('.') || text.contains('e') || text.contains('E');
@@ -1559,12 +1598,17 @@ else if self.match_keyword(KeywordKind::Typeof) {
             } else {
                 CstExpr {
                     kind: CstExprKind::Integer, expr_type: None, line, col,
-                    data: CstExprData::Integer(text.trim_end_matches(|c: char| c == 'u' || c == 'U' || c == 'l' || c == 'L').parse::<i64>().unwrap_or(0)),
+                    data: CstExprData::Integer(text.parse::<i64>().unwrap_or_else(|_| text.parse::<u64>().unwrap_or(0) as i64)),
                 }
             };
-            return Some(self.mk_npnumber_send(
-                if is_float { "numberWithDouble:" } else { "numberWithInt:" },
-                number_expr, line, col));
+            let selector = if is_float {
+                "numberWithDouble:"
+            } else if suf & (INT_SUFFIX_L | INT_SUFFIX_LL) != 0 {
+                "numberWithLongLong:"
+            } else {
+                "numberWithInt:"
+            };
+            return Some(self.mk_npnumber_send(selector, number_expr, line, col));
         }
         // `@YES` / `@NO` (`@true` / `@false`) — boxed BOOL literal.
         if self.match_token(TokenKind::AtBool) {
@@ -2105,11 +2149,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
         })
     }
 
-    /// Async block literal (§5.1): `async` already consumed; next is
-    /// ReturnType? `^` Parameters? BlockBody. Return type lives between
-    /// `async` and `^` (may be omitted → ellided form, inference rules TBD
-    /// §8-①; parsing only guarantees acceptance). Params/body reuse the plain
-    /// block machinery; IIFE `(args)` call is handled by postfix parsing.
+    /// Async block literal (§5.1): `async` already consumed. Accepted form:
+    /// `^` Return-type? Params? Body — the plain block layout, return type
+    /// AFTER `^` (read by the shared tail below). The legacy `async T ^…`
+    /// layout (return type BEFORE `^`) is only a recovery reader here: the
+    /// caller has already reported the migration error; parsing the old
+    /// shape keeps the diagnostic list clean instead of cascading.
+    /// Params/body reuse the plain block machinery; IIFE `(args)` call is
+    /// handled by postfix parsing.
     fn parse_async_block_literal(&mut self) -> Option<CstExpr> {
         // Optional return type before `^`: builtin type keyword or typename
         // identifier (`async void ^`, `async Result *^`, `async int ^`,
@@ -2147,8 +2194,8 @@ else if self.match_keyword(KeywordKind::Typeof) {
         self.parse_block_literal_tail(None, is_async)
     }
 
-    /// Shared block tail after `^` (plain blocks) or after the return type
-    /// (async blocks): Parameters? BlockBody. `is_async` marks the CST node
+    /// Shared block tail after `^` (plain blocks) or after the `async ^`
+    /// flag: Parameters? BlockBody. `is_async` marks the CST node
     /// (§5.2: evaluation/call yields `NPTask<T> *`).
     fn parse_block_literal_tail(
         &mut self,
@@ -2180,7 +2227,45 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype) {
                 self.parse_type_name().map(Box::new)
             } else if self.current.kind == TokenKind::Identifier {
-                self.parse_type_full().map(Box::new)
+                // Clang block grammar: `^T(` — the `(` after a typename
+                // identifier starts the PARAMETER list, never a function-type
+                // declarator (`^async(int v)` with a user typedef named
+                // `async` is a block taking int, not a block of type
+                // "async(int)"). Peek past the identifier: a `(` — directly
+                // or after pointer stars (`NPString *(…)`) — ⇒ take the bare
+                // name (+stars) and let the tail's param reader consume the
+                // paren; anything else (`<`, another ident) still goes
+                // through the full type parser.
+                let ident_end = self.current.start + self.current.length;
+                let bytes = self.source.as_bytes();
+                let mut j = ident_end;
+                while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                    j += 1;
+                }
+                let mut stars = 0usize;
+                while j < bytes.len() && bytes[j] == b'*' {
+                    stars += 1;
+                    j += 1;
+                    while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                        j += 1;
+                    }
+                }
+                if j < bytes.len() && bytes[j] == b'(' {
+                    let mut base = CstType::new(TypePrim::Named);
+                    base.name = Some(self.current_text().to_string());
+                    self.advance();
+                    let mut ty = base;
+                    for _ in 0..stars {
+                        if !self.match_token(TokenKind::Star) { break; }
+                        let mut outer = CstType::new(TypePrim::Named);
+                        outer.is_pointer = true;
+                        outer.subtype = Some(Box::new(ty));
+                        ty = outer;
+                    }
+                    Some(Box::new(ty))
+                } else {
+                    self.parse_type_full().map(Box::new)
+                }
             } else {
                 None
             };
@@ -3609,7 +3694,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 keyword: KeywordKind::None,
                 start: saved, length: name.len() as usize,
                 line: self.previous.line, column: self.previous.column,
-                char_val: 0,
+                char_val: 0, int_suffix: 0,
             };
         }
 
@@ -3784,6 +3869,22 @@ else if self.match_keyword(KeywordKind::Typeof) {
     /// user typedef/variable named `async` keeps working everywhere else —
     /// C superset iron law. `require_nptask_async` (old NPTask-only rule) is
     /// gone: `async` may precede ANY legal return type, including `void`.
+    /// `async` immediately followed by `^` (whitespace skipped): the async
+    /// block literal start, per §5.1's `async ^…` form. Distinct from
+    /// `at_async_modifier`, which also accepts `async` + type-start for the
+    /// fn/method return-type positions.
+    fn at_async_block_start(&self) -> bool {
+        if self.current.kind != TokenKind::Identifier || self.current_text() != "async" {
+            return false;
+        }
+        let mut i = self.current.start + self.current.length;
+        let bytes = self.source.as_bytes();
+        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+        i < bytes.len() && bytes[i] == b'^'
+    }
+
     fn at_async_modifier(&self) -> bool {
         if self.current.kind != TokenKind::Identifier || self.current_text() != "async" {
             return false;
@@ -5164,7 +5265,18 @@ if self.current.kind == TokenKind::Identifier {
                         if !self.match_token(TokenKind::Comma) { break; }
                     }
                 }
+                // Zero-progress guard: a failed consume leaves the current
+                // token in place; without this the ivar loop spins forever on
+                // any unparseable declaration (observed with
+                // `void (^ *b)(void);` before the block-pointer fix).
+                let before = self.current.start;
                 self.consume(TokenKind::Semicolon, "expected ';' after ivar");
+                if self.current.start == before
+                    && !self.check(TokenKind::RBrace)
+                    && !self.check(TokenKind::Eof)
+                {
+                    self.advance();
+                }
             }
             self.consume(TokenKind::RBrace, "expected '}' after ivar list");
         }
@@ -6362,7 +6474,8 @@ mod tests {
 
     #[test]
     fn test_async_block_literal() {
-        // §5.1 five shapes; async blocks carry is_async = true.
+        // §5.1 shapes (2026-10-15 `async ^` layout); async blocks carry
+        // is_async: true. The return type sits AFTER `^` like a plain block's.
         let async_block = |src: &str| {
             let mut p = Parser::new(src);
             let unit = p.parse_translation_unit().unwrap();
@@ -6370,30 +6483,88 @@ mod tests {
             (text.contains("is_async: true"), text.contains("is_async: false"), p.last_error().is_empty())
         };
 
-        // Complete forms: return type between `async` and `^`.
-        let (a, has_plain, ok) = async_block("void f(void) { async void ^(NPString *u) { await [self fetchUser:u]; }; }");
+        // Complete forms: `async ^` Return-type? Params? Body.
+        let (a, has_plain, ok) = async_block("void f(void) { async ^ void (NPString *u) { await [self fetchUser:u]; }; }");
         assert!(a && ok && !has_plain, "async void form: a={} ok={} err", a, ok);
-        let (a, _, ok) = async_block("void f(void) { async int ^(int x) { return x + 1; }; }");
+        let (a, _, ok) = async_block("void f(void) { async ^ int (int x) { return x + 1; }; }");
         assert!(a && ok, "async int form");
-        let (a, _, ok) = async_block("void f(void) { async NPString *^(NPString *k) { return await [self get:k]; }; }");
+        let (a, _, ok) = async_block("void f(void) { async ^ NPString *(NPString *k) { return await [self get:k]; }; }");
         assert!(a && ok, "async object-return form");
 
-        // Ellided form (inference rules TBD §8-①; parse-only acceptance).
+        // Ellided form (inference per §8-①: rules A-D).
         let (a, _, ok) = async_block("void f(void) { async ^ { [self performTask]; }; }");
         assert!(a && ok, "ellided form");
         // `(void)` no-param spelling.
-        let (a, _, ok) = async_block("void f(void) { async void ^(void) { [self t]; }; }");
+        let (a, _, ok) = async_block("void f(void) { async ^ void (void) { [self t]; }; }");
         assert!(a && ok, "(void) param form");
 
         // IIFE: definition-then-call, empty and with args (user 2026-10-11).
-        let (a, _, ok) = async_block("void f(void) { async void ^(void) { [self t]; }(); }");
+        let (a, _, ok) = async_block("void f(void) { async ^ void (void) { [self t]; }(); }");
         assert!(a && ok, "IIFE empty-args form");
-        let (a, _, ok) = async_block("void f(void) { async void ^(NPString *u) { await [self fetchUser:u]; }(u); }");
+        let (a, _, ok) = async_block("void f(void) { async ^ void (NPString *u) { await [self fetchUser:u]; }(u); }");
         assert!(a && ok, "IIFE with-args form");
 
-        // Plain blocks stay is_async: false.
+        // The removed `async T ^…` layout (return type between flag and `^`)
+        // is a migration error, not a silent reparse.
+        let mut p = Parser::new("void f(void) { async void ^(void) { [self t]; }; }");
+        let _ = p.parse_translation_unit().unwrap();
+        assert!(!p.last_error().is_empty(), "old async T ^ spelling must error");
+
+        // Plain blocks stay is_async: false — including `^async(...)` with a
+        // user typedef named `async` as the return type (the whole point of
+        // the `async ^` layout: the two never share a syntax slot).
         let (_, has_plain, ok) = async_block("void f(void) { int (^b)(int) = ^(int x) { return x; }; }");
         assert!(has_plain && ok, "plain block not marked async");
+        let (_, has_plain, ok) = async_block("void f(void) { int v = ^async (int x) { return x; }(3); }");
+        assert!(has_plain && ok, "^async(...) is a plain block with typedef return type");
+    }
+
+    #[test]
+    fn test_blockon_paren_async_block_arg() {
+        // 2026-10-15 regression: `[NPTask blockOn:(async ^{ … })]` — a
+        // paren-wrapped async block as a message argument used to fall through
+        // the blockOn bridge and emit `NPTask->blockOn_`. Parsing itself was
+        // never wrong (probe-verified: the Paren(Block{is_async:true}) AST was
+        // correct), but pin the message-arg shapes so a parser regression
+        // here is caught at the parser layer.
+        let msg_arg = |src: &str| {
+            let mut p = Parser::new(src);
+            let unit = p.parse_translation_unit().unwrap();
+            let text = format!("{:?}", unit);
+            (
+                text.contains("Message"),
+                text.contains("is_async: true"),
+                text.contains("is_async: false"),
+                p.last_error().is_empty(),
+            )
+        };
+
+        // A. plain block, paren-wrapped, as message argument.
+        let (msg, a, pa, ok) = msg_arg(
+            "void f(void) { [NPTask blockOn:(^{ doSomething(); })]; }");
+        assert!(msg && !a && pa && ok, "A plain-block paren arg: msg={} a={} pa={} err", msg, a, pa);
+        // B. async block, paren-wrapped, as message argument (the M3 shape).
+        let (msg, a, pa, ok) = msg_arg(
+            "void f(void) { [NPTask blockOn:(async ^{ await [api run]; })]; }");
+        assert!(msg && a && !pa && ok, "B async-block paren arg: msg={} a={} pa={} err", msg, a, pa);
+        // C. async block as a local initializer (paren and bare).
+        let (msg, a, _, ok) = msg_arg("void f(void) { id t = (async ^{ await [api run]; }); }");
+        assert!(msg && a && ok, "C paren initializer");
+        let (msg, a, _, ok) = msg_arg("void f(void) { id t = async ^{ await [api run]; }; }");
+        assert!(msg && a && ok, "C bare initializer");
+        // D. async block as a plain function-call argument.
+        let (msg, a, _, ok) = msg_arg("void f(void) { sink(async ^{ await [api run]; }); }");
+        assert!(msg && a && ok, "D function-call arg");
+        // E. async block as an argument of another message send.
+        let (msg, a, _, ok) = msg_arg(
+            "void f(void) { [box hold:(async ^{ await [api run]; })]; }");
+        assert!(msg && a && ok, "E nested message arg");
+
+        // Paren-wrapping must not regress either spelling of the bridge.
+        let (msg, a, _, ok) = msg_arg("void f(void) { [NPTask blockOn:async ^ void { [api run]; }]; }");
+        assert!(msg && a && ok, "bare blockOn arg");
+        let (msg, a, _, ok) = msg_arg("void f(void) { [NPTask blockOn:(async ^ void { [api run]; })]; }");
+        assert!(msg && a && ok, "paren blockOn arg");
     }
 
     #[test]

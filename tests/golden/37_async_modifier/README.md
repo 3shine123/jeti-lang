@@ -14,7 +14,7 @@
   旧模型的"句柄捕获（形态 A）+ `await t`（形态 B）"已随规则 2 废除——句柄将只来自
   显式 spawn（阶段 3）。
 - `int z = [self plain:5];` —— 与任务无关的普通同步调用。
-- `[NPTask blockOn:async void ^ { … }]` —— main 里唯一的同步 → 异步桥（规则 3）；
+- `[NPTask blockOn:async ^ void { … }]` —— main 里唯一的同步 → 异步桥（规则 3）；
   旧的 `NPTask<void> *task = [f runAll]; [task start];` 语句位驱动形态已废除。
 
 | 文件 | 期望 |
@@ -37,7 +37,7 @@ runAll x=42 y=84 z=6
 
 - **语句位 async 调用与语句位 `[t start]` 驱动已废除**（规则 2）：裸 async 调用是
   checker error， lowering 不再按调用位置改变行为。
-- **唯一同步 → 异步桥：`[NPTask blockOn:async T ^{ … }]`**（规则 3）：阻塞 join 在
+- **唯一同步 → 异步桥：`[NPTask blockOn:async ^ void { … }]`**（规则 3）：阻塞 join 在
   调用点泵到完成。它在 receiver 仍 ARC 存活时运行——与旧语句位驱动相同的安全性论证
   （ARC 的 scope-end release 排在函数收尾，`main` 退出处兜底泵必然晚于它，故 v1 同样
   不设兜底泵）。

@@ -564,7 +564,7 @@ async 方法用修饰符直接声明**业务返回类型**——`async int`、`a
 int main() {
     // v1 规则3：blockOn: 是唯一同步→异步桥——裸 async 调用在任何位置都是 error（规则2）。
     // 接收者在块内分配（块 thunk 阶段3前只捕获参数+self）。
-    [NPTask blockOn:async void ^ {
+    [NPTask blockOn:async ^ void {
         Fetcher *f = [[Fetcher alloc] init];
         await [f runAll];             // 规则2：async 调用必须 await
     }];
@@ -1157,7 +1157,7 @@ M1 限制（编译期强制）：`@defer` 必须直接位于块内；defer 体�
 - `async` 直接修饰业务类型（`async int` / `async NPString *` / `async void`）；旧的 `(async NPTask<T>)` 拼写报迁移 error（见 `tests/negative/async_nptask_*.jeti`）。
 - 任务句柄在 v1 下不可被用户捕获：`NPTask<T> *t = [f compute];` 是 error（规则2 废除了"裸调用创建任务"）；句柄将只在显式 `+[NPTask spawn:…]` 诞生（阶段3，规划中）。`await` 仍是唯一取值通道，同一任务可多次 `await`（结果缓存）。
 - `NPTask` 是保留类名。
-- **一座桥，无入口位**：`[NPTask blockOn:async T ^{ … }]` 在调用点把 async 块驱动到完成（降为 `jeti_task_await`），是唯一同步→异步通道——`main`、同步方法、裸机同样适用。旧的语句位入口（`[f runAll];` 自动驱动、语句位 `[t start];` 驱动）已废除——语句位 `[t start];` 现在只入队，裸的任务产出语句是 checker error。`main` 退出处依旧不做兜底泵：ARC 的 scope-end release 比它更晚。
+- **一座桥，无入口位**：`[NPTask blockOn:async ^ void { … }]` 在调用点把 async 块驱动到完成（降为 `jeti_task_await`），是唯一同步→异步通道——`main`、同步方法、裸机同样适用。旧的语句位入口（`[f runAll];` 自动驱动、语句位 `[t start];` 驱动）已废除——语句位 `[t start];` 现在只入队，裸的任务产出语句是 checker error。`main` 退出处依旧不做兜底泵：ARC 的 scope-end release 比它更晚。
 
 Golden：`tests/golden/37_async_modifier/`。
 

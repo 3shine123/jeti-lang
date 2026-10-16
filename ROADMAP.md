@@ -38,8 +38,13 @@
   `tests/multi_tu/13_kvc_predicate`. Block-based filtering
   (`indexesOfObjectsPassingTest:`) stays a valid alternative for one-off tests.
 - [ ] **Variadic convenience constructors** — only `arrayWithObjects:count:`-style signatures exist; the variadic `initWithObjects:..., nil` form is not declared. Related known quirk: `[NPMutableArray arrayWithObjects:...]` desugars to the immutable array path.
-- [ ] **`NSAssert`** macro is absent.
-- [ ] **Object subscripting on dictionaries** — `d[@"k"]` is deliberately not wired (`objectForKeyedSubscript:` undeclared); the checker's subscript rewrite only knows `objectAtIndex:`.
+- [x] **`NPAssert`** assertion macro (fixed-arity: `NPAssert(cond, "desc")`,
+  throws NPError; variadic format-string form waits on preprocessor
+  `__VA_ARGS__` support).
+- [x] **Object subscripting on dictionaries** — `d[@"k"]` reads via
+  `objectForKey:` and `md[@"k"] = v` writes via `setObject:forKey:`; the
+  checker's subscript rewrite picks the selector from what the receiver class
+  actually declares (indexed arrays keep `objectAtIndex:` / `setObject:atIndex:`).
 - [x] **`conformsToProtocol:` runtime** — class metadata now carries a populated protocol table and the runtime query walks class + protocol parent chains (`doc/categories_protocol_plan.md` §8).
 
 ## EH known limitations (accepted, not scheduled)

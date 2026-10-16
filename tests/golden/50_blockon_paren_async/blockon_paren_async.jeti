@@ -1,0 +1,44 @@
+// Golden: the paren-wrapped blockOn argument — `[NPTask blockOn:(async ^…)]`.
+// 2026-10-15 regression (M3): the Paren(Block{is_async:true}) argument used to
+// miss the blockOn bridge and fall through to a vtable dispatch for a selector
+// NPTask does not declare, and clang rejected the generated C
+// (`NPTask->blockOn_`). The bridge now looks through the Paren, so all three
+// spellings below run the block body and propagate the awaited value.
+// Expected:
+//   bare=7
+//   paren=7
+//   await=42
+//   main done
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+@interface Api : NPObject
+- (async int)compute;
+@end
+
+@implementation Api
+- (async int)compute { return 42; }
+@end
+
+int main(void) {
+    // Bare async block argument (pre-existing spelling).
+    long a = [NPTask blockOn:async ^ int (void) { return 7; }];
+    printf("bare=%ld\n", a);
+
+    // Paren-wrapped async block argument (the M3 shape).
+    long p = [NPTask blockOn:(async ^ int (void) { return 7; })];
+    printf("paren=%ld\n", p);
+
+    // Paren-wrapped, with a real await inside: the block body runs on the
+    // bridge and the awaited value propagates to the result. (The helper is
+    // declared inside the block — blocks do not capture arbitrary locals,
+    // a known v1 boundary.)
+    long w = [NPTask blockOn:(async ^ int (void) {
+        Api *api = [[Api alloc] init];
+        return await [api compute];
+    })];
+    printf("await=%ld\n", w);
+
+    printf("main done\n");
+    return 0;
+}

@@ -1,0 +1,54 @@
+// Golden: Foundation 批次1 值/数据核心（2026-10-16）。
+// 新增类：NPNull（单例 null 占位）、NPValue（装箱标量/Range）、
+// NPDate（时间点）、NPData/NPMutableData（二进制缓冲区）、
+// NPEnumerator（数组/字典/集合枚举适配）。
+// Expected:
+//   null=1 <null>
+//   value=1 0
+//   date=1 1 1
+//   data=2 1 ff
+//   enum=alpha,beta,gamma left=0
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+int main(void) {
+    // NPNull: 单例 + 值语义描述。
+    NPNull *n1 = [NPNull null];
+    NPNull *n2 = [NPNull null];
+    printf("null=%d %s\n", n1 == n2, [[n1 description] UTF8String]);
+
+    // NPValue: 类型标签 + 载荷判等（装箱 int 7 ≠ 装箱 double 7.0）。
+    NPValue *v1 = [NPValue valueWithLongLong:7];
+    NPValue *v2 = [NPValue valueWithLongLong:7];
+    NPValue *v3 = [NPValue valueWithDouble:7.0];
+    printf("value=%d %d\n", [v1 isEqual:v2], [v1 isEqual:v3]);
+
+    // NPDate: 构造、间隔、比较。
+    NPDate *d1 = [NPDate dateWithTimeIntervalSince1970:1000.0];
+    NPDate *d2 = [NPDate dateWithTimeIntervalSince1970:3000.0];
+    printf("date=%d %d %d\n",
+           [d2 timeIntervalSinceDate:d1] == 2000.0,
+           [d2 compare:d1] == 1,
+           [d1 isEqualToDate:d1]);
+
+    // NPData/NPMutableData: 追加、删除、内容判等、子数据。
+    NPMutableData *md = [[NPMutableData alloc] init];
+    unsigned char src[5] = {0xde, 0xad, 0xbe, 0xef, 0xff};
+    [md appendBytes:src length:5];
+    [md deleteBytesInRange:(NPRange){0, 3}];            // 剩 ef ff
+    NPData *ro = [NPData dataWithBytes:[md bytes] length:[md length]];
+    NPData *sub = [ro subdataWithRange:(NPRange){1, 1}]; // 只剩 ff
+    printf("data=%zu %d %02x\n", [ro length], [ro isEqual:md], [sub byteAtIndex:0]);
+
+    // NPEnumerator: 数组消费 + 耗尽。
+    NPArray *arr = @[@"alpha", @"beta", @"gamma"];
+    NPEnumerator *e = [NPEnumerator enumeratorWithArray:arr];
+    id o;
+    int first = 1;
+    while ((o = [e nextObject])) {
+        printf("%s%s", first ? "" : ",", [(NPString *)o UTF8String]);
+        first = 0;
+    }
+    printf(" left=%zu\n", [[e allObjects] count]);
+    return 0;
+}

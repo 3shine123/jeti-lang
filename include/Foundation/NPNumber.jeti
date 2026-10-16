@@ -81,6 +81,13 @@
 
 - (int)isEqualToNumber:(NPNumber *)other {
     if (!other) return 0;
+    // Integer-vs-integer compares the exact 64-bit value: routing through
+    // doubleValue loses precision above 2^53 and reports distinct integers
+    // equal (probed: 2^60 vs 2^60+1). Double is only used when either side
+    // actually holds a double.
+    if (!_isDouble && !other->_isDouble) {
+        return _intValue == other->_intValue;
+    }
     return [self doubleValue] == [other doubleValue];
 }
 

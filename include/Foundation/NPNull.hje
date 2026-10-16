@@ -1,0 +1,17 @@
+#ifndef NPNULL_NH
+#define NPNULL_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPNull — 容器里的单例 null 占位（对应 ObjC 的 NSNull）。
+// 集合不允许存 NULL（NPArray/NPDictionary 会把 nil 值原样存或跳过），
+// 需要"存在一个表示空的对象"时用它。单例：null 恒返回同一实例，
+// isEqual: 因此退化为指针相等（基类默认即如此）。
+@interface NPNull : NPObject {
+@public
+    // 无 ivar —— 占位对象。
+}
++ (NPNull *)null;
+@end
+
+#endif

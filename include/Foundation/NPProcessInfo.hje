@@ -1,0 +1,28 @@
+#ifndef NPPROCESSINFO_NH
+#define NPPROCESSINFO_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+
+// NPProcessInfo — 进程环境信息（对应 ObjC 的 NSProcessInfo）。
+//
+// 边界：argc/argv 不在此重复暴露 —— Jeti 的 main 本来就是 C 的
+// `int main(int argc, char **argv)`，参数已在用户手里；本类补的是
+// 参数之外的环境事实。v1 全部为只读查询，无 processInfo 单例
+// 惰性缓存之外的状态。
+@interface NPProcessInfo : NPObject {
+@public
+    // 无 ivar —— 每次查询直连 OS。
+}
++ (NPProcessInfo *)processInfo;                     // 共享单例
+- (int)processIdentifier;                           // getpid
+- (NPString *)environmentVariable:(NPString *)name; // getenv；未设返回 nil
+- (int)setEnvironmentVariable:(NPString *)name value:(NPString *)value; // setenv；0=成功
+- (int)unsetEnvironmentVariable:(NPString *)name;
+- (NPString *)hostName;                             // gethostname
+- (NPString *)userName;                             // getenv USER/LOGNAME
+- (NPString *)operatingSystem;                      // uname -s
+- (NPString *)machine;                              // uname -m
+@end
+
+#endif

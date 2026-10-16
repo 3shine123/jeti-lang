@@ -1,0 +1,87 @@
+#import <Foundation/NPValue.hje>
+#import <Foundation/NPObject.jeti>
+#include <stdio.h>
+
+@implementation NPValue
+
++ (NPValue *)valueWithLongLong:(long long)value {
+    NPValue *v = [[self alloc] init];
+    if (v) {
+        v->_kind = 0;
+        v->_int64 = value;
+        v->_double = (double)value;
+    }
+    return v;
+}
+
++ (NPValue *)valueWithDouble:(double)value {
+    NPValue *v = [[self alloc] init];
+    if (v) {
+        v->_kind = 1;
+        v->_double = value;
+        v->_int64 = (long long)value;
+    }
+    return v;
+}
+
++ (NPValue *)valueWithPointer:(void *)pointer {
+    NPValue *v = [[self alloc] init];
+    if (v) {
+        v->_kind = 2;
+        v->_pointer = pointer;
+        v->_int64 = (long long)(intptr_t)pointer;
+    }
+    return v;
+}
+
++ (NPValue *)valueWithRange:(NPValueRange)range {
+    NPValue *v = [[self alloc] init];
+    if (v) {
+        v->_kind = 3;
+        v->_range_location = range.location;
+        v->_range_length = range.length;
+    }
+    return v;
+}
+
+- (long long)longLongValue { return _int64; }
+- (double)doubleValue { return _double; }
+- (void *)pointerValue { return _pointer; }
+- (NPValueRange)rangeValue {
+    NPValueRange r = {_range_location, _range_length};
+    return r;
+}
+
+// 判等：类型标签 + 载荷。装箱标量没有对象身份 —— 两个都装 7 的
+// NPValue 相等（与 NPNumber 的值语义一致），不同 kind 永不相等。
+- (BOOL)isEqual:(id)object {
+    if (self == (NPObject *)object) return YES;
+    if (!object) return NO;
+    if (![object isKindOfClass:[NPValue class]]) {
+        return [super isEqual:object];
+    }
+    NPValue *o = (NPValue *)object;
+    if (_kind != o->_kind) return NO;
+    switch (_kind) {
+        case 0: return _int64 == o->_int64;
+        case 1: return _double == o->_double;
+        case 2: return _pointer == o->_pointer;
+        case 3: return _range_location == o->_range_location
+                     && _range_length == o->_range_length;
+    }
+    return NO;
+}
+
+- (NPString *)description {
+    char buf[96];
+    switch (_kind) {
+        case 0: snprintf(buf, sizeof(buf), "%lld", _int64); break;
+        case 1: snprintf(buf, sizeof(buf), "%g", _double); break;
+        case 2: snprintf(buf, sizeof(buf), "%p", _pointer); break;
+        case 3: snprintf(buf, sizeof(buf), "{%zu, %zu}", _range_location, _range_length); break;
+        default: buf[0] = '?'; buf[1] = '\0'; break;
+    }
+    return [NPString stringWithUTF8String:buf];
+}
+
+@end

@@ -1,0 +1,96 @@
+#import <Foundation/NPCountedSet.hje>
+#import <Foundation/NPObject.jeti>
+#import <Foundation/NPNumber.hje>
+#include <stdio.h>
+
+@implementation NPCountedSet
+
++ (NPCountedSet *)countedSet {
+    return [[self alloc] initWithArray:NULL];
+}
+
++ (NPCountedSet *)countedSetWithArray:(NPArray *)array {
+    return [[self alloc] initWithArray:array];
+}
+
+- (NPCountedSet *)initWithArray:(NPArray *)array {
+    self = [super init];
+    if (self) {
+        // 计数表随 self dealloc（ARC 子对象）。
+        _counts = [NPMutableDictionary dictionary];
+        if (array) {
+            [self addObjectsFromArray:array];
+        }
+    }
+    return self;
+}
+
+// 计数取值：未含成员为 0。
+static size_t npcs_count_of(NPCountedSet *self, id object) {
+    if (!object || !self->_counts) return 0;
+    NPNumber *n = [self->_counts objectForKey:object];
+    return n ? (size_t)[n longLongValue] : 0;
+}
+
+static void npcs_set_count(NPCountedSet *self, id object, size_t n) {
+    if (!self->_counts) return;
+    if (n == 0) {
+        [self->_counts removeObjectForKey:object];
+    } else {
+        [self->_counts setObject:[NPNumber numberWithLongLong:(long long)n] forKey:object];
+    }
+}
+
+// 覆盖：走 set 去重插入；若成员确被收纳（含"值相等但指针不同"的
+// 重复添加——set 存首个，计数仍累加，NSCountedSet 语义），计数 +1。
+- (void)addObject:(id)object {
+    if (!object) return;
+    [super addObject:object];
+    if ([self containsObject:object]) {
+        npcs_set_count(self, object, npcs_count_of(self, object) + 1);
+    }
+}
+
+// 自含移除（NPSet 基类无 removeObject:，不可 [super ...] —— 空槽段错误，
+// 探针实证）：找到 isEqual 匹配项，释放并尾移填补，计数同步递减。
+- (void)removeObject:(id)object {
+    if (!object) return;
+    for (size_t i = 0; i < _count; i++) {
+        if (_items[i] && [_items[i] isEqual:object]) {
+            jeti_release(_items[i]);
+            _items[i] = _items[_count - 1];
+            _count--;
+            size_t c = npcs_count_of(self, object);
+            if (c > 0) {
+                npcs_set_count(self, object, c - 1);
+            }
+            return;
+        }
+    }
+}
+
+- (void)removeAllObjects {
+    for (size_t i = 0; i < _count; i++) {
+        if (_items[i]) jeti_release(_items[i]);
+    }
+    _count = 0;
+    if (_counts) {
+        [_counts removeAllObjects];
+    }
+}
+
+- (size_t)countForObject:(id)object {
+    return npcs_count_of(self, object);
+}
+
+- (NPArray *)allObjects {
+    return [super allObjects];
+}
+
+- (NPString *)description {
+    NPString *base = [super description];
+    return [[NPString stringWithUTF8String:"{counts: "]
+        stringByAppendingString:base];
+}
+
+@end

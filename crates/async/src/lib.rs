@@ -480,10 +480,26 @@ fn check_call_site_discipline_expr(
         AstExprData::FuncCall { callee, args, .. } => {
             if let Some(c) = callee { check_call_site_discipline_expr(c, false, async_sels, errs); }
             for a in args { check_call_site_discipline_expr(a, false, async_sels, errs); }
-            // NOTE: async-block IIFE call sites (`async ^{…}()`) are
-            // deliberately not disciplined here — the block desugar runs
-            // after check_unit, and the spawn/await split for block handles
-            // lands with the stage-3 spawn work (spec §5-3).
+            // Rule 2 covers async-block IIFEs too: invoking `async ^{…}(args)`
+            // yields a task handle, so the invocation must be awaited. The
+            // checker runs BEFORE the desugar, so the callee is still the
+            // block literal — matched directly or through a grouping paren
+            // (the shapes the desugar's IIFE arm accepts). A statement- or
+            // argument-position bare IIFE is an error; only
+            // `await (async ^…)(args)` consumes the task.
+            if let Some(c) = callee {
+                let is_async_block_callee = match &c.data {
+                    AstExprData::Block { is_async: true, .. } => true,
+                    AstExprData::Paren(inner) => matches!(&inner.data,
+                        AstExprData::Block { is_async: true, .. }),
+                    _ => false,
+                };
+                if is_async_block_callee && !awaited {
+                    errs.push(format!(
+                        "{0}:{1}: call to an async block must be awaited — invoking 'async ^{{…}}' yields a task handle, not a value (Async Semantics v1 rule 2)",
+                        e.line, e.col));
+                }
+            }
         }
         AstExprData::Unary { operand, .. } => {
             check_call_site_discipline_expr(operand, false, async_sels, errs)
@@ -1599,6 +1615,10 @@ struct AsyncCtx {
     /// Diagnostics produced while inferring elided block return types; handed
     /// back by `desugar_unit_m2` and printed as async warnings by the driver.
     warnings: Vec<String>,
+    /// Hard errors from the same inference: rule C — a value-carrying elided
+    /// block whose `return` expressions mix an object and a scalar result
+    /// never downgrades silently; the driver fails the unit on these.
+    errors: Vec<String>,
 }
 
 /// Does this expression evaluate to an NPTask handle? (async call whose
@@ -1679,13 +1699,27 @@ fn elided_block_return_type(
             None => ambiguous = true,
         }
     }
-    if ambiguous || seen.is_none() {
+    if ambiguous {
+        // Rule C: all value-carrying returns in one elided block must have
+        // compatible types — the inference never "picks one". A hard error,
+        // not a downgrade: a silent object/scalar mix would truncate one
+        // branch's result (an object stored as a word, or a scalar read as
+        // a pointer).
+        ctx.errors.push(format!(
+            "{}:{}: incompatible return types in this 'async ^{{…}}' block: \
+             its 'return' expressions mix an object and a scalar result — \
+             declare the return type explicitly ('async ^T') or make every \
+             branch return the same kind of value",
+            line, col));
+        return Some(Box::new(AstType::new(TypePrim::Long)));
+    }
+    if seen.is_none() {
         ctx.warnings.push(format!(
             "{}:{}: cannot infer the omitted return type of this 'async ^{{…}}' \
              block: its 'return' expressions are not statically classifiable \
              (only a declared selector/function result, a cast or a literal is) \
              — treating the result as a scalar word. Write the type explicitly \
-             ('async T ^') if the block really returns an object",
+             ('async ^T') if the block really returns an object",
             line, col));
         return Some(Box::new(AstType::new(TypePrim::Long)));
     }
@@ -2364,7 +2398,7 @@ fn normalize_task_handle(rt: &mut AstType) {
 }
 
 /// Apply the M2 desugar over the whole unit.
-pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> Vec<String> {
+pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String>) {
     // Signature normalization BEFORE anything else in this pass: the desugar,
     // the checker, and codegen all key off the old-model handle shape.
     normalize_async_signatures(unit);
@@ -2463,6 +2497,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> Vec<String> {
         in_method: false,
         current_class: None,
         warnings: Vec::new(),
+        errors: Vec::new(),
     };
     // Async block literals (§5 desugar) FIRST: every async `^{…}` in the unit
     // (method bodies, plain functions, main) becomes a hidden top-level thunk
@@ -2541,9 +2576,10 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> Vec<String> {
         lower_task_starts_decl(decl, &mut ctx);
         lower_toplevel_awaits_decl(decl);
     }
-    // §8-① diagnostics the elided-return inference produced — the driver prints
-    // them as async warnings (`-Werror` escalates them to errors).
-    std::mem::take(&mut ctx.warnings)
+    // §8-① diagnostics the elided-return inference produced: rule-C
+    // incompatibilities are hard errors (driver fails the unit), the
+    // unclassifiable fallback stays a warning (`-Werror` escalates those).
+    (std::mem::take(&mut ctx.errors), std::mem::take(&mut ctx.warnings))
 }
 
 /// `await e` in a non-async (synchronous) body → `jeti_task_await(e)`.
@@ -2774,17 +2810,44 @@ fn lower_async_blocks_expr(
             // the synthesized Await (it runs before the desugar), so using
             // blockOn in main is legal while a user-written `await` there
             // stays an error.
-            if selector == "blockOn:"
+            // `blockOn:junk:` — any selector starting with `blockOn:` on NPTask
+            // is bridge territory: the class declares no such methods itself,
+            // so a non-`blockOn:` shape is a rule-3 error, not a vtable dispatch.
+            if selector.starts_with("blockOn:")
                 && matches!(&receiver.data, AstExprData::VarRef { name, .. } if name == "NPTask")
             {
+                if selector != "blockOn:" {
+                    ctx.errors.push(format!(
+                        "{0}:{1}: +[NPTask blockOn:] takes exactly one async block argument — write '[NPTask blockOn:async ^{{ … }}]' (rule 3)",
+                        e.line, e.col));
+                    return;
+                }
                 if let [arg] = &mut args[..] {
+                    // `(async ^{…})` — a parenthesized block argument: look
+                    // through the Paren so the paren spelling takes the bridge
+                    // too. Without this the arm below misses, the call falls
+                    // through to a vtable dispatch for a selector NPTask does
+                    // not declare, and clang rejects the generated C
+                    // (`NPTask->blockOn_` — probe-verified). The block expr is
+                    // moved out whole (kind/line/col preserved); the Paren
+                    // wrapper is not preserved across the bridge — the thunk
+                    // call replaces the whole message-send expression.
+                    if let AstExprData::Paren(inner) = &mut arg.data {
+                        if matches!(&inner.data, AstExprData::Block { is_async: true, .. }) {
+                            let blk = std::mem::replace(
+                                &mut **inner,
+                                int_expr(0, arg.line, arg.col),
+                            );
+                            *arg = blk;
+                        }
+                    }
                     if let AstExprData::Block { params, return_type, body, is_async } =
                         &mut arg.data
                     {
                         if *is_async {
                             let params = std::mem::take(params);
                             let return_type = return_type.take();
-                            let body = body.take();
+                            let mut body = body.take();
                             let line = e.line;
                             let col = e.col;
                             let thunk_name = format!("jeti_async_block_{}", seq);
@@ -2792,6 +2855,17 @@ fn lower_async_blocks_expr(
                             let return_type = elided_block_return_type(
                                 return_type, body.as_deref(), ctx, line, col,
                             );
+                            // Nested async blocks inside the bridged body must
+                            // become thunks BEFORE this thunk's M2 desugar sees
+                            // them — otherwise they lower as plain C blocks and
+                            // their awaits never suspend (probe-verified: an
+                            // inner `return await [a calc:x];` miscompiled to a
+                            // synchronous vtable call inside a plain block).
+                            // Classify FIRST (above), lower AFTER — the comma
+                            // form the lowering produces is unclassifiable.
+                            if let Some(ref mut b) = body {
+                                lower_async_blocks_stmt(b, seq, top_decls, ctx);
+                            }
                             build_async_block_thunk(
                                 &thunk_name, &params, return_type.as_deref(), body,
                                 top_decls, ctx,
@@ -2822,10 +2896,31 @@ fn lower_async_blocks_expr(
                             };
                             return;
                         }
+                        // A plain block is synchronous and cannot be driven by
+                        // the bridge — rule 3 names the `async ^` spelling. A
+                        // silent fall-through here emitted `NPTask->blockOn_`
+                        // (probe-verified): codegen has no blockOn vtable slot,
+                        // and clang rejected it with an unrelated-looking error.
+                        ctx.errors.push(format!(
+                            "{0}:{1}: +[NPTask blockOn:] requires an async block — write 'async ^{{ … }}'; a plain block is synchronous and cannot be driven by the bridge (rule 3)",
+                            e.line, e.col));
+                        return;
                     }
+                    // Wrong shape entirely: a paren-wrapped plain block gets
+                    // the same fix-it; anything else is a shape error.
+                    let is_paren_plain_block = matches!(&arg.data, AstExprData::Paren(inner)
+                        if matches!(&inner.data, AstExprData::Block { is_async: false, .. }));
+                    ctx.errors.push(format!(
+                        "{0}:{1}: +[NPTask blockOn:] requires an async block argument — write '[NPTask blockOn:async ^{{ … }}]'{2} (rule 3)",
+                        e.line, e.col,
+                        if is_paren_plain_block { " — a plain block is synchronous and cannot be driven by the bridge" } else { "" }));
+                    return;
                 }
-                // blockOn: with a non-block or multi-arg shape falls through —
-                // codegen rejects it (no such vtable method on NPTask).
+                // Arity: `blockOn:` takes exactly one argument.
+                ctx.errors.push(format!(
+                    "{0}:{1}: +[NPTask blockOn:] takes exactly one async block argument — write '[NPTask blockOn:async ^{{ … }}]' (rule 3)",
+                    e.line, e.col));
+                return;
             }
             lower_async_blocks_expr(receiver, seq, top_decls, ctx);
             for a in args.iter_mut() { lower_async_blocks_expr(a, seq, top_decls, ctx); }
@@ -2836,15 +2931,30 @@ fn lower_async_blocks_expr(
         // IIFE auto-drives via drive_entry_call and an `await` IIFE unwraps
         // like any async call (§4.3 semantics).
         AstExprData::FuncCall { callee: Some(c), args, .. } => {
-            let is_async_block_callee = matches!(&c.data,
-                AstExprData::Block { is_async: true, .. });
+            // `(async ^…)(args)` — a parenthesized block callee is wrapped in
+            // Paren; unwrap it so the parenthesized IIFE takes the same arm
+            // as the direct `async ^…(args)` form. Without this the callee
+            // falls through to the generic call path and renders as an empty
+            // function name — the call degrades to `(args)` (probe-verified
+            // silent miscompile: the block never ran, the arg echoed back).
+            let is_async_block_callee = match &c.data {
+                AstExprData::Block { is_async: true, .. } => true,
+                AstExprData::Paren(inner) => matches!(&inner.data,
+                    AstExprData::Block { is_async: true, .. }),
+                _ => false,
+            };
             if is_async_block_callee {
-                let (params, return_type, body) = match std::mem::replace(
+                let (params, return_type, mut body) = match std::mem::replace(
                     &mut c.data,
                     AstExprData::Int(0),
                 ) {
                     AstExprData::Block { params, return_type, body, .. }
                         => (params, return_type, body),
+                    AstExprData::Paren(inner) => match inner.data {
+                        AstExprData::Block { params, return_type, body, .. }
+                            => (params, return_type, body),
+                        _ => unreachable!(),
+                    },
                     _ => unreachable!(),
                 };
                 let line = e.line;
@@ -2855,6 +2965,12 @@ fn lower_async_blocks_expr(
                 // thunk is built — the thunk signature, the return-to-result
                 // rewriting and the await-site value cast all key off it.
                 let return_type = elided_block_return_type(return_type, body.as_deref(), ctx, line, col);
+                // Nested async blocks inside the IIFE body: lower to thunks
+                // before this thunk's M2 desugar runs (same rule as the
+                // blockOn arm — classify first, lower after).
+                if let Some(ref mut b) = body {
+                    lower_async_blocks_stmt(b, seq, top_decls, ctx);
+                }
                 build_async_block_thunk(&thunk_name, &params, return_type.as_deref(), body, top_decls, ctx);
                 ctx.async_block_fns.insert(thunk_name.clone());
                 ctx.block_ret_obj.insert(

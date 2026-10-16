@@ -145,6 +145,7 @@
     if (!_cstr) return NULL;
     if (to > _length) to = _length;
     char *buf = (char *)malloc(to + 1);
+    if (!buf) return NULL;
     strncpy(buf, _cstr, to);
     buf[to] = '\0';
     NPString *result = [NPString stringWithUTF8String:buf];
@@ -158,6 +159,7 @@
         return NULL;
     }
     char *buf = (char *)malloc(range.length + 1);
+    if (!buf) return NULL;
     strncpy(buf, _cstr + range.location, range.length);
     buf[range.length] = '\0';
     NPString *result = [NPString stringWithUTF8String:buf];

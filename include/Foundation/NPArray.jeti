@@ -60,16 +60,21 @@
     return _count > 0 ? _items[_count - 1] : NULL;
 }
 
+// Value semantics, matching ObjC: `containsObject:` / `indexOfObject:` use
+// `isEqual:` (NPString/NPNumber compare by value), not pointer identity.
+// A nil needle matches nothing (ObjC would raise; we return NO / not-found).
 - (BOOL)containsObject:(T)obj {
+    if (!obj) return NO;
     for (size_t i = 0; i < _count; i++) {
-        if (_items[i] == obj) return YES;
+        if (_items[i] && [_items[i] isEqual:obj]) return YES;
     }
     return NO;
 }
 
 - (size_t)indexOfObject:(T)obj {
+    if (!obj) return (size_t)-1;
     for (size_t i = 0; i < _count; i++) {
-        if (_items[i] == obj) return i;
+        if (_items[i] && [_items[i] isEqual:obj]) return i;
     }
     return (size_t)-1;
 }
@@ -119,7 +124,8 @@
 }
 
 - (NPString *)description {
-    NPString *result = [NPString stringWithUTF8String:"["];
+    // ObjC NSArray description 形态：`(a, b)`（圆括号包裹）。
+    NPString *result = [NPString stringWithUTF8String:"("];
     for (size_t i = 0; i < _count; i++) {
         if (i > 0) {
             result = [result stringByAppendingUTF8String:", "];
@@ -130,7 +136,7 @@
             result = [result stringByAppendingUTF8String:"(null)"];
         }
     }
-    result = [result stringByAppendingUTF8String:"]"];
+    result = [result stringByAppendingUTF8String:")"];
     return result;
 }
 

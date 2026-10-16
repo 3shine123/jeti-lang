@@ -14,7 +14,7 @@
 //     [t start];              → jeti_task_start(t)     // 仅入队；阻塞驱动用 await
 //     await t                 → jeti_task_await(t)     // 未 start 自动 start，取结果
 //     await [f compute:1]     → create + start + await // 唯一调用形态（规则2）
-//     [NPTask blockOn:async T ^{…}] → thunk + jeti_task_await  // 唯一同步桥（规则3）
+//     [NPTask blockOn:async ^ T {…}] → thunk + jeti_task_await  // 唯一同步桥（规则3）
 //
 // 本头不声明任何符号：`NPTask` 的 C 类型来自 jeti/runtime.h（Foundation.hje 已包含）。
 // 它存在只为保持「每个 Foundation 类型都有 .hje/.jeti 对」的目录约定，以及给

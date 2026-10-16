@@ -1,15 +1,22 @@
 // Golden: async block IIFE in a plain function (main) — §5 self-context.
-// There is no `self` in scope; the IIFE's hidden capture argument is
-// `(NPObject *)0` (a block body that actually uses `self` here is already a
-// checker error). Statement position auto-drives (hosted, §5.1). Expected:
+// v1 rule 2: a bare IIFE statement position was removed — invoking an async
+// block yields a task handle and MUST be awaited; sync `main` enters through
+// the blockOn bridge (rule 3). There is no `self` in scope in main; the
+// hidden capture argument is `(NPObject *)0` (a block body that actually
+// uses `self` there is already a checker error). Expected:
+//   iife=42
 //   main done
 #import <Foundation/Foundation.hje>
 #import <stdio.h>
 
 int main(void) {
-    async int ^(void) {
-        return 42;
-    }();
+    long r = [NPTask blockOn:async ^ void {
+        int v = await (async ^ int (void) {
+            return 42;
+        })();
+        printf("iife=%d\n", v);
+    }];
+    (void)r;
     printf("main done\n");
     return 0;
 }

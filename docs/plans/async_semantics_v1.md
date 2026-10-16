@@ -33,19 +33,40 @@
    `await` 一个非 async 表达式 → **warning**（不阻断）。未来可加
    `-Wunhandled-throws`（第二阶段）。
 
-**语法锚点（勿被评审稿笔误带偏）**：async 块字面量是 `async int ^{ … }`
-—— `async` 在 `^` **之前**（parser 实测拼法）。评审示例里的 `^async int {…}`
-是错误拼写，禁止采用。spawn/blockOn 的块实参写法：
+**语法锚点（2026-10-15 定案，勿被历史评审稿带偏）**：async 块字面量是
+`async ^ …` —— `async` 修饰符在 `^` **之前**，块内布局与普通块完全一致
+（返回类型在 `^` **之后**，可省略走推导）：`async ^{ … }`、
+`async ^ int (int x) { … }`、`async ^(int x) { … }`（返回推导）。
+`async` 仍是软关键字（标识符用法不受影响）；Jeti 扩展语法豁免：
+`async` 后随 `^` 恒为 async 块起点，无 XOR 回退——变量名 `async` 与
+`^` 运算组合不受支持。用户 typedef 名叫 `async` 时，`^async(int v)`
+仍是普通块（返回类型为该 typedef），与 async 块永不共享语法槽。
+
+**反转记录（本文件第 2 次）**：2026-10-13 定案 `async int ^{…}`（返回类型
+夹在 `async` 与 `^` 之间）；2026-10-15 曾改为 `^async`（修饰符在 `^` 后），
+同日因与"async 作块返回类型"争用同一语法槽而撤销；**终局 `async ^`**——
+修饰符在块结构之外，`^` 后仍是纯块声明符，不发明第二套推导机制。
+
+spawn/blockOn 的块实参写法（spawn 语法属阶段3，此处仅示块拼法）：
 
 ```objc
-NPTask<int> *t = [NPTask spawn:async int ^ {
+NPTask<int> *t = [NPTask spawn:async ^ int (void) {
     return await [f compute:1];
 }];
-return [NPTask blockOn:async int ^ {
+return [NPTask blockOn:async ^ void {
     await [Demo run];
-    return 0;
 }];
 ```
+
+**省略返回类型的推导规则（§8-① 已落地）**：
+A. 无带值 `return` → `void`；B. 有带值 `return` → 按其结果类型推导
+（声明方法/函数结果、cast、字符串/整型字面量、`await` 解包后的业务类型
+均可分类）；C. 多个带值 `return` 类型不兼容（对象与标量混回）→ **硬错误**
+——推导绝不"挑一个"；静态不可分类（如纯算术表达式）→ 警告 + 标量兜底
+（`-Werror` 升级）。块**参数**类型必须显式（沿用 ObjC 块规则，不推导）。
+调用点纪律：`async ^{…}(args)` IIFE 产生任务句柄，必须
+`await (async ^{…})(args)`；blockOn/IIFE 块体内嵌套的 async 块在降级期
+递归成 thunk（内层 await 真正挂起）。
 
 ## 3. 反转记录（供未来会话查证，勿拿旧决策当依据）
 

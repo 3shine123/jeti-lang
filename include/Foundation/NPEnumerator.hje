@@ -1,0 +1,26 @@
+#ifndef NPENUMERATOR_NH
+#define NPENUMERATOR_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPArray.hje>
+
+// NPEnumerator — 单向迭代器（对应 ObjC 的 NSEnumerator）。
+// 适配三类源：数组元素、字典键、集合成员（集合经 allObjects 有序化）。
+// 消费式：nextObject 走到底后恒返回 nil；reset 不可用（ObjC 同款语义），
+// 需要重来就再取一个枚举器。for-in 已覆盖数组场景；本类补
+// "半途转手 / 存起来慢慢消费" 与字典键遍历的表达力。
+@interface NPEnumerator : NPObject {
+@public
+    NPArray *_items;   // 借用：构造时 retain，dealloc 释放
+    size_t   _index;
+}
++ (NPEnumerator *)enumeratorWithArray:(NPArray *)array;
++ (NPEnumerator *)keyEnumeratorWithDictionary:(id)dictionary;   // allKeys
++ (NPEnumerator *)objectEnumeratorWithDictionary:(id)dictionary; // allValues
++ (NPEnumerator *)objectEnumeratorWithSet:(id)set;              // allObjects
+- (NPEnumerator *)initWithArray:(NPArray *)array;
+- (id)nextObject;    // 走完返回 nil
+- (NPArray *)allObjects;  // 剩余未消费部分（新数组）
+@end
+
+#endif

@@ -1,0 +1,20 @@
+#import <Foundation/NPNull.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPObject.jeti>
+
+@implementation NPNull
+
++ (NPNull *)null {
+    static NPNull *shared = NULL;
+    if (!shared) {
+        shared = [[NPNull alloc] init];
+        jeti_retain(shared); // 常驻：单例永不释放
+    }
+    return shared;
+}
+
+- (id)description {
+    return [NPString stringWithUTF8String:"<null>"];
+}
+
+@end

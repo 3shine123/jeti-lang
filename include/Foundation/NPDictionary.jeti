@@ -114,10 +114,11 @@
 }
 
 - (NPString *)description {
+    // ObjC NSDictionary description 形态：`{ k = v; }`（花括号 + 分号结尾）。
     NPString *result = [NPString stringWithUTF8String:"{"];
     for (size_t i = 0; i < _count; i++) {
         if (i > 0) {
-            result = [result stringByAppendingUTF8String:", "];
+            result = [result stringByAppendingUTF8String:" "];
         }
         if (_keys[i]) {
             result = [result stringByAppendingString:[_keys[i] description]];
@@ -130,8 +131,9 @@
         } else {
             result = [result stringByAppendingUTF8String:"(null)"];
         }
+        result = [result stringByAppendingUTF8String:";"];
     }
-    result = [result stringByAppendingUTF8String:"}"];
+    result = [result stringByAppendingUTF8String:" }"];
     return result;
 }
 

@@ -1,0 +1,36 @@
+#ifndef NPCACHE_NH
+#define NPCACHE_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPArray.hje>
+#import <Foundation/NPMutableArray.hje>
+#import <Foundation/NPMutableDictionary.hje>
+
+// NPCache — 容量受限的对象缓存（对应 ObjC 的 NSCache 的可用子集）。
+//
+// v1 语义：
+//   * objectForKey: 命中会把该键提升为最近使用（LRU）；
+//   * 插入超过 countLimit 时淘汰最久未使用的条目（countLimit=0 = 不限）；
+//   * 键用 isEqual: 值语义（NPString/NPNumber 可作键，同 NPDictionary）；
+//   * 缓存持有值（retain），非弱引用 —— ObjC NSCache 的 evictable/弱值
+//     特性 v1 不做。
+// 存储：NPMutableDictionary 键→值 + NPArray 访问序（首=最旧，尾=最新）。
+@interface NPCache : NPObject {
+@public
+    NPMutableDictionary *_store;   // 键 → 值
+    NPMutableArray *_order;        // 访问序键表：首=最旧
+    size_t _countLimit;            // 0 = 不限
+}
++ (NPCache *)cache;
+- (NPCache *)initWithCountLimit:(size_t)limit;
+- (void)setCountLimit:(size_t)limit;
+- (size_t)countLimit;
+- (id)objectForKey:(id)key;                  // 命中提升 LRU；未中 nil
+- (void)setObject:(id)object forKey:(id)key; // 超限淘汰最旧
+- (void)removeObjectForKey:(id)key;
+- (void)removeAllObjects;
+- (size_t)count;
+@end
+
+#endif

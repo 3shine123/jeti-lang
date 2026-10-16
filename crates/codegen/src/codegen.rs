@@ -1978,8 +1978,21 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
             // also registers the gcc invoke static into the block_defs buffer)
             // and call it in place, instead of rendering an empty callee name.
             if let Some(ref ce) = callee {
-                if matches!(&ce.data, AstExprData::Block { .. }) {
-                    let blk = convert_expr(ce, class_infos);
+                // `(block)(args)` — a parenthesized block callee is wrapped in
+                // Paren; unwrap it so the parenthesized IIFE takes this arm.
+                // Without this the callee renders as an empty function name
+                // and the call degrades to `(args)` (probe-verified silent
+                // miscompile with args, `()` with none).
+                let blk_src = match &ce.data {
+                    AstExprData::Block { .. } => Some(&**ce),
+                    AstExprData::Paren(inner) => match &inner.data {
+                        AstExprData::Block { .. } => Some(&**inner),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(blk_src) = blk_src {
+                    let blk = convert_expr(blk_src, class_infos);
                     let lit = match blk.data {
                         CgExprData::BlockLit(d) => d,
                         _ => unreachable!("block callee must convert to BlockLit"),
@@ -6097,7 +6110,26 @@ fn nil_msg_fallback(type_str: Option<&str>) -> String {
 
 fn emit_expr(e: &CgExpr, out: &mut String) {
     match &e.data {
-        CgExprData::Int(val) => { let _ = write!(out, "{}", val); }
+        CgExprData::Int(val) => {
+            let _ = write!(out, "{}", val);
+            // Suffix-carrying literals must keep their suffix in the emitted
+            // C: `1LL << 60` printed as `1 << 60` shifts in `int` (UB) and
+            // corrupts the value before any widening. The suffix decision
+            // comes from the parser-annotated literal type, not the value.
+            if let Some(t) = e.type_str.as_deref().map(str::trim) {
+                let suf = match t {
+                    "long" => "L",
+                    "long long" => "LL",
+                    "unsigned" => "U",
+                    "unsigned long" => "UL",
+                    "unsigned long long" => "ULL",
+                    _ => "",
+                };
+                if !suf.is_empty() && *val >= 0 {
+                    let _ = write!(out, "{}", suf);
+                }
+            }
+        }
         CgExprData::Float(val) => {
             let s = format!("{}", val);
             if s.contains('.') || s.contains('e') || s.contains('E') {

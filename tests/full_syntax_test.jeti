@@ -863,7 +863,7 @@ static void sec5_misc(void) {
     printf("5.6 throws %d\n", caught);
 
     // 5.7 async 入口：唯一同步桥 blockOn（v1 规则3；语句位裸调用已被规则2废除）
-    [NPTask blockOn:async void ^ { await [FsFetcher runAll]; }];
+    [NPTask blockOn:async ^ void { await [FsFetcher runAll]; }];
 
     // 5.8 内联 asm：basic / extended(volatile+clobber) / 命名操作数 / 读写 / asm goto
     asm("nop");
@@ -969,7 +969,7 @@ int main(void) {
     sec3_expressions();
     sec4_control_runtime();
     sec5_misc();
-    [NPTask blockOn:async void ^ { await [FsApi runAll10]; }];
+    [NPTask blockOn:async ^ void { await [FsApi runAll10]; }];
     printf("ALL SECTIONS DONE\n");
     return 0;
 }
