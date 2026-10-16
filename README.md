@@ -281,13 +281,14 @@ works too. Argument positions are not treated as selector positions, which the
 AST — not the text — decides. Signature help shows the signature of the call the
 cursor is in and highlights the parameter being filled in (`:` triggers it).
 
-Scope today: the lifecycle handshake, full-document sync
+Scope today: the lifecycle handshake, incremental document sync
 (`didOpen`/`didChange`/`didClose` → `publishDiagnostics`),
 `textDocument/documentSymbol`, `textDocument/definition`, `textDocument/hover`,
 `textDocument/completion` (global names plus receiver members; protocol members
 for `id<P>` and generic argument substitution are not in yet) and
-`textDocument/signatureHelp`. Rename, incremental sync and ARC-only diagnostics
-are not in yet.
+`textDocument/signatureHelp`, with **incremental** document sync (the client
+sends changed ranges, not the whole buffer). Rename and ARC-only diagnostics are
+not in yet.
 
 ### VS Code
 

@@ -268,10 +268,10 @@ jeti-lsp --include include        # 在 stdin/stdout 上说 LSP
 `obj.` 同样可用；实参位置不会被当成 selector 位置（由 AST 判断，不是靠文本猜）。
 signature help 显示光标所在调用的签名并高亮正在填的参数（`: ` 触发）。
 
-当前范围：生命周期握手、全量文档同步（`didOpen`/`didChange`/`didClose` → `publishDiagnostics`）、
+当前范围：生命周期握手、增量文档同步（`didOpen`/`didChange`/`didClose` → `publishDiagnostics`）、
 `textDocument/documentSymbol`、`textDocument/definition`、`textDocument/hover`、`textDocument/completion`
-（全局名字 + 接收者成员；`id<P>` 的协议成员与泛型参数替换还没做）、`textDocument/signatureHelp`。
-rename、incremental sync、ARC 专属诊断尚未实现。
+（全局名字 + 接收者成员；`id<P>` 的协议成员与泛型参数替换还没做）、`textDocument/signatureHelp`，
+文档同步是**增量**的（客户端只发改动的区间，不重发整个缓冲区）。rename、ARC 专属诊断尚未实现。
 
 ### VS Code
 

@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停、补全（全局名字 + 接收者成员）与 signature help**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的 rename/incremental sync 等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停、补全（全局名字 + 接收者成员）、signature help 与增量同步**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的 rename/调试器适配等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -109,7 +109,7 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
-- 未做（后续阶段）：rename、incremental sync、workspace folders、ARC 专属诊断、
+- 未做（后续阶段）：rename（需要项目级引用索引）、分析结果的缓存/编辑合并、workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`），以及成员补全里的协议/泛型细化。
 
 **进展（大纲 + 定义跳转 —— 已落地）**
@@ -174,6 +174,21 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 遍历用 `BodyWalk` 显式列出 `AstStmtData` / `AstExprData` 的**全部**变体（不用 `_ =>`），
   所以 AST 新增变体会编译失败，而不是悄悄少收集；没有源位置的合成节点跳过。
 - 未做：协议成员（`id<P>`）与泛型参数替换（`NPArray<T>` 的 `T` 具体化）。
+**进展（增量同步 —— 已落地）**
+
+- `textDocumentSync: 2`（Incremental）。`didChange` 按 LSP 规定**顺序**应用每条 change：带 `range` 的做区间替换，
+  不带 range 的整篇替换（编辑器整篇重写时就是这么发的）。行列换算复用 `SourceFile::lsp_to_offset`
+  （0 基行 + UTF-16 列 → 字节 offset），所以 "emoji 之后的那个字符" 落在编辑器说的地方，而不是按字节数算。
+- 区间不合法（行列越界、start > end）时**不接受**该改动并停止应用（继续用旧文本），绝不猜——猜出来的文本会与
+  编辑器显示的内容悄悄分叉。
+- 客户端不再重发整个缓冲区：`lsp-client.js` 直接转发 VS Code 的 `contentChanges`（range 已是 0 基行 + UTF-16 列，
+  与 LSP 同坐标，无需转换）；事件里没有 contentChanges 时退化为整篇替换，服务器同样接受。
+- **诚实说明**：增量同步省的是传输与 JSON 体积，**不减少分析开销**——每次改动仍跑一遍完整前端
+  （典型文件 ~25 ms，9 KB ~30 ms）。真正的大文件杠杆是缓存（头文件文本/解析结果复用）与合并高频编辑（debounce）。
+- 回归：单测覆盖插入/删除/替换/整篇替换/UTF-16 前后编辑/非法区间拒绝，以及服务器级"区间编辑后诊断跟着移动"；
+  会话测试用真实二进制做"删掉 `;` 报错、再插回清零"；`test/extension.test.js` 覆盖经 VS Code 事件对象
+  （带 range）的整条路径。
+
 **进展（signature help —— 已落地）**
 
 - `textDocument/signatureHelp`：光标所在的调用 → 签名 + 当前在填第几个参数。
