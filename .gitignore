@@ -26,6 +26,11 @@ __pycache__/
 *.swo
 *~
 
+# VS Code extension packaging (`vsce package` writes the VSIX next to it; the
+# extension itself has no npm dependencies, so node_modules should stay empty).
+*.vsix
+node_modules/
+
 # Other
 todo.md
 mimo.sh

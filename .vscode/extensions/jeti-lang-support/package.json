@@ -2,13 +2,18 @@
   "name": "jeti-lang",
   "displayName": "Jeti Language",
   "description": "Syntax highlighting and language support for Jeti — a statically-dispatched Objective-C dialect",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "jeti-lang",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:jeti"
   ],
   "contributes": {
     "languages": [
@@ -32,6 +37,27 @@
         "scopeName": "source.jeti",
         "path": "./syntaxes/jeti.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Jeti",
+      "properties": {
+        "jeti.serverPath": {
+          "type": "string",
+          "default": "jeti-lsp",
+          "markdownDescription": "Path to the `jeti-lsp` executable. A bare name is resolved against `PATH`, after checking the workspace's own `target/debug/jeti-lsp` and `target/release/jeti-lsp` (so working inside the Jeti repository needs no configuration). Build it with `cargo build -p jeti-lsp`."
+        },
+        "jeti.searchPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "include",
+            "."
+          ],
+          "markdownDescription": "Directories passed to the server as `--include`, used to resolve `#import`. Relative entries are resolved against the workspace folder; the directory of each open document is always searched first."
+        }
+      }
+    }
   }
 }

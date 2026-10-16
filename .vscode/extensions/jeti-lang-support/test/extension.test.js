@@ -1,0 +1,254 @@
+'use strict';
+
+/**
+ * Verifies the extension glue in `extension.js` — settings resolution, the
+ * document-event wiring, and the LSP→VS Code diagnostic conversion — without
+ * VS Code: `require('vscode')` is intercepted and answered with a small stub,
+ * and the document events are fired by hand. The server underneath is the real
+ * `jeti-lsp` binary, so this covers the whole path an editor takes.
+ *
+ *   cargo build -p jeti-lsp
+ *   node .vscode/extensions/jeti-lang-support/test/extension.test.js
+ *
+ * `JETI_LSP=/path/to/jeti-lsp` overrides the binary (as `jeti.serverPath`).
+ */
+
+const assert = require('assert');
+const fs = require('fs');
+const Module = require('module');
+const os = require('os');
+const path = require('path');
+const { pathToFileURL } = require('url');
+
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const SERVER = process.env.JETI_LSP || path.join(REPO_ROOT, 'target', 'debug', 'jeti-lsp');
+
+// ---------------------------------------------------------------------------
+// The `vscode` stub. Only what extension.js touches.
+// ---------------------------------------------------------------------------
+
+const warnings = [];
+const outputLines = [];
+const collections = new Map();
+const listeners = new Map();
+
+const vscode = {
+  DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  Position: class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  },
+  Range: class Range {
+    constructor(startLine, startCharacter, endLine, endCharacter) {
+      this.start = { line: startLine, character: startCharacter };
+      this.end = { line: endLine, character: endCharacter };
+    }
+  },
+  Diagnostic: class Diagnostic {
+    constructor(range, message, severity) {
+      this.range = range;
+      this.message = message;
+      this.severity = severity;
+      this.source = undefined;
+    }
+  },
+  Uri: {
+    parse: (text) => ({ text, toString: () => text }),
+    file: (p) => ({ text: pathToFileURL(p).toString(), toString() { return this.text; }, fsPath: p }),
+  },
+  languages: {
+    createDiagnosticCollection: (name) => {
+      const store = new Map();
+      collections.set(name, store);
+      return {
+        set: (uri, diagnostics) => store.set(uri.toString(), diagnostics),
+        delete: (uri) => store.delete(uri.toString()),
+        clear: () => store.clear(),
+        dispose: () => store.clear(),
+      };
+    },
+  },
+  window: {
+    createOutputChannel: (name) => ({
+      append: (text) => outputLines.push(text),
+      appendLine: (line) => outputLines.push(line),
+      dispose: () => {},
+    }),
+    showWarningMessage: (message) => warnings.push(message),
+  },
+  workspace: {
+    workspaceFolders: [{ uri: { fsPath: REPO_ROOT, toString: () => pathToFileURL(REPO_ROOT).toString() } }],
+    textDocuments: [],
+    // Defaults mirror package.json; `overrides` lets a test change a setting.
+    getConfiguration: () => ({
+      get: (key) => overrides[key] ?? defaults[key],
+    }),
+    onDidOpenTextDocument: (listener) => subscribe('open', listener),
+    onDidChangeTextDocument: (listener) => subscribe('change', listener),
+    onDidCloseTextDocument: (listener) => subscribe('close', listener),
+    onDidChangeConfiguration: (listener) => subscribe('config', listener),
+  },
+};
+
+const defaults = {
+  serverPath: 'jeti-lsp',
+  searchPaths: ['include', '.'],
+};
+const overrides = {};
+
+function subscribe(kind, listener) {
+  if (!listeners.has(kind)) listeners.set(kind, []);
+  listeners.get(kind).push(listener);
+  return { dispose: () => {} };
+}
+
+function fire(kind, event) {
+  for (const listener of listeners.get(kind) || []) listener(event);
+}
+
+// Intercept `require('vscode')` before extension.js is loaded.
+const originalLoad = Module._load;
+Module._load = function (request, ...rest) {
+  if (request === 'vscode') return vscode;
+  return originalLoad.call(this, request, ...rest);
+};
+
+const extension = require('../extension.js');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function waitUntil(predicate, what, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = predicate();
+    if (value) return value;
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+function documentFor(file, text) {
+  return {
+    uri: { fsPath: file, toString: () => pathToFileURL(file).toString() },
+    languageId: 'jeti',
+    getText: () => text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The scenario
+// ---------------------------------------------------------------------------
+
+async function main() {
+  if (!fs.existsSync(SERVER)) {
+    console.error(`FAIL: no server at ${SERVER} — run "cargo build -p jeti-lsp" first (or set JETI_LSP)`);
+    process.exitCode = 1;
+    return;
+  }
+  if (process.env.JETI_LSP) overrides.serverPath = process.env.JETI_LSP;
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jeti-lsp-ext-'));
+  const file = path.join(dir, 'probe.jeti');
+  const broken = 'int main(void) { return 0 }\n';
+  const fixed = 'int main(void) { return 0; }\n';
+  const uri = pathToFileURL(file).toString();
+  fs.writeFileSync(file, broken);
+
+  const context = { subscriptions: [] };
+  try {
+    await extension.activate(context);
+    assert.deepStrictEqual(warnings, [], `unexpected warning: ${warnings.join('; ')}`);
+    assert.ok(
+      outputLines.some((line) => line.includes('jeti-lsp started')),
+      `expected a start log line, got: ${outputLines.join(' | ')}`,
+    );
+    assert.ok(
+      outputLines.some((line) => line.includes(path.join('target', 'debug', 'jeti-lsp'))),
+      'a bare "jeti-lsp" setting should prefer the workspace build output',
+    );
+    console.log('ok  activate → server started from the workspace build output');
+
+    const collection = () => collections.get('jeti');
+    assert.ok(collection(), 'expected a "jeti" diagnostic collection');
+
+    // didOpen → diagnostics rendered into the collection (LSP → VS Code).
+    fire('open', documentFor(file, broken));
+    const diagnostics = await waitUntil(() => {
+      const entries = collection().get(uri);
+      return entries && entries.length ? entries : null;
+    }, 'diagnostics for the opened buffer');
+    assert.strictEqual(diagnostics.length, 1);
+    assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
+    assert.strictEqual(diagnostics[0].source, 'jeti');
+    assert.deepStrictEqual(diagnostics[0].range.start, { line: 0, character: 24 });
+    assert.match(diagnostics[0].message, /expected ';'/);
+    console.log(`ok  didOpen → collection has ${diagnostics.length} diagnostic: ${diagnostics[0].message}`);
+
+    // didChange (full text) → cleared.
+    fire('change', { document: documentFor(file, fixed) });
+    await waitUntil(() => (collection().get(uri) || []).length === 0, 'cleared diagnostics');
+    console.log('ok  didChange → collection cleared');
+
+    // didClose → entry dropped from the collection.
+    fire('close', documentFor(file, fixed));
+    await waitUntil(() => !collection().has(uri), 'the closed document to be dropped');
+    console.log('ok  didClose → entry dropped');
+
+    // A non-jeti document is ignored (no crash, no publish).
+    fire('open', {
+      uri: { fsPath: '/tmp/other.txt', toString: () => 'file:///tmp/other.txt' },
+      languageId: 'plaintext',
+      getText: () => 'hi',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(!collection().has('file:///tmp/other.txt'), 'non-jeti documents must not be sent');
+    console.log('ok  non-jeti document ignored');
+    // A missing server must not throw: it warns, stays inert, and a settings
+    // change brings it back without reloading the window.
+    await extension.deactivate();
+    // A fresh extension host: no listeners left over from the first activate.
+    listeners.clear();
+    warnings.length = 0;
+    overrides.serverPath = path.join(dir, 'no-such-server');
+    await extension.activate({ subscriptions: [] });
+    assert.ok(
+      warnings.some((warning) => warning.includes('failed to start')),
+      `expected a "failed to start" warning, got: ${warnings.join(' | ')}`,
+    );
+    console.log('ok  missing server → warning, no crash');
+
+    outputLines.length = 0;
+    overrides.serverPath = SERVER;
+    fire('config', { affectsConfiguration: (section) => section === 'jeti' });
+    await waitUntil(() => outputLines.some((line) => line.includes('jeti-lsp started')), 'the restarted server');
+    fire('open', documentFor(file, broken));
+    const revived = await waitUntil(() => {
+      const entries = collection().get(uri);
+      return entries && entries.length ? entries : null;
+    }, 'diagnostics after the restart');
+    assert.match(revived[0].message, /expected ';'/);
+    console.log('ok  settings change → server revived and reporting again');
+  } catch (error) {
+    process.exitCode = 1;
+    console.error(`FAIL: ${error.message}`);
+    if (outputLines.length) console.error(`extension log:\n${outputLines.join('\n')}`);
+  } finally {
+    await extension.deactivate();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+let exited = false;
+process.on('exit', () => {
+  exited = true;
+});
+main().then(() => {
+  if (!exited && process.exitCode !== 1) console.log('\nextension.test.js: all checks passed');
+  if (!exited) process.exit(process.exitCode || 0); // the server's stdio keeps the loop alive
+});

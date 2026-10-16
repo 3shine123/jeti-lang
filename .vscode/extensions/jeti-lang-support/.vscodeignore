@@ -1,0 +1,6 @@
+# Packaging (`vsce package`) ships the editor half only — the node-only test
+# harness and repo bookkeeping files stay out of the VSIX.
+test/**
+.vscodeignore
+.DS_Store
+**/.DS_Store
