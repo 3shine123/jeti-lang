@@ -109,6 +109,10 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
+- **语法错误不再截断后续诊断**：`analyze_document` 与 `transpile` 的差别只有这一处——parse 失败时把恢复出的 CST 继续交给
+  bind / elaborate / EH·defer·pattern·async desugar / checker，于是"语法错误 + 它下面的类型/ARC 错误"一起报出，
+  并照旧回传 AST（因此文件里有语法错误时，大纲、定义跳转、悬停、补全仍然可用）。`transpile` 依旧拒绝为解析失败的文件
+  生成代码。没有这一条时，一个漏写的 `;` 会把它下面所有诊断全部藏起来，改一个才看一个（clang 的行为是两者一起报）。
 - 未做（后续阶段）：rename（需要项目级引用索引）、分析结果的缓存/编辑合并、workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`），以及成员补全里的协议/泛型细化。
 

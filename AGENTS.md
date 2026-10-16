@@ -183,5 +183,8 @@ node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue
   `transpile`, sharing `Pipeline::prepare`, and every request (diagnostics, outline,
   definition) answers from that one run's AST and `SourceMap` (walking the AST it
   was handed is the consumer's job, as it is for codegen). New front-end
-  stages/fatality rules must be mirrored there, not duplicated.
+  stages/fatality rules must be mirrored there, not duplicated — the one deliberate
+  difference is a **parse error**: the editor hands the recovered CST to the later
+  stages (fix one error, see them all, and the AST still answers outline/definition),
+  while `transpile` refuses to emit code at all.
 - **Destructive git ops need user approval.**

@@ -254,7 +254,11 @@ impl Pipeline {
     ///
     /// This is the entry the LSP (and any "check this buffer" caller) uses. It
     /// reports the stages that ran, in stage order, and stops descending once a
-    /// stage fails because the later stages have nothing sound to work on. The
+    /// stage fails because the later stages have nothing sound to work on — with
+    /// one deliberate exception: a **parse error does not stop the descent**
+    /// (the recovered CST is still handed on), so a file with a syntax mistake
+    /// still gets its type/ARC diagnostics and still yields an AST for outline,
+    /// definition and completion. `transpile` is the one that must refuse. The
     /// diagnostics carry the shared positions (`file`, 1-based source `line`,
     /// **byte** `col` and the exclusive `end_col`), so a consumer only has to
     /// project the columns into its own unit; it must never re-derive positions.
@@ -279,7 +283,7 @@ impl Pipeline {
     ///
     /// [`SourceMap`]: jeti_cst::source_map::SourceMap
     pub fn analyze_document(&mut self, source: &str, filename: &str) -> Analysis {
-        let Prepared { pre, cst, parser_diags, parser_has_error } =
+        let Prepared { pre, cst, parser_diags, parser_has_error: _ } =
             match self.prepare(source, filename) {
                 Ok(p) => p,
                 // The preprocessor failed: no positions exist to report against.
@@ -291,11 +295,30 @@ impl Pipeline {
                     }
                 }
             };
+        self.finish_analysis(&pre, cst, parser_diags, filename)
+    }
+
+    /// The stages after the parse: bind → elaborate → EH / `@defer` / legacy
+    /// `@finally` / pattern / async desugar → checker, stopping at the first
+    /// stage that fails (the later ones have nothing sound to work on). `diags`
+    /// arrives seeded with the parser's list.
+    ///
+    /// A **parse error does not stop the descent**: the recovered CST is handed
+    /// on, so a file with a syntax mistake still gets its type/ARC diagnostics
+    /// and still yields an AST for outline, definition, hover and completion.
+    /// Before this, one forgotten `;` reported that `;` and nothing else — every
+    /// error below it stayed invisible until the `;` was fixed (fix-one-see-one),
+    /// and no AST came back, so every request about the file went blank too.
+    /// `transpile` calls this as well when the parse failed: it is the *codegen*
+    /// refusal, not the analysis, that a broken file must stop.
+    fn finish_analysis(
+        &mut self,
+        pre: &Preprocessor,
+        cst: Option<jeti_cst::TranslationUnit>,
+        mut diags: Vec<Diagnostic>,
+        filename: &str,
+    ) -> Analysis {
         let sm = pre.source_map.clone();
-        let mut diags = parser_diags;
-        if parser_has_error {
-            return Self::stopped(diags, sm);
-        }
         let Some(mut cst) = cst else { return Self::stopped(diags, sm) };
         cst.filename = filename.to_string();
 
@@ -383,13 +406,20 @@ impl Pipeline {
     pub fn transpile(&mut self, source: &str, filename: &str) -> Result<String, String> {
         let Prepared { pre, cst, parser_diags, parser_has_error } =
             self.prepare(source, filename)?;
-        let mut cst = cst
-            .ok_or_else(|| format!("Parse failed:\n{}", render_checker_diags(&parser_diags, &pre.source_map)))?;
-        cst.filename = filename.to_string();
-
-        if parser_has_error {
-            return Err(format!("Parse failed:\n{}", render_checker_diags(&parser_diags, &pre.source_map)));
+        // A file that does not parse is never compiled — but it *is* analyzed the
+        // rest of the way, so the terminal prints what the editor publishes: the
+        // parse diagnostics plus whatever the recovered CST lets the later stages
+        // decide. Hiding every error below the syntax mistake made the CLI and the
+        // editor disagree about the same file. See `finish_analysis`.
+        if parser_has_error || cst.is_none() {
+            let analysis = self.finish_analysis(&pre, cst, parser_diags, filename);
+            return Err(format!(
+                "Parse failed:\n{}",
+                render_checker_diags(&analysis.diagnostics, &analysis.source_map)
+            ));
         }
+        let mut cst = cst.expect("checked for `None` just above");
+        cst.filename = filename.to_string();
 
         // Step 2: Bind names
         if self.verbose { eprintln!("[jetic] binding names..."); }

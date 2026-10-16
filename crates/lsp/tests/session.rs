@@ -121,6 +121,87 @@ fn the_arc_switch_reaches_the_analysis() {
     assert_eq!(child.wait().expect("wait").code(), Some(0));
 }
 
+/// A syntax error must not hide the diagnostics *after* it.
+///
+/// One forgotten `;` used to stop the descent at the parser: the type errors
+/// further down stayed invisible until the `;` was fixed (fix one, see one), and
+/// because no AST came back the outline, definition, hover and completion went
+/// blank for the whole file too. The editor path (`Pipeline::analyze_document`)
+/// hands the recovered CST to the later stages; `transpile` still refuses to
+/// emit code for such a file.
+#[test]
+fn a_syntax_error_does_not_hide_later_diagnostics() {
+    let dir = std::env::temp_dir().join("jeti_lsp_session_test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("mixed.jeti");
+    let mixed = "\
+int main(void) {
+    int a = 1
+    [self release];
+    return 0;
+}
+";
+    std::fs::write(&path, mixed).expect("write probe file");
+    let uri = format!("file://{}", path.display());
+
+    let (mut child, mut stdin, mut stdout) = spawn(&[]);
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {},
+        })).as_bytes())
+        .expect("write initialize");
+    stdin.flush().expect("flush");
+    read_frame(&mut stdout);
+
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": mixed,
+            }},
+        })).as_bytes())
+        .expect("write didOpen");
+    stdin.flush().expect("flush");
+    let published = read_frame(&mut stdout);
+    let diagnostics = published["params"]["diagnostics"].as_array().expect("diagnostics").clone();
+    let messages: Vec<&str> =
+        diagnostics.iter().map(|d| d["message"].as_str().unwrap()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("expected ';'")),
+        "the syntax error must be reported: {published}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("release") && m.contains("ARC")),
+        "the ARC error below it must not be swallowed: {published}"
+    );
+
+    // The recovered AST still answers what an editor asks about the code.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        })).as_bytes())
+        .expect("write documentSymbol");
+    stdin.flush().expect("flush");
+    let symbols = read_frame(&mut stdout);
+    let names: Vec<&str> = symbols["result"]
+        .as_array()
+        .expect("symbol array")
+        .iter()
+        .map(|symbol| symbol["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["main"], "the outline must survive a syntax error: {symbols}");
+
+    stdin
+        .write_all(frame(&json!({"jsonrpc": "2.0", "id": 9, "method": "shutdown"})).as_bytes())
+        .expect("write shutdown");
+    stdin.write_all(frame(&json!({"jsonrpc": "2.0", "method": "exit"})).as_bytes())
+        .expect("write exit");
+    stdin.flush().expect("flush");
+    drop(stdin);
+    assert_eq!(child.wait().expect("wait").code(), Some(0));
+}
+
 /// A project's own configuration file (`compile_flags.txt`) is found by the
 /// server, with no editor setting and no command-line flag: the editor analyzes
 /// the way the project builds.

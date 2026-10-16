@@ -1594,12 +1594,26 @@ int helper(int value, int other) {
     }
 
     #[test]
-    fn a_failed_front_end_offers_no_symbols() {
-        // A parse error stops before elaboration: diagnostics yes, symbols no.
+    fn a_parse_error_still_offers_the_recovered_symbols() {
+        // The editor path continues past a parse error (see
+        // `Pipeline::finish_analysis`): the syntax mistake is reported *and* the
+        // outline of what the parser recovered is still there, so one forgotten
+        // `;` no longer blanks every request about the file.
         let analyzed = analyze("int main(void) { return 0 }\n");
-        assert!(!analyzed.diagnostics.is_empty());
-        assert!(analyzed.index.document_symbols("/tmp/jeti_lsp_unit/broken.jeti").is_empty());
-        assert!(analyzed.index.definitions("main").is_empty());
+        assert!(!analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+        let symbols = analyzed.index.document_symbols("/tmp/jeti_lsp_unit/symbols.jeti");
+        let names: Vec<&str> = symbols.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["main"], "{symbols:#?}");
+        assert!(!analyzed.index.definitions("main").is_empty());
+    }
+
+    #[test]
+    fn a_front_end_that_cannot_run_offers_no_symbols() {
+        // A failure with no positions behind it (here: an import that cannot be
+        // opened) yields diagnostics and nothing to answer requests from.
+        let analyzed = analyze("#import \"definitely_missing.hje\"\n");
+        assert!(!analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+        assert!(analyzed.index.document_symbols("/tmp/jeti_lsp_unit/symbols.jeti").is_empty());
     }
 
     #[test]
