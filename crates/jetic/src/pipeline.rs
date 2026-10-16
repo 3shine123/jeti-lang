@@ -11,6 +11,7 @@ use jeti_ast::ast::*;
 use jeti_cfg::cfg_build;
 use jeti_arc::{arc_local_analyze, arc_global_analyze, arc_analyze_loops, arc_insert_actions, arc_optimize_pairs};
 use jeti_checker::Checker;
+use jeti_cst::diagnostic::{Diagnostic, Severity};
 use jeti_trace::{trace_refcounts, TraceOptions};
 use attrs::{Backend, disposition, AttrDisposition};
 
@@ -25,6 +26,18 @@ use attrs::{Backend, disposition, AttrDisposition};
 /// `-eh legacy` (alias `-eh sjlj`) selects the old setjmp/longjmp backend and
 /// remains a complete, faithful rollback.
 pub const DEFAULT_EH_CHECKED: bool = true;
+
+/// Preprocess + parse result, shared by `transpile` and `analyze`.
+pub struct Prepared {
+    /// Preprocessor state: the inlined buffer, the line map and the columns.
+    pub pre: Preprocessor,
+    /// The parsed CST (`None` when the parser could not build one at all).
+    pub cst: Option<jeti_cst::TranslationUnit>,
+    /// Parser diagnostics, already remapped to source positions.
+    pub parser_diags: Vec<Diagnostic>,
+    /// True when the parser recorded an error (see `Parser::has_error`).
+    pub parser_has_error: bool,
+}
 
 pub struct Pipeline {
     pub has_error: bool,
@@ -175,7 +188,14 @@ impl Pipeline {
         Ok(())
     }
 
-    pub fn transpile(&mut self, source: &str, filename: &str) -> Result<String, String> {
+    /// The shared front-end prefix: preprocess the source and parse it.
+    ///
+    /// Both [`Pipeline::transpile`] and [`Pipeline::analyze`] start here, so the
+    /// preprocessor flags, the C type-name probe and the parser's source-map
+    /// wiring exist exactly once. `Err` means the preprocessor itself failed
+    /// (no CST at all); parse errors are reported as diagnostics instead, the
+    /// way a compiler front end is expected to.
+    fn prepare(&self, source: &str, filename: &str) -> Result<Prepared, String> {
         // `__JETI__` is always defined: jeti headers can guard objc-style
         // syntax behind `#ifdef __JETI__` so a plain C compiler sees only the
         // C-compatible subset when the header is used directly (without jetic).
@@ -202,12 +222,129 @@ impl Pipeline {
         // `NP_ASSUME_NONNULL` region to the file that opened it — without this
         // an open region marks every pointer in every imported header nonnull.
         parser.set_source_map(pre.source_map.clone());
-        let mut cst = parser.parse_translation_unit()
-            .ok_or_else(|| format!("Parse failed:\n{}", render_checker_diags(parser.diagnostics(), &pre.source_map)))?;
+        let cst = parser.parse_translation_unit();
+        let parser_diags = parser.diagnostics().to_vec();
+        let parser_has_error = parser.has_error();
+        // The parser borrows the inlined buffer; end that borrow before handing
+        // ownership of the preprocessor state to the caller.
+        drop(parser);
+        Ok(Prepared {
+            pre,
+            cst,
+            parser_diags,
+            parser_has_error,
+        })
+    }
+
+    /// Run the front end for diagnostics only — no ARC lowering, no codegen.
+    ///
+    /// This is the entry the LSP (and any "check this buffer" caller) uses. It
+    /// reports the stages that ran, in stage order, and stops descending once a
+    /// stage fails because the later stages have nothing sound to work on. The
+    /// diagnostics carry the shared positions (`file`, 1-based source `line`,
+    /// **byte** `col` and the exclusive `end_col`), so a consumer only has to
+    /// project the columns into its own unit; it must never re-derive positions.
+    ///
+    /// Differences from [`Pipeline::transpile`], both deliberate:
+    /// - ARC runs no retain/release analysis, so ARC-only diagnostics (leak
+    ///   warnings, ARC requirement errors) are not produced yet. Everything the
+    ///   parser, binder, elaborator and type checker can decide is.
+    /// - Warnings are returned alongside errors instead of being printed.
+    pub fn analyze(&mut self, source: &str, filename: &str) -> Vec<Diagnostic> {
+        let Prepared { pre, cst, parser_diags, parser_has_error } =
+            match self.prepare(source, filename) {
+                Ok(p) => p,
+                // The preprocessor failed: no positions exist to report against.
+                Err(msg) => return vec![Diagnostic::error(filename, 0, 0, msg)],
+            };
+        let sm = pre.source_map.clone();
+        let mut diags = parser_diags;
+        if parser_has_error {
+            return diags;
+        }
+        let Some(mut cst) = cst else { return diags };
         cst.filename = filename.to_string();
 
-        if parser.has_error() {
-            return Err(format!("Parse failed:\n{}", render_checker_diags(parser.diagnostics(), &pre.source_map)));
+        // Step 2: Bind names
+        let mut binder = Binder::new(SymbolTable::new());
+        if binder.bind(&mut cst) != 0 {
+            diags.extend(parse_stage_string_diags(
+                &translate_lines(binder.last_error(), &sm), filename, Severity::Error));
+            return diags;
+        }
+        // Step 3: Elaborate CST → AST
+        let symtab_for_checker = binder.symtab.clone();
+        let mut elaborator = Elaborator::new(Some(binder.symtab));
+        if elaborator.run(&cst) != 0 {
+            diags.extend(parse_stage_string_diags(&elaborator.last_error(), filename, Severity::Error));
+            return diags;
+        }
+        let Some(mut ast) = elaborator.take_ast() else { return diags };
+
+        // The desugar passes the checker consumes in `transpile` (checked EH,
+        // `@defer`, legacy `@finally`, pattern switches, async bodies) in the
+        // same order and for the same reasons — the checker must see exactly
+        // the shape it sees there or it would report shapes the CLI never
+        // reports. Their errors become diagnostics here rather than a hard stop.
+        if self.eh_checked {
+            let eh = jeti_eh::check_unit(&ast);
+            if !eh.errors.is_empty() {
+                diags.extend(parse_stage_string_diags(&translate_lines(&eh.errors.join("\n"), &sm), filename, Severity::Error));
+                return diags;
+            }
+            jeti_eh::desugar_unit(&mut ast);
+        } else {
+            jeti_eh::splice_finally_exits(&mut ast);
+        }
+        let defer_diags = jeti_defer::desugar_unit(&mut ast);
+        if !defer_diags.errors.is_empty() {
+            diags.extend(parse_stage_string_diags(&translate_lines(&defer_diags.errors.join("\n"), &sm), filename, Severity::Error));
+            return diags;
+        }
+        jeti_pattern::desugar_unit(&mut ast);
+
+        // Step 4.8: Async pre-pass (validate placement, then desugar the bodies
+        // the checker would otherwise see in their pre-desugar form).
+        let async_diags = jeti_async::check_unit(&ast);
+        diags.extend(parse_stage_string_diags(
+            &translate_lines(&async_diags.warnings.join("\n"), &sm), filename, Severity::Warning));
+        if !async_diags.errors.is_empty() {
+            diags.extend(parse_stage_string_diags(
+                &translate_lines(&async_diags.errors.join("\n"), &sm), filename, Severity::Error));
+            return diags;
+        }
+        let (async_errors, async_warnings) = jeti_async::desugar_unit_m2(&mut ast);
+        diags.extend(parse_stage_string_diags(
+            &translate_lines(&async_warnings.join("\n"), &sm), filename, Severity::Warning));
+        if !async_errors.is_empty() {
+            diags.extend(parse_stage_string_diags(
+                &translate_lines(&async_errors.join("\n"), &sm), filename, Severity::Error));
+            return diags;
+        }
+
+        // Step 5: Check types
+        if !self.no_checker {
+            let mut checker = Checker::new(Some(symtab_for_checker));
+            checker.no_arc = self.no_arc;
+            checker.source_map = Some(sm);
+            checker.eh_checked = self.eh_checked;
+            if checker.check(&mut ast) != 0 {
+                diags.extend(checker.errors_as_diagnostics());
+            }
+            diags.extend(checker.warnings_as_diagnostics());
+        }
+        diags
+    }
+
+    pub fn transpile(&mut self, source: &str, filename: &str) -> Result<String, String> {
+        let Prepared { pre, cst, parser_diags, parser_has_error } =
+            self.prepare(source, filename)?;
+        let mut cst = cst
+            .ok_or_else(|| format!("Parse failed:\n{}", render_checker_diags(&parser_diags, &pre.source_map)))?;
+        cst.filename = filename.to_string();
+
+        if parser_has_error {
+            return Err(format!("Parse failed:\n{}", render_checker_diags(&parser_diags, &pre.source_map)));
         }
 
         // Step 2: Bind names
@@ -608,6 +745,48 @@ fn render_stage_string_diags(msg: &str) -> String {
     }).collect();
     let color = std::io::stderr().is_terminal();
     render_annotated_colored(&diags, &|file| fs::read_to_string(file).ok(), color)
+}
+
+/// Parse `file:LINE:COL: msg` / `LINE:COL: msg` diagnostic lines into
+/// structured diagnostics, for callers that consume positions instead of
+/// rendering text (the LSP). Position-less lines become messages pinned to
+/// `default_file` at line 0, which consumers treat as file-wide.
+///
+/// This is the structured twin of [`render_stage_string_diags`]; that one is
+/// left exactly as it was so the CLI's rendered text does not drift.
+fn parse_stage_string_diags(msg: &str, default_file: &str, severity: Severity) -> Vec<Diagnostic> {
+    msg.lines().map(|l| {
+        let parts: Vec<&str> = l.splitn(4, ':').collect();
+        let parsed = match parts.as_slice() {
+            [f, a, b, rest]
+                if a.trim().parse::<usize>().is_ok() && b.trim().parse::<usize>().is_ok() =>
+            {
+                Some((*f, *a, *b, *rest))
+            }
+            [a, b, rest]
+                if a.trim().parse::<usize>().is_ok() && b.trim().parse::<usize>().is_ok() =>
+            {
+                Some((default_file, *a, *b, *rest))
+            }
+            _ => None,
+        };
+        let (file, line, col, message) = match parsed {
+            Some((f, a, b, rest)) => {
+                let file = if f.trim().is_empty() { default_file } else { f };
+                (file, a.trim().parse().unwrap_or(0), b.trim().parse().unwrap_or(0), rest.trim_start())
+            }
+            None => (default_file, 0, 0, l),
+        };
+        Diagnostic {
+            severity,
+            file: file.to_string(),
+            line,
+            col,
+            end_col: None,
+            hint: None,
+            message: message.to_string(),
+        }
+    }).collect()
 }
 
 /// Rewrites `LINE:COL: message` occurrences in a diagnostic string so the
