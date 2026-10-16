@@ -281,6 +281,14 @@ works too. Argument positions are not treated as selector positions, which the
 AST — not the text — decides. Signature help shows the signature of the call the
 cursor is in and highlights the parameter being filled in (`:` triggers it).
 
+A syntax error does not hide the rest of the file. The parse still fails, but the
+recovered syntax tree is handed to the later stages, so the editor reports the
+syntax mistake **and** the type/ARC errors below it, and the outline, definition,
+hover and completion keep answering from that tree. The terminal prints the same
+list, ordered by source position (the way clang orders diagnostics): the CLI
+refuses to *emit code* for a file that did not parse, it does not refuse to tell
+you what else is wrong with it.
+
 Scope today: the lifecycle handshake, incremental document sync
 (`didOpen`/`didChange`/`didClose` → `publishDiagnostics`),
 `textDocument/documentSymbol`, `textDocument/definition`, `textDocument/hover`,

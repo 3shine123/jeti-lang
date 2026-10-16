@@ -268,6 +268,10 @@ jeti-lsp --include include        # 在 stdin/stdout 上说 LSP
 `obj.` 同样可用；实参位置不会被当成 selector 位置（由 AST 判断，不是靠文本猜）。
 signature help 显示光标所在调用的签名并高亮正在填的参数（`: ` 触发）。
 
+语法错误不会把文件其余部分藏起来：解析依然算失败，但恢复出的语法树会继续交给后面的阶段，所以编辑器既报那条语法错误，
+也报它下面的类型 / ARC 错误，大纲、跳转定义、悬停、补全也照样从这棵树回答。终端打印的是**同一份列表**，并按源位置
+排序（与 clang 的顺序一致）——CLI 拒绝的是**为没解析成功的文件生成代码**，不是拒绝告诉你它还错在哪。
+
 当前范围：生命周期握手、增量文档同步（`didOpen`/`didChange`/`didClose` → `publishDiagnostics`）、
 `textDocument/documentSymbol`、`textDocument/definition`、`textDocument/hover`、`textDocument/completion`
 （全局名字 + 接收者成员；`id<P>` 的协议成员与泛型参数替换还没做）、`textDocument/signatureHelp`，
