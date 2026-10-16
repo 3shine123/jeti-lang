@@ -218,13 +218,54 @@ impl Checker {
     /// Span-aware entry point: `end_col` is the exclusive end of the
     /// annotated range on the same line (`None` = single caret). Call sites
     /// graduate to this one as spans are threaded through (span-widening work).
-    #[allow(dead_code)]
     fn check_error_span(&mut self, line: usize, col: usize, end_col: Option<usize>, msg: &str) {
         self.record(Severity::Error, line, col, end_col, msg);
     }
 
+    /// Annotated end column for a node whose start is `(line, col)`: the node's
+    /// own end when it is on the same line and actually wider, `None` otherwise
+    /// (synthesized nodes carry `end == 0`, multi-line nodes cannot express
+    /// their end as one column on the start line) — a single caret is the
+    /// honest annotation then.
+    fn span_end(line: usize, col: usize, end_line: usize, end_col: usize) -> Option<usize> {
+        if end_line == line && end_col > col {
+            Some(end_col)
+        } else {
+            None
+        }
+    }
+
+    /// Record an error annotated over a node's whole extent, so editors and the
+    /// rendered CLI diagnostics underline the construct the message is about
+    /// instead of a single caret.
+    fn check_error_over(
+        &mut self,
+        line: usize,
+        col: usize,
+        end_line: usize,
+        end_col: usize,
+        msg: &str,
+    ) {
+        let end = Self::span_end(line, col, end_line, end_col);
+        self.check_error_span(line, col, end, msg);
+    }
+
     fn check_warning(&mut self, line: usize, col: usize, msg: &str) {
         self.record(Severity::Warning, line, col, None, msg);
+    }
+
+    /// Warning counterpart of [`Checker::check_error_over`]: annotate over the
+    /// node's whole extent when it has one on a single line.
+    fn check_warning_over(
+        &mut self,
+        line: usize,
+        col: usize,
+        end_line: usize,
+        end_col: usize,
+        msg: &str,
+    ) {
+        let end = Self::span_end(line, col, end_line, end_col);
+        self.record(Severity::Warning, line, col, end, msg);
     }
 
     /// The single recording path. Resolves (file, line) through the SourceMap
@@ -466,7 +507,7 @@ impl Checker {
             && pt.prim == TypePrim::Char
             && pt.is_pointer
         {
-            self.check_error(a.line, a.col,
+            self.check_error_over(a.line, a.col, a.end_line, a.end_col,
                 "cannot pass an @\"...\" object where a C string ('char *') is expected — use [str UTF8String]");
         }
     }
@@ -624,7 +665,7 @@ impl Checker {
         let pointerish = param.is_pointer
             || matches!(param.prim, TypePrim::Id | TypePrim::Instancetype | TypePrim::Class);
         if pointerish && Self::is_nil_or_zero(arg) {
-            self.check_error(arg.line, arg.col,
+            self.check_error_over(arg.line, arg.col, arg.end_line, arg.end_col,
                 "null passed to a callee that requires a non-null argument — pass a real object, or declare the parameter 'nullable'");
             return;
         }
@@ -632,7 +673,7 @@ impl Checker {
             return;
         }
         let pname = param.name.clone().unwrap_or_else(|| "object".into());
-        self.check_error(arg.line, arg.col, &format!(
+        self.check_error_over(arg.line, arg.col, arg.end_line, arg.end_col, &format!(
             "nullable value passed to nonnull parameter '{}' — the callee may assume it is non-nil; guard with 'if (x)' or pass a non-null value",
             pname));
     }
@@ -1061,7 +1102,7 @@ impl Checker {
                 } else if arg == FormatArgKind::Object {
                     msg.push_str(" — use %@ for NPString objects");
                 }
-                self.check_warning(a.line, a.col, &msg);
+                self.check_warning_over(a.line, a.col, a.end_line, a.end_col, &msg);
             }
         }
     }
@@ -1649,7 +1690,7 @@ impl Checker {
             TypePrim::Named if !ty.is_pointer && !ty.is_struct => "numberWithInt:",
             _ => {
                 let tstr = Self::type_display(&ty);
-                self.check_error(e.line, e.col, &format!(
+                self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                     "illegal type '{}' in a boxed expression — '@(...)' accepts arithmetic and BOOL values only",
                     tstr));
                 return None;
@@ -2033,7 +2074,7 @@ impl Checker {
                         }
                     }
                 }
-                self.check_error(e.line, e.col, &format!("use of undeclared identifier '{}'", name));
+                self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!("use of undeclared identifier '{}'", name));
                 None
             }
             AstExprData::MsgSend { receiver, args, selector, is_class_method, .. } => {
@@ -2044,7 +2085,7 @@ impl Checker {
                 // but it is almost always a logic bug: the result will silently
                 // be zero. Warn so the programmer knows the send is dead.
                 if matches!(receiver.kind, AstExprKind::Nil) {
-                    self.check_warning(e.line, e.col, &format!(
+                    self.check_warning_over(e.line, e.col, e.end_line, e.end_col, &format!(
                         "message '{}' sent to nil receiver; result is always zero/nil", selector));
                 }
                 // Receiver kind vs method kind: a class singleton receives only
@@ -2058,7 +2099,7 @@ impl Checker {
                     let all_class = kinds.iter().all(|&k| k);
                     let any_class = kinds.iter().any(|&k| k);
                     if all_class != any_class && !all_class && *is_class_method {
-                        self.check_error(e.line, e.col, &format!(
+                        self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                             "instance method '{}' cannot be called on a class name", selector));
                     } else if all_class != any_class && all_class && !*is_class_method {
                         let recv_is_instance = match &receiver.data {
@@ -2071,7 +2112,7 @@ impl Checker {
                             _ => false,
                         };
                         if recv_is_instance {
-                            self.check_error(e.line, e.col, &format!(
+                            self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                                 "class method '{}' cannot be called on an instance", selector));
                         }
                     }
@@ -2085,7 +2126,7 @@ impl Checker {
                 // fall through to the arrow-access path and emit bad C).
                 if selector == "respondsToSelector:" && args.len() == 1 {
                     if !matches!(args[0].data, AstExprData::Selector(_)) {
-                        self.check_error(e.line, e.col,
+                        self.check_error_over(e.line, e.col, e.end_line, e.end_col,
                             "respondsToSelector: requires an @selector(...) literal argument");
                     }
                 }
@@ -2135,7 +2176,7 @@ impl Checker {
                                 && !Self::is_vtable_exempt_selector(selector)
                                 && !self.method_param_decls.contains_key(selector)
                             {
-                                self.check_error(e.line, e.col, &format!(
+                                self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                                     "no visible method '{}' on receiver type '{} *' — static dispatch would hit a NULL vtable slot; declare it on '{}' (or a superclass) or type the receiver as 'id'",
                                     selector, cn, cn));
                             }
@@ -2151,7 +2192,7 @@ impl Checker {
                 for (i, a) in args.iter().enumerate() {
                     if let Some(Some(ref pt)) = param_types.get(i) {
                         if Self::is_object_type(pt) && matches!(a.data, AstExprData::String(_)) {
-                            self.check_warning(a.line, a.col,
+                            self.check_warning_over(a.line, a.col, a.end_line, a.end_col,
                                 "argument as a bare C string is not an object; use @\"...\" for an NPString");
                         }
                         // Reverse direction: an @"..." object literal passed where a
@@ -2204,9 +2245,9 @@ impl Checker {
                                 _ => false,
                             }).unwrap_or(false);
                             if scalar {
-                                let (al, ac) = (args[idx].line, args[idx].col);
                                 let elem_str = elem.name.clone().unwrap_or_else(|| "object".into());
-                                self.check_error(al, ac, &format!(
+                                self.check_error_over(args[idx].line, args[idx].col,
+                                    args[idx].end_line, args[idx].end_col, &format!(
                                     "inserting a scalar into a typed container — its element type is '{}'; use an object of that type",
                                     elem_str));
                             }
@@ -2278,7 +2319,7 @@ impl Checker {
                     for (i, a) in args.iter().enumerate() {
                         if let (Some(Some(ref pt)), Some(at)) = (param_types_sub.get(i), a.expr_type.as_ref()) {
                             if !self.arg_type_ok(pt, at) {
-                                self.check_error(a.line, a.col, &format!(
+                                self.check_error_over(a.line, a.col, a.end_line, a.end_col, &format!(
                                     "argument of type '{}' does not match the container's declared element type '{}'",
                                     Self::type_display(at), Self::type_display(pt)));
                             }
@@ -2298,7 +2339,7 @@ impl Checker {
                     if sel == "retain" || sel == "release" || sel == "autorelease" || sel == "dealloc" {
                         let impl_ok = self.current_method.as_deref().map(|m| m.trim_end_matches(':') == sel).unwrap_or(false);
                         if !impl_ok {
-                            self.check_error(e.line, e.col, &format!(
+                            self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                                 "explicit '{}' not allowed in ARC mode; wrap in @noarc {{ }} to manage manually", sel));
                         }
                     }
@@ -2366,7 +2407,7 @@ impl Checker {
                             self.check_format_args(fmt, &args[1..], e.line, e.col, "NPLog");
                         }
                         Some(_) => {
-                            self.check_warning(args[0].line, args[0].col, "NPLog first argument should be an NPString literal (@\"...\")");
+                            self.check_warning_over(args[0].line, args[0].col, args[0].end_line, args[0].end_col, "NPLog first argument should be an NPString literal (@\"...\")");
                         }
                         None => {}
                     }
@@ -2377,7 +2418,7 @@ impl Checker {
                 for (i, a) in args.iter().enumerate() {
                     if let Some(Some(ref pt)) = param_types.get(i) {
                         if Self::is_object_type(pt) && matches!(a.data, AstExprData::String(_)) {
-                            self.check_warning(a.line, a.col,
+                            self.check_warning_over(a.line, a.col, a.end_line, a.end_col,
                                 "argument as a bare C string is not an object; use @\"...\" for an NPString");
                         }
                         // Same check as the MsgSend arm: @"..." object into a
@@ -2498,7 +2539,7 @@ AstExprData::Subscript { object, key, .. } => {
                     && matches!(&obj.data, AstExprData::VarRef { name, .. } if name == "self")
                 {
                     let ivn = ivar.clone().unwrap_or_else(|| "?".to_string());
-                    self.check_error(e.line, e.col, &format!(
+                    self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                         "instance variable '{}' accessed in class method (self is the class, not an instance)", ivn));
                 }
                 Some(AstType::new(TypePrim::Int))
@@ -2580,8 +2621,7 @@ AstExprData::Subscript { object, key, .. } => {
                     if let Some(t) = self.check_expr(entry) {
                         if !Self::is_object_type(&t) {
                             let tstr = Self::type_display(&t);
-                            let (line, col) = (entry.line, entry.col);
-                            self.check_error(line, col, &format!(
+                            self.check_error_over(entry.line, entry.col, entry.end_line, entry.end_col, &format!(
                                 "illegal type '{}' in a dictionary literal — keys and values must be Objective-C objects",
                                 tstr));
                         }
@@ -2816,7 +2856,7 @@ AstExprData::Subscript { object, key, .. } => {
                 // DOES run the cleanup, so checked mode has no such hazard.
                 // (Checked is the DEFAULT backend — only warn under -eh sjlj.)
                 if !self.eh_checked && Self::stmt_has_throw(body) {
-                    self.check_warning(lock.line, lock.col,
+                    self.check_warning_over(lock.line, lock.col, lock.end_line, lock.end_col,
                         "@throw inside a '@synchronized' block skips its unlock (setjmp/longjmp bypasses the cleanup attribute) — handle it with a local '@try' or restructure");
                 }
                 self.check_stmt(&mut *body);
@@ -3023,7 +3063,7 @@ AstExprData::Subscript { object, key, .. } => {
                         "__jeti_eh_flag" | "__jeti_eh_val" | "__jeti_eh_isa"
                         | "__jeti_exception_value" | "__jeti_exception_buf")
                     {
-                        self.check_error(d.line, d.col, &format!(
+                        self.check_error_over(d.line, d.col, d.end_line, d.end_col, &format!(
                             "'{}' is reserved for the exception runtime (-eh); use a different name",
                             name));
                     }
@@ -3061,7 +3101,7 @@ AstExprData::Subscript { object, key, .. } => {
                     } else if let (Some(vt), Some(it)) = (var_type.as_deref(), init_ty.as_ref()) {
                         let declared_complex = Self::is_complex_type(vt);
                         if !declared_complex && it.is_complex && Self::is_real_scalar(vt) {
-                            self.check_warning(d.line, d.col, &format!(
+                            self.check_warning_over(d.line, d.col, d.end_line, d.end_col, &format!(
                                 "initialization of real type from complex value discards the imaginary part ('{}' = '{}')",
                                 Self::type_desc(vt), Self::type_desc(it)));
                         }
@@ -3070,14 +3110,14 @@ AstExprData::Subscript { object, key, .. } => {
                         // sides were "unknown" before generic substitution.
                         // Now the substituted return type is concrete.
                         if let Some(m) = self.init_ptr_scalar_mismatch(vt, it, i) {
-                            self.check_error(d.line, d.col, &m);
+                            self.check_error_over(d.line, d.col, d.end_line, d.end_col, &m);
                         }
                         // Bare → specialized generic assignment: safe at the
                         // machine level (layout-identical) but the element
                         // type is unchecked — warn (clang-style), -Werror
                         // upgrades.
                         if let Some(m) = self.init_generic_erasure_warning(vt, it) {
-                            self.check_warning(d.line, d.col, &m);
+                            self.check_warning_over(d.line, d.col, d.end_line, d.end_col, &m);
                         }
                     }
                 }
@@ -3226,7 +3266,7 @@ AstExprData::Subscript { object, key, .. } => {
             .collect();
         if missing.is_empty() { return; }
         let list = missing.iter().map(|m| format!("'{}'", m)).collect::<Vec<_>>().join(", ");
-        self.check_error(expr.line, expr.col, &format!(
+        self.check_error_over(expr.line, expr.col, expr.end_line, expr.end_col, &format!(
             "switch over enum '{}' does not cover member(s): {} — add the missing case(s) or a default arm",
             name, list));
     }
