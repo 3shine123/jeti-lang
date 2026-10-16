@@ -294,6 +294,29 @@ signature help 显示光标所在调用的签名并高亮正在填的参数（`:
 | `jeti.arc` | `true` | 按 ARC 模式分析（编译器默认）。用 `-fno-jeti-arc` 构建的项目请关掉。 |
 | `jeti.arguments` | `[]` | 额外的服务器参数，用 `jetic` 的拼写：`-fno-jeti-arc`、`-fno-checker`、`-eh legacy`。 |
 
+#### 项目配置文件
+
+上面的设置只是**默认值**。项目也可以按 clangd 的方式自己声明 flags，服务器会自己找到：
+
+| 文件 | 作用范围 | 形态 |
+| --- | --- | --- |
+| `compile_commands.json` | 逐文件 | `{directory, file, arguments \| command}` 的数组；命中文档的那条优先，没有命中就用**目录最接近**的那条（clangd 的 inference）。相对 `-I` 按该条的 `directory` 解析。 |
+| `compile_flags.txt` | 整棵树 | 一行一个 flag，对所有文档生效。 |
+
+两者都从文档所在目录向**上**搜索，到工作区根为止；同一目录里 `compile_commands.json` 优先。
+认得的 flag：`-I DIR` / `-IDIR` / `--include DIR`、`-fno-jeti-arc`、`-fno-checker`、`-eh checked|legacy|sjlj`；
+其它（`-o`、`-g`…）忽略——编辑器不链接、不运行代码。项目配置**细化**编辑器设置：目录相加、
+关掉的开关保持关掉、文件里显式写的 `-eh` 覆盖编辑器选择。
+
+```json
+[
+  { "directory": ".", "file": "src/legacy.jeti",
+    "arguments": ["jetic", "-I", "include", "-fno-jeti-arc", "src/legacy.jeti"] }
+]
+```
+
+#### 为什么有 ARC/MRC 这两个设置
+
 后两项存在的原因是：**编辑器必须和你的构建一致**。默认情况下服务器完全按 `jetic` 的默认分析
 （ARC 开、checker 开），所以手写 retain/release 的旧代码会显示
 `explicit 'release' not allowed in ARC mode` —— **因为编译器就是这么报的**（那些测试文件能过，是因为

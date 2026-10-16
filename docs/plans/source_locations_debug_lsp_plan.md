@@ -174,6 +174,28 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 遍历用 `BodyWalk` 显式列出 `AstStmtData` / `AstExprData` 的**全部**变体（不用 `_ =>`），
   所以 AST 新增变体会编译失败，而不是悄悄少收集；没有源位置的合成节点跳过。
 - 未做：协议成员（`id<P>`）与泛型参数替换（`NPArray<T>` 的 `T` 具体化）。
+**进展（项目配置文件：compile_commands.json / compile_flags.txt —— 已落地）**
+
+- 编辑器设置解决了"编辑器要知道你怎么构建"，但每个项目都要手填一次。按 clangd 的方式让**项目自己声明**。
+- `compile_commands.json`（逐文件）：取 `file` 与文档匹配的那条；没有匹配就用**目录最接近**的那条
+  （clangd 的 inference；同一目录多条时取最前面那条，即 clangd 文档里的 "first entry" 回退）。
+  相对 `-I` 按该条的 `directory` 解析（格式要求）；`command` 字符串按空白切分（clangd 也如此）。
+- `compile_flags.txt`（整棵树）：一行一个 flag，对所有文档生效。
+- 搜索从文档所在目录向上，**到工作区根为止**（`initialize` 的 `rootUri` 或 `workspaceFolders[0]`），
+  避免嵌套项目误吃父项目的文件；同一目录内 `compile_commands.json` 优先。
+  文档尚未存盘也能定位：`canonical()` 会规范化到最近存在的祖先再补回剩余路径
+  （macOS 上 `/tmp` → `/private/tmp` 这类差异因此不会让匹配失败）。
+- 只接受**改变诊断**的开关（`-I`/`--include`、`-fno-jeti-arc`、`-fno-checker`、`-eh`），其它（`-o`、`-g`…）忽略；
+  `-D` 不适用——jetic 没有用户宏开关。解析用**与服务端命令行同一个** `apply_flags`，
+  所以一个 flag 在命令行、配置文件、编辑器设置三处含义一致。
+- 合并规则：项目文件**细化**编辑器设置——目录相加、关掉的开关保持关掉、`-eh` 以文件里的显式值为准。
+- 缓存：`compile_commands.json` 可能很大而每次敲键都分析一次，所以按文件 + mtime 缓存，变了才重读；
+  `compile_flags.txt` 很小，每次读。
+- 证据：单测覆盖 per-file 命中 / 推断 / 向上搜索在工作区根停止 / 坏 JSON 视为不存在 / `-o` 的值不被当成目录；
+  会话测试起真实二进制、只给 `rootUri`，让服务器自己找到 `compile_flags.txt` 并断言零诊断；
+  `compile_commands.json` 也用真实探测验证过（MRC 文件 0 诊断）。
+- 不做：`.clangd`（clangd 自己的 YAML 配置，语义不同且需要 YAML 依赖）。
+
 **进展（编辑器与构建一致：诊断开关 —— 已落地）**
 
 - 起因：在编辑器里打开一个 MRC 风格的测试文件（`tests/tt.jeti`，`dealloc` 里手写 `[_next release]`），

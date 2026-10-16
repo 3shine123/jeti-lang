@@ -316,6 +316,33 @@ no configuration), then on `PATH`. Settings:
 | `jeti.arc` | `true` | Analyze in ARC mode (the compiler's default). Turn it **off** for projects built with `-fno-jeti-arc`. |
 | `jeti.arguments` | `[]` | Extra server flags in `jetic`'s spelling: `-fno-jeti-arc`, `-fno-checker`, `-eh legacy`. |
 
+#### Project configuration
+
+The settings above are the *defaults*. A project can also state its own flags the
+way clangd reads them, and the server finds them by itself:
+
+| File | Scope | Shape |
+| --- | --- | --- |
+| `compile_commands.json` | per file | an array of `{directory, file, arguments \| command}` — the entry for the document wins, otherwise the closest entry's flags are used (clangd's inference). A relative `-I` resolves against the entry's `directory`. |
+| `compile_flags.txt` | the whole tree | one flag per line, applied to every document. |
+
+Both are searched from the document's directory upwards, stopping at the
+workspace root; a directory holding both uses `compile_commands.json`.
+Recognized flags: `-I DIR` / `-IDIR` / `--include DIR`, `-fno-jeti-arc`,
+`-fno-checker`, `-eh checked|legacy|sjlj`. Everything else (`-o`, `-g`, …) is
+ignored, because the editor neither links nor runs code. Project flags *refine*
+the settings: directories add, a switch that turns something off stays off, and
+an explicit `-eh` in a file replaces the editor's choice.
+
+```json
+[
+  { "directory": ".", "file": "src/legacy.jeti",
+    "arguments": ["jetic", "-I", "include", "-fno-jeti-arc", "src/legacy.jeti"] }
+]
+```
+
+#### Why the ARC/MRC settings exist
+
 The last two settings exist because the editor has to agree with your build.
 By default the server analyzes exactly as `jetic` does — ARC on, checker on — so
 legacy manual-retain/release code shows `explicit 'release' not allowed in ARC
