@@ -128,6 +128,17 @@ fn line_start_of(text: &str, line: u32) -> Option<usize> {
     Some(start)
 }
 
+/// Byte offset of a **1-based** (line, byte column), clamped to that line's
+/// end so an over-long column can never leak into the next line.
+fn line_col_byte(text: &str, line: u32, col: u32) -> Option<usize> {
+    let start = line_start_of(text, line.saturating_sub(1))?;
+    let end = text[start..]
+        .find('\n')
+        .map(|i| start + i)
+        .unwrap_or(text.len());
+    Some((start + col.saturating_sub(1) as usize).min(end))
+}
+
 /// Registry of all source files in one compilation. `SourceId 0` is reserved
 /// for the main file so a default `SourceSpan` never aliases a real import.
 #[derive(Debug, Clone, Default)]
@@ -264,10 +275,8 @@ impl SourceSpan {
     pub fn to_lsp_range(&self, text: &str) -> LspRange {
         let to_pos = |line: u32, col: u32, byte: Option<usize>| match byte {
             Some(b) => SourceFile::offset_to_lsp(text, b),
-            None => match line_start_of(text, line.saturating_sub(1)) {
-                Some(base) => {
-                    SourceFile::offset_to_lsp(text, base + col.saturating_sub(1) as usize)
-                }
+            None => match line_col_byte(text, line, col) {
+                Some(b) => SourceFile::offset_to_lsp(text, b),
                 None => LspPosition::default(),
             },
         };

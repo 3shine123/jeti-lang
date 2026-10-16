@@ -115,6 +115,37 @@ impl Diagnostic {
             format!("{}:{}:{}: {}", self.file, self.line, self.col, self.message)
         }
     }
+
+    /// The diagnostic's position as a [`SourceSpan`] (1-based source line, byte
+    /// columns, half-open end), so consumers that speak the span model — LSP,
+    /// debugger adapters — project it through [`SourceSpan::to_lsp_range`]
+    /// instead of re-deriving positions from `line`/`col` in their own units.
+    ///
+    /// `file` stays `0`: the id only means something to a [`SourceMap`], while
+    /// the diagnostic carries the display path the consumer looks the text up
+    /// with. A file-wide diagnostic (no file, or line 0) is marked synthetic so
+    /// nothing invents a range for it.
+    pub fn to_source_span(&self) -> crate::source_map::SourceSpan {
+        use crate::source_map::{SourceSpan, SpanOrigin};
+        let end_col = match self.end_col {
+            Some(end) if end > self.col => end as u32,
+            _ => self.col as u32,
+        };
+        SourceSpan {
+            file: 0,
+            start_line: self.line as u32,
+            start_col: self.col as u32,
+            end_line: self.line as u32,
+            end_col,
+            start_byte: None,
+            end_byte: None,
+            origin: if self.file.is_empty() || self.line == 0 {
+                SpanOrigin::Synthetic
+            } else {
+                SpanOrigin::Source
+            },
+        }
+    }
 }
 
 /// Render a list of diagnostics back to the historical plain lines. Used for
