@@ -200,14 +200,16 @@ function documentFor(file, text) {
   };
 }
 
-/** The (0-based line, UTF-16 character) an editor reports for `needle`. */
-function positionOf(text, needle) {
+/** The (0-based line, UTF-16 character) an editor reports for `needle`, shifted
+ *  `extra` characters into it. */
+function positionOf(text, needle, extra = 0) {
   const index = text.indexOf(needle);
   if (index < 0) throw new Error(`needle not found: ${needle}`);
-  const line = text.slice(0, index).split('\n').length - 1;
-  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  const target = index + extra;
+  const line = text.slice(0, target).split('\n').length - 1;
+  const lineStart = text.lastIndexOf('\n', target - 1) + 1;
   // JS strings are UTF-16, so their length *is* the LSP character count.
-  return new vscode.Position(line, index - lineStart);
+  return new vscode.Position(line, target - lineStart);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +298,7 @@ async function main() {
       '',
       'int main(void) {',
       '    NPString *s = @"hi";',
+      '    [s UTF8String];',
       '    return 0;',
       '}',
       '',
@@ -362,6 +365,16 @@ async function main() {
     assert.strictEqual(npstring.kind, vscode.CompletionItemKind.Class);
     assert.strictEqual(npstring.detail, '@interface:NPObject');
     console.log(`ok  completion provider → ${completions.length} item(s), kinds and details converted`);
+
+    // Member completion: inside a send, the local's class answers, so `[s UTF8S`
+    // offers only NPString's own member.
+    const members = await completionProvider.provideCompletionItems(
+      programDocument,
+      positionOf(program, '[s UTF8S', 8),
+    );
+    assert.deepStrictEqual(members.map((item) => item.label), ['UTF8String']);
+    assert.strictEqual(members[0].kind, vscode.CompletionItemKind.Method);
+    console.log('ok  completion provider → receiver members inside a send');
 
     // A missing server must not throw: it warns, stays inert, and a settings
     // change brings it back without reloading the window.
