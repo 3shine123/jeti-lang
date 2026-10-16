@@ -24,7 +24,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use jeti_cst::diagnostic::{Diagnostic, Severity};
-use jeti_cst::source_map::{LspPosition, LspRange};
+use jeti_cst::source_map::{LspPosition, LspRange, SourceFile};
 use jetic::pipeline::Pipeline;
 use serde_json::{json, Value};
 
@@ -247,6 +247,51 @@ fn search_dirs_for(path: &str, search_dirs: &[String]) -> Vec<String> {
     dirs
 }
 
+/// Apply one `textDocument/didChange` entry to the document text.
+///
+/// Two shapes are legal and both are handled: a whole-buffer replacement
+/// (`{text}` with no range, which is what an editor sends when it rewrites
+/// everything) and a range replacement (`{range, text}`). A range's positions
+/// are 0-based lines with **UTF-16** columns, exactly LSP's coordinates, so the
+/// shared `lsp_to_offset` does the crossing — an edit after an emoji lands where
+/// the editor meant, not where a byte count would put it.
+///
+/// Returns `false` when a range cannot be applied (a position past the end, or
+/// inverted bounds). The caller keeps the previous text then; the alternative —
+/// guessing — would silently diverge from what the editor shows.
+fn apply_change(text: &mut String, change: &Value) -> bool {
+    let Some(replacement) = change.get("text").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(range) = change.get("range") else {
+        // Whole-buffer replacement: no range at all.
+        text.clear();
+        text.push_str(replacement);
+        return true;
+    };
+    let position = |name: &str| -> Option<LspPosition> {
+        let point = range.get(name)?;
+        Some(LspPosition {
+            line: point.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
+            character: point.get("character").and_then(Value::as_u64).unwrap_or(0) as u32,
+        })
+    };
+    let (Some(start), Some(end)) = (position("start"), position("end")) else {
+        return false;
+    };
+    let (Some(start), Some(end)) = (
+        SourceFile::lsp_to_offset(text, start),
+        SourceFile::lsp_to_offset(text, end),
+    ) else {
+        return false;
+    };
+    if start > end {
+        return false;
+    }
+    text.replace_range(start..end, replacement);
+    true
+}
+
 /// One diagnostic in LSP shape.
 ///
 /// The byte→UTF-16 projection runs on the text of the file the diagnostic
@@ -348,10 +393,9 @@ impl Server {
                 id,
                 json!({
                     "capabilities": {
-                        // 1 = Full: the client sends the whole buffer on every
-                        // change. Incremental sync needs range-diff handling and
-                        // is a later stage.
-                        "textDocumentSync": 1,
+                        // 2 = Incremental: the client sends the changed range,
+                        // not the whole buffer. See `apply_change`.
+                        "textDocumentSync": 2,
                         "documentSymbolProvider": true,
                         "definitionProvider": true,
                         "hoverProvider": true,
@@ -392,16 +436,14 @@ impl Server {
                     .pointer("/params/textDocument/uri")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                // Full sync: the last content change is the whole new buffer.
-                let text = message
+                let changes = message
                     .pointer("/params/contentChanges")
-                    .and_then(Value::as_array)
-                    .and_then(|c| c.last())
-                    .and_then(|c| c.get("text"))
-                    .and_then(Value::as_str);
-                if let Some(text) = text {
-                    if let Some(doc) = self.docs.get_mut(uri) {
-                        doc.text = text.to_string();
+                    .and_then(Value::as_array);
+                // LSP applies the changes of one notification in order, each to
+                // the text the previous one produced.
+                if let (Some(changes), Some(doc)) = (changes, self.docs.get_mut(uri)) {
+                    for change in changes {
+                        apply_change(&mut doc.text, change);
                     }
                 }
                 if self.docs.contains_key(uri) {
@@ -818,7 +860,7 @@ mod tests {
         let out = server.handle(&init);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["id"], 1);
-        assert_eq!(out[0]["result"]["capabilities"]["textDocumentSync"], 1);
+        assert_eq!(out[0]["result"]["capabilities"]["textDocumentSync"], 2);
 
         let uri = path_to_uri("/tmp/jeti_lsp_unit/session.jeti");
         let open = json!({
@@ -860,6 +902,119 @@ mod tests {
             "params": { "textDocument": { "uri": uri } },
         });
         let out = server.handle(&close);
+        assert_eq!(out[0]["params"]["diagnostics"], json!([]));
+    }
+
+    #[test]
+    fn incremental_changes_apply_in_the_editors_coordinates() {
+        // A range replacement keeps the rest of the buffer.
+        let mut text = String::from("let a = 1;\nlet b = 2;\n");
+        assert!(apply_change(
+            &mut text,
+            &json!({ "range": { "start": {"line": 1, "character": 8},
+                                "end": {"line": 1, "character": 9} },
+                     "text": "42" }),
+        ));
+        assert_eq!(text, "let a = 1;\nlet b = 42;\n");
+
+        // An insertion: an empty range.
+        assert!(apply_change(
+            &mut text,
+            &json!({ "range": { "start": {"line": 0, "character": 0},
+                                "end": {"line": 0, "character": 0} },
+                     "text": "// hi\n" }),
+        ));
+        assert_eq!(text, "// hi\nlet a = 1;\nlet b = 42;\n");
+
+        // A deletion: an empty replacement. LSP columns stop at the line's end
+        // (the newline is not addressable), so a whole-line delete ends at the
+        // *start of the next* line.
+        assert!(apply_change(
+            &mut text,
+            &json!({ "range": { "start": {"line": 0, "character": 0},
+                                "end": {"line": 1, "character": 0} },
+                     "text": "" }),
+        ));
+        assert_eq!(text, "let a = 1;\nlet b = 42;\n");
+
+        // A whole-buffer replacement carries no range.
+        assert!(apply_change(&mut text, &json!({ "text": "let c = 3;\n" })));
+        assert_eq!(text, "let c = 3;\n");
+
+        // Columns are UTF-16 code units, not bytes: `😀` is 2 units and 4
+        // bytes, so `let s = "` (9 units) puts the emoji at 9..11 and `x` at 11.
+        // Editing "the character after the emoji" must land on `x`, not four
+        // bytes in.
+        let mut text = String::from("let s = \"😀x\";\n");
+        assert!(apply_change(
+            &mut text,
+            &json!({ "range": { "start": {"line": 0, "character": 11},
+                                "end": {"line": 0, "character": 12} },
+                     "text": "y" }),
+        ));
+        assert_eq!(text, "let s = \"😀y\";\n");
+
+        // …and an edit before the emoji keeps it intact.
+        let mut text = String::from("let s = \"😀x\";\n");
+        assert!(apply_change(
+            &mut text,
+            &json!({ "range": { "start": {"line": 0, "character": 9},
+                                "end": {"line": 0, "character": 9} },
+                     "text": "-" }),
+        ));
+        assert_eq!(text, "let s = \"-😀x\";\n");
+
+        // An impossible range is refused rather than guessed at.
+        let mut text = String::from("short\n");
+        assert!(!apply_change(
+            &mut text,
+            &json!({ "range": { "start": {"line": 9, "character": 0},
+                                "end": {"line": 10, "character": 0} },
+                     "text": "x" }),
+        ));
+        assert_eq!(text, "short\n");
+    }
+
+    #[test]
+    fn a_range_change_moves_the_diagnostics() {
+        let mut server = Server::new(Vec::new());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/incremental.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1,
+                "text": "int main(void) { return 0; }\n",
+            }},
+        }));
+
+        // Delete the `;` (line 0, character 25) — the parse error appears there.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{
+                    "range": { "start": {"line": 0, "character": 25},
+                               "end": {"line": 0, "character": 26} },
+                    "text": "",
+                }],
+            },
+        }));
+        let diagnostics = out[0]["params"]["diagnostics"].as_array().expect("diagnostics");
+        assert_eq!(diagnostics.len(), 1, "{out:?}");
+        assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
+
+        // Put it back: the same range, an insertion this time.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 3 },
+                "contentChanges": [{
+                    "range": { "start": {"line": 0, "character": 25},
+                               "end": {"line": 0, "character": 25} },
+                    "text": ";",
+                }],
+            },
+        }));
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
     }
 

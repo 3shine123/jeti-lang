@@ -96,8 +96,10 @@ impl SourceFile {
     /// LSP position (**0-based line, 0-based UTF-16 column**) → byte offset.
     ///
     /// `None` when the line does not exist or the column runs past the line's
-    /// end (LSP positions must stay within the line). A column landing inside a
-    /// surrogate pair resolves to the start of that scalar (best effort).
+    /// end (LSP positions must stay within the line). A column that lands inside
+    /// a surrogate pair advances to the next scalar boundary, so the result is
+    /// always a valid UTF-8 offset (best effort — editors do not produce such
+    /// positions).
     pub fn lsp_to_offset(text: &str, pos: LspPosition) -> Option<usize> {
         let line_start = line_start_of(text, pos.line)?;
         let line_end = text[line_start..]

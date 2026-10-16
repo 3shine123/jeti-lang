@@ -108,7 +108,7 @@ fn server_answers_editors_requests_end_to_end() {
     stdin.flush().expect("flush");
     let response = read_frame(&mut stdout);
     assert_eq!(response["id"], 1);
-    assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 1);
+    assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 2);
     assert_eq!(response["result"]["capabilities"]["documentSymbolProvider"], true);
     assert_eq!(response["result"]["capabilities"]["definitionProvider"], true);
     assert_eq!(response["result"]["serverInfo"]["name"], "jeti-lsp");
@@ -278,6 +278,40 @@ fn server_answers_editors_requests_end_to_end() {
     assert_eq!(help["result"]["activeParameter"], 1, "{help}");
     assert_eq!(signature["label"], "- (void)greet:(NPString *)name from:(NPString *)where");
     assert_eq!(signature["parameters"][1]["label"], "(NPString *)where");
+
+    // An incremental change: delete the `;` of `return 0;` (line 16), expect the
+    // parse error there, then put it back with a zero-width insertion.
+    let mut semicolon = position_of(PROGRAM, "return 0;");
+    semicolon["character"] = json!(semicolon["character"].as_u64().unwrap() + 8);
+    let mut after = semicolon.clone();
+    after["character"] = json!(semicolon["character"].as_u64().unwrap() + 1);
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 3 },
+                "contentChanges": [{ "range": { "start": semicolon, "end": after }, "text": "" }],
+            },
+        })).as_bytes())
+        .expect("write didChange");
+    stdin.flush().expect("flush");
+    let published = read_frame(&mut stdout);
+    let diagnostics = published["params"]["diagnostics"].as_array().expect("diagnostics");
+    assert_eq!(diagnostics.len(), 1, "{published}");
+    assert_eq!(diagnostics[0]["range"]["start"]["line"], semicolon["line"]);
+
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 4 },
+                "contentChanges": [{ "range": { "start": semicolon, "end": semicolon }, "text": ";" }],
+            },
+        })).as_bytes())
+        .expect("write didChange");
+    stdin.flush().expect("flush");
+    let published = read_frame(&mut stdout);
+    assert_eq!(published["params"]["diagnostics"], json!([]));
 
     // shutdown → response, exit → process ends with status 0
     stdin
