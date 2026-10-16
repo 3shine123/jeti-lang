@@ -3,7 +3,7 @@
 #
 #   ./tools/build-foundation-lib.sh [outdir]        # default: target/foundation
 #
-# Per-TU compilation (doc/stable_slots_plan.md §11, plan A): every Foundation
+# Per-TU compilation (docs/plans/stable_slots_plan.md §11, plan A): every Foundation
 # `.jeti` is compiled as its OWN translation unit — i.e. as a main file — so R2
 # ownership makes each owned class's metadata STRONG automatically. No
 # -fstrong-metadata anywhere.
@@ -95,7 +95,7 @@ for gm in include/Foundation/*.jeti; do
     # implementation into the library, defeating the per-TU build.
     # Skip NPTask.jeti for the same reason: `NPTask<T>` is the runtime task
     # HANDLE (route A), not a class — no implementation, no vtable
-    # (doc/async_nptask_plan.md §Foundation 壳层).
+    # (docs/plans/async_nptask_plan.md §Foundation 壳层).
     [[ "$name" == "Foundation" || "$name" == "NPTask" ]] && continue
     wrap="$tus/$name.jeti"
     { echo '#import <Foundation/Foundation.hje>'; cat "$gm"; } > "$wrap"

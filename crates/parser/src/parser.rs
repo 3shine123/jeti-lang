@@ -96,7 +96,7 @@ impl<'a> Parser<'a> {
                 "key_t".into(), "fsblkcnt_t".into(), "fsfilcnt_t".into(), "blkcnt_t".into(),
                 "blksize_t".into(), "dev_t".into(), "id_t".into(), "ino_t".into(),
                 "nlink_t".into(), "uid_t".into(), "gid_t".into(),
-                // `NPTask<T>` — real task-handle class (doc/async_nptask_plan.md).
+                // `NPTask<T>` — real task-handle class (docs/plans/async_nptask_plan.md).
                 // Registered so `NPTask<int>` parses type args; the `async`
                 // modifier in front of it is a contextual keyword handled at
                 // the return-type position (at_async_modifier).
@@ -1379,7 +1379,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
     fn parse_primary(&mut self) -> Option<CstExpr> {
         let (pri_line, pri_col) = (self.current.line, self.current.column);
         // Soft keyword `await` — suspension-point operator
-        // (doc/async_soft_keywords_plan.md §3). Operator only in
+        // (docs/plans/async_soft_keywords_plan.md §3). Operator only in
         // expression-prefix position followed by a unary-start token
         // (at_await_operator judgment table §3.4); otherwise plain C
         // identifier. Replaces the removed `@await` machinery token.
@@ -4263,7 +4263,7 @@ line: pri_line,
         Some(name)
     }
 
-    /// Contextual `async` modifier (doc/async_soft_keywords_plan.md §4):
+    /// Contextual `async` modifier (docs/plans/async_soft_keywords_plan.md §4):
     /// the identifier `async` followed by a TYPE START (`void`, builtin type
     /// keyword, `struct/union/enum`, or a typename identifier) = async
     /// function/method modifier; followed by `^` = async block literal (§5,
@@ -4320,7 +4320,7 @@ line: pri_line,
         c.is_alphabetic() || c == '_'
     }
 
-    /// Soft keyword `await` (doc/async_soft_keywords_plan.md §3.2): in
+    /// Soft keyword `await` (docs/plans/async_soft_keywords_plan.md §3.2): in
     /// expression-prefix position, `await` is the suspension operator iff the
     /// next non-whitespace char starts a unary expression — EXCEPT the
     /// unary/binary same-shape operators `+ - * &`, which stay C-compatible
@@ -6188,7 +6188,7 @@ if self.current.kind == TokenKind::Identifier {
 
         // Parse return type: (type) or plain type. Inside the parens, a bare
         // `async` identifier followed by `NPTask` is the async return-type
-        // modifier (doc/async_nptask_plan.md), not part of the type.
+        // modifier (docs/plans/async_nptask_plan.md), not part of the type.
         let mut async_modifier = false;
         let return_type = if self.match_token(TokenKind::LParen) {
             async_modifier = self.at_async_modifier();

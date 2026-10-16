@@ -557,7 +557,7 @@ pub struct CgUnit {
     pub no_arc: bool,
     /// Classes whose `@implementation` sits in **this** TU's main file (not in
     /// an imported header) — the translation unit that owns them, per rule R2
-    /// of `doc/stable_slots_plan.md`.
+    /// of `docs/plans/stable_slots_plan.md`.
     ///
     /// An owner's metadata is emitted **strong**, so another TU's weak stub can
     /// never displace it; and if a second TU also implements the class in its
@@ -568,7 +568,7 @@ pub struct CgUnit {
     pub owned_classes: std::collections::HashSet<String>,
     /// The instance-method names whose vtable layout must agree across all
     /// linked TUs — the segment the `__sig` fingerprint is computed over
-    /// (rule R3 of `doc/stable_slots_plan.md`).
+    /// (rule R3 of `docs/plans/stable_slots_plan.md`).
     ///
     /// Under R1 the public segment (methods declared in imported
     /// `@interface`s) occupies the same slot indices everywhere, and R2 keeps
@@ -581,11 +581,11 @@ pub struct CgUnit {
     /// True when this TU can see the NPPredicate declaration (pipeline: a
     /// transitive jeti `#import` of NPPredicate). Gates KVC accessor-table
     /// emission (JETI_KVC_$_<Class>): a TU that never touches predicates
-    /// pays nothing. See doc/nppredicate_plan.md §2.
+    /// pays nothing. See docs/plans/nppredicate_plan.md §2.
     pub kvc: bool,
     /// Protocol declarations visible in this unit: (name, parents, required,
     /// optional). Emitted as static `NPProtocol` instances (D5.2,
-    /// doc/categories_protocol_plan.md) so `conformsToProtocol:` can answer
+    /// docs/plans/categories_protocol_plan.md) so `conformsToProtocol:` can answer
     /// from metadata. Owner-only emission (strong) follows the R2 rule.
     pub protocols: Vec<(String, Vec<String>, Vec<String>, Vec<String>)>,
 }
@@ -1031,7 +1031,7 @@ fn cst_type_to_c_str(ct: &jeti_cst::CstType) -> String {
         TypePrim::Named => {
             if let Some(ref name) = ct.name {
                 // NPTask<T> is the task HANDLE, not a monomorphized class:
-                // render as NPTask * (doc/async_nptask_plan.md, stage D) —
+                // render as NPTask * (docs/plans/async_nptask_plan.md, stage D) —
                 // there is no NPTask_int typedef; the handle type is uniform.
                 if name == "NPTask" && !ct.type_args.is_empty() {
                     s.push_str("NPTask *");
@@ -1174,7 +1174,7 @@ pub fn ast_type_to_c_str(t: &AstType) -> String {
                 // separately (param_pairs replace on the whole type string).
                 // NPTask<T> → the task HANDLE `NPTask *` (uniform C type; no
                 // per-instantiation typedef exists). Same rule as the CST
-                // path (doc/async_nptask_plan.md, stage D).
+                // path (docs/plans/async_nptask_plan.md, stage D).
                 if type_name == "NPTask" && !t.type_args.is_empty() {
                     s.push_str("NPTask *");
                     return s;
@@ -1275,7 +1275,7 @@ struct ClassInfo {
     has_category_impl: bool,
     /// Protocol names this class conforms to, resolved to FQN by the
     /// elaborator. Emitted into the class's static protocol table (D5.2,
-    /// doc/categories_protocol_plan.md §7): `protocol_count` stops being
+    /// docs/plans/categories_protocol_plan.md §7): `protocol_count` stops being
     /// hardcoded 0 and the runtime query can answer conformances.
     protocols: Vec<String>,
     ivar_types: Vec<String>,
@@ -7279,7 +7279,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     // Metadata linkage: the default is `weak`, so the
     // many per-TU copies of a class's vtable / meta-vtable / getClass coalesce
     // to one. Ownership (rule R2 — `CgUnit::owned_classes`) decides which
-    // copies below are emitted strong instead. See `doc/stable_slots_plan.md`.
+    // copies below are emitted strong instead. See `docs/plans/stable_slots_plan.md`.
     let meta_weak: &str = "__attribute__((weak)) ";
     let mut out = String::new();
     if comments {
@@ -7820,7 +7820,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
                     //    reference fails loudly at link time on every
                     //    platform — probes/xcat P1 showed macOS ld rejects
                     //    undefined weak symbols anyway, so strong extern is
-                    //    the stable semantics (doc/categories_protocol_plan.md).
+                    //    the stable semantics (docs/plans/categories_protocol_plan.md).
                     let is_cat = cm.category_method_names.contains(mname);
                     if method_is_emitted(&owner, mname) || owner != flat_cn || is_cat {
                         let (_, ptr_type) = METHOD_METADATA.get().unwrap().get(mname.as_str()).unwrap();
@@ -7898,7 +7898,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     };
     out.push_str(&arc_dealloc_defs);
 
-    // KVC accessor tables (NPPredicate support) — doc/nppredicate_plan.md §2.
+    // KVC accessor tables (NPPredicate support) — docs/plans/nppredicate_plan.md §2.
     // Emitted only when the pipeline saw a transitive NPPredicate import
     // (`unit.kvc`): a TU that never touches predicates pays nothing. Each
     // table maps method-name keys to generated wrapper getters whose body is
@@ -8360,7 +8360,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
         // synthesised dealloc does release the ivar — which would consume the
         // table's only reference, free the "immortal" constant, and leave the
         // table pointing at freed memory (heap-use-after-free in the next
-        // intern lookup's strcmp). See doc/arc_intern_uaf.md.
+        // intern lookup's strcmp). See docs/plans/arc_intern_uaf.md.
         out.push_str("    jeti_retain(obj);\n");
         out.push_str("    if (jeti_intern_count < 256) {\n");
         out.push_str("        jeti_intern_table[jeti_intern_count].cstr = str->_cstr;\n");

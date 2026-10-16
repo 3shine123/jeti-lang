@@ -1,5 +1,5 @@
 //! Sidecar source-map file (`.jeti.map`) — the versioned JSON schema of 阶段 4
-//! (`doc/source_locations_debug_lsp_plan.md` lines 66-74).
+//! (`docs/plans/source_locations_debug_lsp_plan.md` lines 66-74).
 //!
 //! The file maps **generated C lines** back to **Jeti source lines**. Its
 //! ground truth is the `#line` directive stream in the generated C, which is

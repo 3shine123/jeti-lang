@@ -201,7 +201,7 @@ int main() {
 jetic app.jeti -o app               # 库被自动找到并链接
 ```
 
-底层区别：self-contained 模式下内联实现不是其 TU 的主文件，类元数据是弱符号（每个 TU 重复一份再合并）；库模式下每个 Foundation `.jeti` 作为独立 TU 编译，其 `@implementation` 持有元数据并发射为强符号——归档里只存一份。owner/strong/weak 完整规则见 `doc/architecture.md`。
+底层区别：self-contained 模式下内联实现不是其 TU 的主文件，类元数据是弱符号（每个 TU 重复一份再合并）；库模式下每个 Foundation `.jeti` 作为独立 TU 编译，其 `@implementation` 持有元数据并发射为强符号——归档里只存一份。owner/strong/weak 完整规则见 `docs/plans/architecture.md`。
 
 ### Shell 补全（Tab 自动补全）
 
@@ -467,7 +467,7 @@ Jeti 在 Objective-C 语法基础上，加入了一些 ObjC 本身没有的语�
 
 **近期亮点：**
 
-- **谓词 / KVC（`NPPredicate`）** — 格式串解析器与求值引擎**全在 Foundation 库的 C 里**（`age > 18 AND name BEGINSWITH[c] 'A'`、`ANY tags LIKE '*dev*'`），底层是编译期发射的 KVC 访问表（`JETI_KVC_$_X`，owner TU 出强表），并带宿主过滤 API（`filteredArrayUsingPredicate:` / `indexOfObjectMatchingPredicate:` / `filterUsingPredicate:`；`nil` 谓词 = 恒等不过滤）。编译器从不解析格式串 —— 见 `doc/architecture.md` §12。
+- **谓词 / KVC（`NPPredicate`）** — 格式串解析器与求值引擎**全在 Foundation 库的 C 里**（`age > 18 AND name BEGINSWITH[c] 'A'`、`ANY tags LIKE '*dev*'`），底层是编译期发射的 KVC 访问表（`JETI_KVC_$_X`，owner TU 出强表），并带宿主过滤 API（`filteredArrayUsingPredicate:` / `indexOfObjectMatchingPredicate:` / `filterUsingPredicate:`；`nil` 谓词 = 恒等不过滤）。编译器从不解析格式串 —— 见 `docs/plans/architecture.md` §12。
 - **集合（`NPSet` / `NPMutableSet` / `NPOrderedSet`）** — Foundation 库里的哈希桶集合容器（元素唯一，`containsObject:` / `anyObject` / `setWithObjects:count:`），`NPOrderedSet` 额外保持插入顺序；全部容器方法走静态 vtable 派发，跨 TU 安全。
 - **原生裸机支持（`-ffreestanding`）** — 编译为自包含 C，无 libc、无 Foundation、无 TLS；`@try/@catch` 走默认的 `-eh checked` 后端（纯旗标 + 守卫，**完全不用 `setjmp/longjmp`**，这正是裸机可用的前提；`-eh legacy` 才回退到 `__builtin_setjmp/longjmp`），零样板的 `runtime_freestanding.c` 提供 bump allocator、`JETI_CLASS_$_jeti_root`、异常状态和 `memcpy`。
 - **C 超集** — `@protocol` + 一致性检查、`@property` + `@synthesize`、`instancetype`、`@public` ivar、点语法、struct + 函数指针、内联汇编、C 风格类型转换。

@@ -1,6 +1,6 @@
 # strong_metadata — metadata-linkage and class-ownership protection tests
 
-Guards the precompiled-library (P3) contract (`doc/stable_slots_plan.md` §8) and
+Guards the precompiled-library (P3) contract (`docs/plans/stable_slots_plan.md` §8) and
 the per-class ownership rule R2 (§9).
 
 ```bash
@@ -21,7 +21,7 @@ metadata linkage is correct:
 | 7 | a main file that owns the root classes (`NPObject.jeti` compiled standalone) compiles clean — `jeti_root`/`NPObject` defined **exactly once** in the generated file | stable-slots §9 blocker 1: Section 4's guarded fallbacks used to be re-emitted unguarded by the class-layout section — a hard C redefinition error |
 
 There is no flag left to remember: the old `-fstrong-metadata` was deleted when
-plan A landed (per-TU Foundation build, doc/stable_slots_plan.md §11), and
+plan A landed (per-TU Foundation build, docs/plans/stable_slots_plan.md §11), and
 check 3 pins that deletion. Checks 4–6 cover the automatic side of the same
 rule: R2 makes a duplicate implementation loud (4), makes standalone TUs
 automatically strong (5) and keeps declaration-only clients weak (6). Check 7

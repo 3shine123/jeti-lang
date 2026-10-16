@@ -34,7 +34,7 @@ impl TagKind {
 }
 
 /// Nullability of a pointer type — ObjC's `nullable` / `nonnull` / unspecified
-/// triple (PEP, see `doc/nullability_plan.md`).
+/// triple (PEP, see `docs/plans/nullability_plan.md`).
 ///
 /// Deliberately a THREE-state enum, not a bool. The third state is what makes
 /// the whole design work: `Unspecified` ("nobody said") and `NullUnspecified`
@@ -456,7 +456,7 @@ pub enum CstDeclData {
         /// Trailing `throws` / `throws(T)` annotation (declaration position).
         /// `None` = not annotated. Compile-time only — never emitted to C.
         throws: Option<Box<CstType>>,
-        /// `async` return-type modifier (doc/async_nptask_plan.md). Always
+        /// `async` return-type modifier (docs/plans/async_nptask_plan.md). Always
         /// false for plain C functions — the modifier is method syntax;
         /// kept on the node for uniformity.
         async_marker: bool,
@@ -530,7 +530,7 @@ pub enum CstDeclData {
         /// before `;` or `{`). `None` = not annotated. Compile-time only —
         /// never emitted to C. Distinct from the `@throw` statement.
         throws: Option<Box<CstType>>,
-        /// `async` return-type modifier (see Function / doc/async_nptask_plan.md).
+        /// `async` return-type modifier (see Function / docs/plans/async_nptask_plan.md).
         async_marker: bool,
     },
     Namespace(Vec<CstDecl>),

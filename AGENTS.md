@@ -1,17 +1,17 @@
 # AGENTS.md — Jeti Language Project
 
-> **Read first:** `doc/architecture.md` is the single source of truth for the current
+> **Read first:** `docs/plans/architecture.md` is the single source of truth for the current
 > architecture (pipeline, `.hje`/`.jeti` semantics, Foundation modes, owner/strong/weak
 > metadata, vtable rules, EH backends). This file covers layout, commands, and the
 > rules code changes must follow.
-> **Source locations / debugging / LSP plan:** `doc/source_locations_debug_lsp_plan.md`
+> **Source locations / debugging / LSP plan:** `docs/plans/source_locations_debug_lsp_plan.md`
 > describes SourceSpan, generated-C `#line`, DWARF-backed debugging, versioned source
 > maps, and LSP/debugger reuse. It is a plan, not implemented behavior; check
-> `doc/architecture.md` and `ROADMAP.md` for current status.
+> `docs/plans/architecture.md` and `ROADMAP.md` for current status.
 >
 > **History:** detailed implementation logs and decision records live in
-> `doc/stable_slots_plan.md`, `doc/arc_intern_uaf.md`, and
-> `doc/archive/agents-history-2026-10.md` (the pre-2026-10 version of this file,
+> `docs/plans/stable_slots_plan.md`, `docs/plans/arc_intern_uaf.md`, and
+> `docs/archive/agents-history-2026-10.md` (the pre-2026-10 version of this file,
 > including the legacy C-era project map). Do not re-derive them here.
 
 ## Current Phase
@@ -43,7 +43,7 @@ jeti-lang/
 │   └── *.jeti                 # individual integration programs
 ├── tools/build-foundation-lib.sh   # → target/foundation/libjetifoundation.a
 ├── test_all.py              # full integration suite (test_all.sh = parallel wrapper)
-├── doc/                     # architecture.md (start here), plans, archive/
+├── docs/                    # plans/ (architecture.md — start here), archive/ (history)
 └── ROADMAP.md               # what is actually not done yet
 ```
 
@@ -153,6 +153,6 @@ cargo test --workspace           # Rust unit tests
   passes, preserve their source origin. New synthesized nodes should be marked or
   documented as synthetic and retain the originating Jeti span when one exists.
   Do not add a parallel line-number/source-map mechanism: follow
-  `doc/source_locations_debug_lsp_plan.md` and keep diagnostics, generated-C mappings,
+  `docs/plans/source_locations_debug_lsp_plan.md` and keep diagnostics, generated-C mappings,
   LSP, and debugger support on the shared SourceSpan/SourceMap model.
 - **Destructive git ops need user approval.**

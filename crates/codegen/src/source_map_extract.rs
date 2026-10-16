@@ -1,6 +1,6 @@
 //! Extraction of the sidecar source map (`.jeti.map`) from the FINAL generated
 //! C text, by scanning its `#line` directive stream
-//! (`doc/source_locations_debug_lsp_plan.md` 阶段 4).
+//! (`docs/plans/source_locations_debug_lsp_plan.md` 阶段 4).
 //!
 //! Why scan the finished text instead of recording events during emission:
 //! the emitted buffer is post-processed before it reaches disk

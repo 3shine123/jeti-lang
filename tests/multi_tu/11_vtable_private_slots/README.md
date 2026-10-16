@@ -28,4 +28,4 @@ run=42
 
 > 状态：**正向 PASS**（R1+R2+R3 全链验证通过，2026-10-03）。原 `EXPECT_FAIL` /
 > `EXPECT_FAIL_MATCH` 标记已删除，输出按 `expected.txt` 逐字比对。
-> 摘牌过程暴露并修掉的两个缺口见 `doc/stable_slots_plan.md` §10"验证链连带修复"。
+> 摘牌过程暴露并修掉的两个缺口见 `docs/plans/stable_slots_plan.md` §10"验证链连带修复"。

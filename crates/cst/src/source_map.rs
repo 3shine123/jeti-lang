@@ -1,5 +1,5 @@
 //! Source location model — the single source of truth for file identity and
-//! position mapping (doc/source_locations_debug_lsp_plan.md, 阶段 1).
+//! position mapping (docs/plans/source_locations_debug_lsp_plan.md, 阶段 1).
 //!
 //! Every file read or imported gets a stable [`SourceId`]. The flattened
 //! post-preprocessing buffer (what the lexer/parser see) maps *line ranges*

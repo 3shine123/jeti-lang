@@ -381,7 +381,7 @@ impl Pipeline {
                 eprintln!("\x1b[1;35m[async] warning:\x1b[0m {}", translate_lines(w, &pre.source_map));
             }
         }
-        // `hosted` gates the entry auto-pump (doc/async_nptask_plan.md
+        // `hosted` gates the entry auto-pump (docs/plans/async_nptask_plan.md
         // §静态分析 3): a hosted chain drives itself, bare metal pumps from
         // its own main loop.
         let (async_desugar_errors, async_desugar_warnings) = jeti_async::desugar_unit_m2(&mut ast);
@@ -451,7 +451,7 @@ impl Pipeline {
         // Selectors this TU sees through a header it imports — the "public"
         // surface. Codegen gives them the same vtable slot indices in every TU,
         // so a legal two-TU split does not produce disagreeing layouts.
-        // See doc/stable_slots_plan.md (R1).
+        // See docs/plans/stable_slots_plan.md (R1).
         let public_methods = collect_public_methods(&ast, filename, &pre.source_map);
         // R2: the classes this TU owns (its `@implementation`s live in the main
         // file). Their metadata is emitted strong, everyone else's stays weak.
@@ -648,7 +648,7 @@ fn translate_lines(msg: &str, sm: &jeti_cst::source_map::SourceMap) -> String {
 
 /// Sanitized selectors declared in an `@interface` from a file this TU
 /// imports — its "public" surface. Codegen uses this to lay out the public
-/// vtable segment identically in every TU (`doc/stable_slots_plan.md`, rule R1).
+/// vtable segment identically in every TU (`docs/plans/stable_slots_plan.md`, rule R1).
 ///
 /// Only `@interface` declarations count (`is_implementation: false`). A
 /// selector that appears solely in an imported `@implementation` is private to
@@ -692,7 +692,7 @@ fn collect_public_methods(
 }
 
 /// Classes whose `@implementation` lives in **this** TU's main file — the
-/// translation unit that owns the class (`doc/stable_slots_plan.md`, rule R2).
+/// translation unit that owns the class (`docs/plans/stable_slots_plan.md`, rule R2).
 ///
 /// Codegen emits an owner's metadata **strong**, so another TU's weak stub can
 /// never displace the real table; and if a second TU also implements the class
@@ -723,7 +723,7 @@ fn collect_owned_classes(
                 // contributes method definitions only — it must NOT claim
                 // class ownership, or linking owner + category TUs fails with
                 // duplicate metadata symbols (probes/xcat P0). See
-                // doc/categories_protocol_plan.md D1.
+                // docs/plans/categories_protocol_plan.md D1.
                 AstDeclData::Class { is_implementation: true, is_category: true, .. } => {}
                 AstDeclData::Class { is_implementation: true, .. } => {
                     let (file, _) = map.locate(d.line);

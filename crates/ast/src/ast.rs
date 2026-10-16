@@ -398,7 +398,7 @@ pub struct AstDecl {
          /// implementation must NOT claim class ownership (R2): its TU emits
          /// only the method definitions, never the strong class metadata —
          /// otherwise linking owner + category TUs fails with duplicate
-         /// symbols (probes/xcat P0). See doc/categories_protocol_plan.md D1.
+         /// symbols (probes/xcat P0). See docs/plans/categories_protocol_plan.md D1.
          is_category: bool,
      },
      Method {
@@ -413,7 +413,7 @@ pub struct AstDecl {
          /// `throws` ("declared to throw, type unstated"). Compile-time only
          /// (checker reconciles it against `@throw` stmts) — never emitted to C.
          throws: Option<Box<AstType>>,
-         /// `async` return-type modifier (doc/async_nptask_plan.md): set when
+         /// `async` return-type modifier (docs/plans/async_nptask_plan.md): set when
          /// the declaration is spelled `async NPTask<T>`.
          async_marker: bool,
      },
@@ -484,7 +484,7 @@ pub struct AstDecl {
     },
     /// A `@protocol P <Parents>` declaration. Carries what the codegen needs
     /// to emit the static `NPProtocol` metadata (D5.2,
-    /// doc/categories_protocol_plan.md): parent names, required/optional
+    /// docs/plans/categories_protocol_plan.md): parent names, required/optional
     /// selector names in declaration order. Compile-time only — methods keep
     /// no param types here (the runtime query compares selector names).
     Protocol {

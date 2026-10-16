@@ -203,7 +203,7 @@ int main() {
 jetic app.jeti -o app               # the library is found and linked automatically
 ```
 
-Under the hood: in self-contained mode the inlined implementations are not their TU's main file, so their class metadata is weak (duplicated per TU and merged). In library mode each Foundation `.jeti` is compiled as its own TU, so its `@implementation` owns the metadata and emits it strong — one copy in the archive. Full owner/strong/weak rules: `doc/architecture.md`.
+Under the hood: in self-contained mode the inlined implementations are not their TU's main file, so their class metadata is weak (duplicated per TU and merged). In library mode each Foundation `.jeti` is compiled as its own TU, so its `@implementation` owns the metadata and emits it strong — one copy in the archive. Full owner/strong/weak rules: `docs/plans/architecture.md`.
 
 ### Shell Completion (Tab autocomplete)
 
@@ -486,7 +486,7 @@ Jeti adds features on top of Objective-C syntax that ObjC itself doesn't have.
 
 **Recent highlights:**
 
-- **Predicates / KVC (`NPPredicate`)** — a runtime format-string parser + evaluation engine living entirely in the Foundation library (`age > 18 AND name BEGINSWITH[c] 'A'`, `ANY tags LIKE '*dev*'`), backed by compile-time KVC accessor tables (`JETI_KVC_$_X`, strong in the owner TU) and a host filtering API (`filteredArrayUsingPredicate:` / `indexOfObjectMatchingPredicate:` / `filterUsingPredicate:`; a `nil` predicate is the identity). The compiler never parses the format string — see `doc/architecture.md` §12.
+- **Predicates / KVC (`NPPredicate`)** — a runtime format-string parser + evaluation engine living entirely in the Foundation library (`age > 18 AND name BEGINSWITH[c] 'A'`, `ANY tags LIKE '*dev*'`), backed by compile-time KVC accessor tables (`JETI_KVC_$_X`, strong in the owner TU) and a host filtering API (`filteredArrayUsingPredicate:` / `indexOfObjectMatchingPredicate:` / `filterUsingPredicate:`; a `nil` predicate is the identity). The compiler never parses the format string — see `docs/plans/architecture.md` §12.
 - **Sets (`NPSet` / `NPMutableSet` / `NPOrderedSet`)** — hash-bucket set containers in the Foundation library (unique elements, `containsObject:` / `anyObject` / `setWithObjects:count:`), with `NPOrderedSet` preserving insertion order; all container methods dispatch through the static vtable, so they are safe across TUs.
 - **Native bare-metal support (`-ffreestanding`)** — compiles to self-contained C with no libc, no Foundation, no TLS; `@try/@catch` uses `__builtin_setjmp/longjmp`, and a zero-boilerplate `runtime_freestanding.c` provides the bump allocator, `JETI_CLASS_$_jeti_root`, exception state, and `memcpy`.
 - **C superset** — `@protocol` + conformance, `@property` + `@synthesize`, `instancetype`, `@public` ivars, dot syntax, structs + function pointers, inline asm, C-style casts.

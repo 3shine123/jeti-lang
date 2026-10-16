@@ -1,4 +1,4 @@
-//! Async/await desugar — Async Semantics v1 (doc/plans/async_semantics_v1.md).
+//! Async/await desugar — Async Semantics v1 (docs/plans/async_semantics_v1.md).
 //!
 //! `async` is part of the signature and means MAY suspend. A call to an async
 //! method must be `await`-ed (rule 2 — the checker enforces it); the desugar
@@ -21,7 +21,7 @@
 //!   1. async classification (body contains `await` — chain infection),
 //!   2. `@try` spanning an await rejection.
 //!
-//! Note (doc/async_nptask_plan.md): bare async calls from sync contexts are
+//! Note (docs/plans/async_nptask_plan.md): bare async calls from sync contexts are
 //! LEGAL — form A (lazy task creation, handle is a first-class value). The
 //! old M1 sync-context call check was removed when `NPTask<T>` handles
 //! became real values; `[task start]` / `await` drive them afterwards.
@@ -370,7 +370,7 @@ fn warn_await_on_sync_expr(
     }
 }
 
-/// Async Semantics v1 rule 2 (doc/plans/async_semantics_v1.md §2): a call to
+/// Async Semantics v1 rule 2 (docs/plans/async_semantics_v1.md §2): a call to
 /// an async method MUST be awaited. A bare task-yielding expression whose
 /// value is silently discarded (statement position, comma tail, cast-to-void,
 /// block-literal no-op call) used to auto-drive (hosted) — the Swift-model
@@ -591,7 +591,7 @@ pub struct AsyncDiagnostics {
 pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
     let mut diags = AsyncDiagnostics { errors: Vec::new(), warnings: Vec::new() };
 
-    // ── async-modifier reconciliation (doc/async_nptask_plan.md, stage B) ──
+    // ── async-modifier reconciliation (docs/plans/async_nptask_plan.md, stage B) ──
     // The modifier is a signature-level flag; the body's awaits decide the
     // truth. Only implementations (methods WITH a body) reconcile against the
     // body — header-only `@interface` methods have no body to contradict
@@ -680,7 +680,7 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
                 }
             }
             // Top-level functions (main included): `await` here is the
-            // BLOCKING-join entry form (doc/async_nptask_plan.md — sync
+            // BLOCKING-join entry form (docs/plans/async_nptask_plan.md — sync
             // context awaits pump/drive the task inline). Legal without the
             // modifier; only class methods reconcile.
             _ => {}
@@ -745,7 +745,7 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
                 // Async Semantics v1 rule 1: `async` is a capability ("MAY
                 // suspend"), NOT "must suspend" — a body with no `await` is
                 // legal (cache hit, protocol impl that happens to be sync).
-                // The old §4.2 body-self-evidence error is gone (doc/plans/
+                // The old §4.2 body-self-evidence error is gone (docs/plans/
                 // async_semantics_v1.md §3). The reverse check (await without
                 // the modifier) stays a hard error, enforced below.
                 check_async_context(b, &sym, *async_marker, &mut diags);
@@ -915,13 +915,13 @@ fn check_async_nptask_spelling(rt: &AstType, line: usize, col: usize, diags: &mu
 }
 
 /// Reconcile the `async` return-type modifier against the body's awaits
-/// (doc/async_nptask_plan.md, stage B). The modifier is part of the
+/// (docs/plans/async_nptask_plan.md, stage B). The modifier is part of the
 /// signature, so a lying signature is an error in BOTH directions:
 ///   marked + await     → ok
 ///   marked, no await   → ok — Async Semantics v1 rule 1: `async` means
 ///                        "MAY suspend" (a capability), not "must suspend";
 ///                        cache hits and sync protocol impls are normal
-///                        (doc/plans/async_semantics_v1.md §2-1)
+///                        (docs/plans/async_semantics_v1.md §2-1)
 ///   await, unmarked    → error — the signature is lying: a suspending method
 ///                        MUST be declared `(async T)`
 ///   unmarked, no await → ok
@@ -994,7 +994,7 @@ fn check_stmt_for_try_await(s: &AstStmt, owner: &str, diags: &mut AsyncDiagnosti
 
 /// `[task start]` on an NPTask handle → `jeti_task_start(task)`. The handle
 /// is a runtime struct, not an NPObject — a vtable message send would be
-/// undefined (doc/async_nptask_plan.md, stage D).
+/// undefined (docs/plans/async_nptask_plan.md, stage D).
 fn is_task_start_send(e: &AstExpr) -> bool {
     if let AstExprData::MsgSend { receiver, args, .. } = &e.data {
         if args.is_empty() {
@@ -1471,7 +1471,7 @@ fn desugar_method_m2(
     };
     top_decls.push(entry_decl);
 
-    // NPTask design (doc/async_nptask_plan.md, stage D): the driver is LAZY —
+    // NPTask design (docs/plans/async_nptask_plan.md, stage D): the driver is LAZY —
     // create the task, fill the frame params, and return the handle. No join:
     // execution starts at [task start] / await. The method's C return type is
     // NPTask * (codegen renders NPTask<T> as NPTask *).
@@ -1933,7 +1933,7 @@ fn lower_awaits_m2_decl(d: &mut AstDecl, state: &mut i32, ctx: &mut AsyncCtx) {
         // task object (`NPTask<int> *t = [self loadCachedValue];`), and the
         // design allows `await` on any `NPTask<T> *` expression — a variable,
         // ivar or return value — not only on the result of an async call
-        // (doc/async_nptask_plan.md §调用点语义). The initializer-shape probe
+        // (docs/plans/async_nptask_plan.md §调用点语义). The initializer-shape probe
         // below cannot see this: its selector is not an async method.
         if let Some(vt) = var_type.as_deref() {
             if vt.is_pointer
@@ -2674,7 +2674,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
     new_decls.extend(unit.decls.drain(..));
     unit.decls = new_decls;
     // `[task start]` appears in CALLER bodies too (e.g. main), outside async
-    // methods — rewrite it unit-wide (doc/async_nptask_plan.md, stage D).
+    // methods — rewrite it unit-wide (docs/plans/async_nptask_plan.md, stage D).
     // Likewise `await e` in NON-async bodies (main / plain functions): the
     // blocking-join entry form lowers to jeti_task_await(e) here; async
     // method bodies were already rewritten above.

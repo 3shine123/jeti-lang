@@ -4,7 +4,7 @@
 ./tests/arc_intern/run_arc_intern_test.sh
 ```
 
-Fixed 2026-10-02. Full analysis: `doc/arc_intern_uaf.md`.
+Fixed 2026-10-02. Full analysis: `docs/plans/arc_intern_uaf.md`.
 
 An interned `@"..."` constant assigned straight to an object ivar was freed by
 the synthesised ARC dealloc (which releases owned ivars), leaving

@@ -1414,7 +1414,7 @@ impl Checker {
             name));
     }
 
-    // ── Generic protocol bounds (`T : Proto`) — doc/generic_bounds_plan.md ──
+    // ── Generic protocol bounds (`T : Proto`) — docs/plans/generic_bounds_plan.md ──
 
     /// Short name of a possibly-namespaced symbol (`ns::P` → `P`).
     fn short_type_name(n: &str) -> &str {
@@ -2663,7 +2663,7 @@ AstExprData::Subscript { object, key, .. } => {
             AstExprData::Await { inner, .. } => {
                 let inner_ty = self.check_expr(&mut *inner.clone());
                 // await unwraps the task box: `await` on `NPTask<T> *`
-                // yields `T` (doc/async_nptask_plan.md). Await on a non-task
+                // yields `T` (docs/plans/async_nptask_plan.md). Await on a non-task
                 // expression keeps the expression's own type (async-call
                 // sugar: the call's return type IS the NPTask handle... so
                 // through-sugar awaits also land here and unwrap).
@@ -3414,7 +3414,7 @@ AstExprData::Subscript { object, key, .. } => {
         }
     }
 
-    /// Category implementation rules (D3/D4 of doc/categories_protocol_plan.md):
+    /// Category implementation rules (D3/D4 of docs/plans/categories_protocol_plan.md):
     /// D4 — a selector implemented twice for the same class (main
     /// @implementation + category, or two categories) is a compile-time error.
     /// Static dispatch has no method list to prepend, so the ObjC "later

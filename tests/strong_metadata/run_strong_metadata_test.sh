@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_strong_metadata_test.sh — protection tests for class-metadata linkage.
 #
-# Guards the precompiled-library (P3) contract from doc/stable_slots_plan.md §8
+# Guards the precompiled-library (P3) contract from docs/plans/stable_slots_plan.md §8
 # on three levels, because "the program printed the right thing" alone does not
 # prove the metadata linkage is right:
 #
