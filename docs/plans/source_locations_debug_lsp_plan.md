@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲与跳转定义**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze`，大纲/跳转走同一次分析产出的符号索引，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的补全/悬停等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停与全局名字补全**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的成员补全/rename 等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -108,8 +108,8 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
-- 未做（后续阶段）：补全 / 悬停、rename、incremental sync、workspace folders、ARC 专属诊断、
-  `-Werror` 之外的设置协商（`workspace/configuration`）。
+- 未做（后续阶段）：**成员补全**（按接收者类型过滤）、signature help、rename、incremental sync、
+  workspace folders、ARC 专属诊断、`-Werror` 之外的设置协商（`workspace/configuration`）。
 
 **进展（大纲 + 定义跳转 —— 已落地）**
 
@@ -138,6 +138,24 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 回归：`cargo test -p jeti-lsp`（18 个单测 + 真实子进程会话，覆盖 outline、跳到同文件的两处声明、
   跳到 `include/Foundation/NPString.hje`、以及 miss 返回 `null`）；`test/extension.test.js` 覆盖两个 provider
   的 VS Code 类型换算。
+
+**进展（悬停 + 补全 —— 已落地）**
+
+- `textDocument/hover`：光标处符号 → 索引 → markdown。内容 = 种类（class / method / protocol / …）+ 名字 +
+  `detail`（`@interface:NPObject`、`- greet:` 这类），然后是**该声明的原文**（从靶点文件的行区间切出来，
+  最多 10 行，所以整个类体不会糊满弹窗），最后是 `_Declared in <相对工作区根的路径>:<行>_`；
+  同名多处时补一句 `N declarations`（selector 的声明 + 实现就是这种）。共享 span 模型照旧：
+  靶点文件用打开缓冲区或磁盘文本做投影。
+- `textDocument/completion`：光标处的名字当**前缀**（去掉尾部冒号，所以 `setOb` 与 `setObject:` 都能给出
+  `setObject:atIndex:`），索引里按前缀筛（大小写敏感，与语言一致），去重（同一个类声明两处只给一条）、
+  按字母排序、上限 2000 条兜底。**kind 用的是 `CompletionItemKind` 而不是 `SymbolKind`** —— 两套枚举编号不同，
+  编辑器图标看的是前者，索引里显式转换（class→7、method→2…）。
+- 局限（明确写在这里）：**没有成员补全**（`obj.` / `[obj ` 之后按接收者类型过滤）——那需要"光标前的表达式节点"
+  这种按位置查 AST 的能力；也还没有 signature help 与 rename。全局名字补全（类、方法 selector、函数、
+  typedef、enum、全局变量）已经可用。
+- 回归：`cargo test -p jeti-lsp` 现为 20 个单测 + 会话测试（会话里覆盖 hover 读到头文件 markdown、
+  前缀 `NPS` 给出 `NPString` 且 kind=7）；`test/extension.test.js` 覆盖 hover 的 MarkdownString 换算与
+  补全项的 kind/detail 换算。
 
 **进展（编辑器客户端 —— 已接线）**
 
