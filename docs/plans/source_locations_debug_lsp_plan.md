@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 的诊断 MVP 骨架已实施**（`crates/lsp` 的 `jeti-lsp`，语法/类型诊断走 `Pipeline::analyze`，位置经共享 SourceSpan 投影到 UTF-16）；阶段 5 与阶段 6 的补全/跳转等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲与跳转定义**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze`，大纲/跳转走同一次分析产出的符号索引，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的补全/悬停等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -89,6 +89,7 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 ### 阶段 6：LSP 与调试器适配
 
 - LSP 复用 lexer/parser/checker 的 SourceSpan；先实现语法/类型诊断，再补全和定义跳转。无需等待 source-map sidecar 或 DWARF。
+  （诊断、大纲、定义跳转已落地；补全与悬停仍待做。）
 - 调试器适配器消费 sidecar，把 Jeti 断点转换成可执行源码行/PC，把生成 C 栈帧和运行时 crash 位置映射回 Jeti。
 - source map 同时支持展开导入源与主 TU，并允许一条 Jeti 语句映射到多段 C。
 - 先支持 LLDB/GDB 的文件行断点与栈帧回映；单步、变量显示和 async await 逐步扩展。
@@ -107,8 +108,36 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
-- 未做（后续阶段）：补全 / 悬停 / 跳转、incremental sync、workspace folders、ARC 专属诊断、
+- 未做（后续阶段）：补全 / 悬停、rename、incremental sync、workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`）。
+
+**进展（大纲 + 定义跳转 —— 已落地）**
+
+- `Pipeline::analyze` 拆成 `analyze`（只要诊断，CLI/测试用）与 `analyze_document`（额外回传**同一个** AST 与
+  `SourceMap`）。LSP 的每一次 `didOpen`/`didChange` 只跑一次前端，诊断与符号索引都从这一次运行里派生；
+  `initialize` 里声明 `documentSymbolProvider` 与 `definitionProvider`。请求**不会**重新解析缓冲区。
+- 新模块 `crates/lsp/src/index.rs`：把 AST 走成一棵符号树 + 名字表。
+  索引的声明种类：class / category / protocol / method / property / ivar / function / 文件级 variable /
+  typedef / struct·union / enum / namespace（可嵌套）。
+  **不索引** forward 声明（那不是定义）、enum 成员与 protocol 的方法清单（AST 里没有它们的位置——没有位置的
+  跳转目标比没有更糟）、以及局部变量。
+- 位置照旧只走共享模型：每个节点 `(line,col)…(end_line,end_col)` 经 `SourceMap::span_from_node`，
+  再 `SourceSpan::to_lsp_range(text)` 投到 UTF-16。**没有源位置的合成节点不进索引**（`end == 0` 意味着不能指）。
+  导入是内联的，所以一个 import 了 Foundation 的文件，其 AST 也含 Foundation 的声明：这对查找是好事
+  （可以从自己的代码跳进头文件），大纲按路径把它们过滤掉。
+- `textDocument/definition`：先用文档文本定位光标处的符号名（消息发送里把整条 selector 当一个符号：
+  `setObject:atIndex:`；声明里的关键字部分保留冒号 `run:`），再拿名字查索引，返回**全部**同名声明
+  （LSP 允许一个请求多个 location，比如 selector 在声明与实现各有一处）。
+  多个候选不是猜：光标落在 receiver 或实参上时返回那个普通标识符（局部变量——索引里没有，于是不跳），
+  查不到就回 `null`，绝不编造目标。
+  selector 的识别是**文本级**的（从光标向前匹配括号、只取括号内紧邻 `:` 的标识符段），刻意不做 AST 遍历：
+  它只决定"拿哪个名字去查"，返回的区间全部来自共享 span 模型，所以误判最多造成跳不到，不会跳到编造的位置。
+- URI：靶点在被编辑的文档里就原样复用客户端给的 URI（避免 macOS `/var` → `/private/var` 规范化后
+  编辑器为同一文件再开一个标签）；靶点在导入的头文件里才做绝对化 + 规范化（`file_uri`），否则相对路径
+  会变成打不开的 `file://relative/...`。
+- 回归：`cargo test -p jeti-lsp`（18 个单测 + 真实子进程会话，覆盖 outline、跳到同文件的两处声明、
+  跳到 `include/Foundation/NPString.hje`、以及 miss 返回 `null`）；`test/extension.test.js` 覆盖两个 provider
+  的 VS Code 类型换算。
 
 **进展（编辑器客户端 —— 已接线）**
 

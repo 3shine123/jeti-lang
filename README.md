@@ -254,27 +254,36 @@ cargo test --workspace
 ### Editor Support (LSP)
 
 `jeti-lsp` is a stdio language server that reports **syntax, type and async
-diagnostics** for the buffer you are editing. It runs the compiler's own front
-end (`Pipeline::analyze`), so the findings are exactly what the CLI reports —
-never a second, drifting linter — and every position crosses the protocol
-boundary through the shared `SourceSpan` model (1-based byte columns → LSP
-UTF-16 code units) exactly once.
+diagnostics** for the buffer you are editing, plus an **outline** and
+**go-to-definition**. It runs the compiler's own front end (`Pipeline::analyze`),
+so the findings are exactly what the CLI reports — never a second, drifting
+linter — and every position crosses the protocol boundary through the shared
+`SourceSpan` model (1-based byte columns → LSP UTF-16 code units) exactly once.
 
 ```bash
 cargo build -p jeti-lsp           # → target/debug/jeti-lsp
 jeti-lsp --include include        # speaks LSP over stdin/stdout
 ```
 
-Scope today: the lifecycle handshake plus full-document sync
-(`didOpen`/`didChange`/`didClose` → `publishDiagnostics`). Completion, hover,
-go-to-definition, incremental sync and ARC-only diagnostics are not in yet.
+One analysis run per edit feeds all three: diagnostics are published, and the
+symbol index behind the outline and definition answers requests from the *same*
+AST — a request never re-parses your buffer. Definition resolves the name under
+the cursor (a whole selector like `setObject:atIndex:` counts as one name) and
+returns every declaration of it, including ones in an imported header, so
+`NPString` in your code jumps into `Foundation/NPString.hje`.
+
+Scope today: the lifecycle handshake, full-document sync
+(`didOpen`/`didChange`/`didClose` → `publishDiagnostics`),
+`textDocument/documentSymbol` and `textDocument/definition`. Completion, hover,
+rename, incremental sync and ARC-only diagnostics are not in yet.
 
 ### VS Code
 
 The bundled extension (`.vscode/extensions/jeti-lang-support`) adds syntax
 highlighting **and** the language client: it spawns `jeti-lsp` and renders the
-diagnostics as squiggles in the editor. Try it in a throwaway window (nothing is
-installed into your own setup):
+diagnostics as squiggles in the editor, fills the Outline view and the
+breadcrumb bar, and answers Go to Definition. Try it in a throwaway window
+(nothing is installed into your own setup):
 
 ```bash
 ./tools/run-vscode-extension.sh                 # this repository

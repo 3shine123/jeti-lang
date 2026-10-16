@@ -171,8 +171,11 @@ node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue
   `Diagnostic::to_source_span` / `SourceMap::span_from_node`). Never re-derive a
   column in a consumer, never mix the two unit systems, and never invent a range
   for a node without a source origin (`end == 0` → zero-width, at the start).
-- **LSP diagnostics come from the compiler front end:** `Pipeline::analyze` is the
-  single entry (`crates/lsp` must not grow its own parser/checker chain); it runs
-  the same stage order as `transpile`, sharing `Pipeline::prepare`. New front-end
+- **LSP requests come from the compiler front end:** `Pipeline::analyze_document` is
+  the single entry — `crates/lsp` must not grow its own parser/checker chain, and a
+  request must never re-parse the buffer. It runs the same stage order as
+  `transpile`, sharing `Pipeline::prepare`, and every request (diagnostics, outline,
+  definition) answers from that one run's AST and `SourceMap` (walking the AST it
+  was handed is the consumer's job, as it is for codegen). New front-end
   stages/fatality rules must be mirrored there, not duplicated.
 - **Destructive git ops need user approval.**

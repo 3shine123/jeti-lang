@@ -250,22 +250,28 @@ cargo test --workspace
 
 ### 编辑器支持（LSP）
 
-`jeti-lsp` 是一个 stdio 语言服务器，为正在编辑的缓冲区报出**语法、类型与 async 诊断**。
-它跑的是编译器自己的前端（`Pipeline::analyze`），因此诊断与 CLI 完全一致——不是另一套会说谎的
-linter；位置只跨协议边界一次，走共享的 `SourceSpan` 模型（1 基 byte 列 → LSP UTF-16 code unit）。
+`jeti-lsp` 是一个 stdio 语言服务器：为正在编辑的缓冲区报出**语法、类型与 async 诊断**，另外提供**大纲**与
+**跳转定义**。它跑的是编译器自己的前端（`Pipeline::analyze_document`），因此诊断与 CLI 完全一致——不是另一套
+会说谎的 linter；位置只跨协议边界一次，走共享的 `SourceSpan` 模型（1 基 byte 列 → LSP UTF-16 code unit）。
 
 ```bash
 cargo build -p jeti-lsp           # → target/debug/jeti-lsp
 jeti-lsp --include include        # 在 stdin/stdout 上说 LSP
 ```
 
-当前范围：生命周期握手 + 全量文档同步（`didOpen`/`didChange`/`didClose` →
-`publishDiagnostics`）。补全、悬停、跳转定义、incremental sync、ARC 专属诊断尚未实现。
+每次编辑只跑一次分析：诊断推给客户端，大纲与跳转用的符号索引则来自**同一棵 AST**——请求不会重新解析缓冲区。
+跳转定义先认出光标下的名字（`setObject:atIndex:` 这样的整条 selector 算一个名字），再返回它的全部声明，
+包括导入头文件里的，所以在自己代码里点 `NPString` 会跳进 `Foundation/NPString.hje`。
+
+当前范围：生命周期握手、全量文档同步（`didOpen`/`didChange`/`didClose` → `publishDiagnostics`）、
+`textDocument/documentSymbol`、`textDocument/definition`。补全、悬停、rename、incremental sync、
+ARC 专属诊断尚未实现。
 
 ### VS Code
 
 仓库自带的扩展（`.vscode/extensions/jeti-lang-support`）除语法高亮外，还包含了 language client：
-它会拉起 `jeti-lsp`，并把诊断渲染成编辑器里的波浪线。用一个临时窗口试（不会装进你自己的编辑器配置）：
+它会拉起 `jeti-lsp`，把诊断渲染成编辑器里的波浪线，填充大纲视图与面包屑，并支持跳转定义。
+用一个临时窗口试（不会装进你自己的编辑器配置）：
 
 ```bash
 ./tools/run-vscode-extension.sh                 # 本仓库
