@@ -1,7 +1,7 @@
 [-> 中文](CHINESE.md)
 
 <div align="center">
-<img src="doc/assets/logo/jeti_border_gray_on_amber.svg" alt="Jeti_avatar" width="210">
+<img src="docs/assets/logo/jeti_border_gray_on_amber.svg" alt="Jeti_avatar" width="210">
 
 # The Jeti Programming Language
 
