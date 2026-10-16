@@ -130,6 +130,30 @@ class JetiLanguageClient {
     return this.request('textDocument/definition', { textDocument: { uri }, position });
   }
 
+  /**
+   * `textDocument/hover` → the markdown hover for the symbol at `position`, or
+   * `null` when there is nothing to say about it.
+   *
+   * @param {string} uri
+   * @param {{line: number, character: number}} position
+   * @returns {Promise<object | null>}
+   */
+  hover(uri, position) {
+    return this.request('textDocument/hover', { textDocument: { uri }, position });
+  }
+
+  /**
+   * `textDocument/completion` → the completion list for `position`.
+   *
+   * @param {string} uri
+   * @param {{line: number, character: number}} position
+   * @returns {Promise<object[]>}
+   */
+  completion(uri, position) {
+    return this.request('textDocument/completion', { textDocument: { uri }, position })
+      .then((list) => list?.items || []);
+  }
+
   /** `shutdown` + `exit`, then resolve with the server's exit code. */
   async stop({ timeoutMs = 10000 } = {}) {
     const proc = this.process;

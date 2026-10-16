@@ -35,6 +35,27 @@ const providers = new Map();
 
 const vscode = {
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  // LSP CompletionItemKind: Method 2, Function 3, Field 5, Variable 6, Class 7,
+  // Interface 8, Module 9, Property 10, Enum 13, Struct 22, Text 1.
+  CompletionItemKind: { Text: 1, Method: 2, Function: 3, Field: 5, Variable: 6, Class: 7, Interface: 8, Module: 9, Property: 10, Enum: 13, Struct: 22 },
+  MarkdownString: class MarkdownString {
+    constructor(value) {
+      this.value = value;
+    }
+  },
+  Hover: class Hover {
+    constructor(contents, range) {
+      this.contents = contents;
+      this.range = range;
+    }
+  },
+  CompletionItem: class CompletionItem {
+    constructor(label, kind) {
+      this.label = label;
+      this.kind = kind;
+      this.detail = undefined;
+    }
+  },
   SymbolKind: {
     Namespace: 3,
     Class: 5,
@@ -100,6 +121,8 @@ const vscode = {
     },
     registerDocumentSymbolProvider: (selector, provider) => registerProvider('documentSymbol', provider),
     registerDefinitionProvider: (selector, provider) => registerProvider('definition', provider),
+    registerHoverProvider: (selector, provider) => registerProvider('hover', provider),
+    registerCompletionItemProvider: (selector, provider) => registerProvider('completion', provider),
   },
   window: {
     createOutputChannel: (name) => ({
@@ -313,6 +336,32 @@ async function main() {
     const missing = await definitionProvider.provideDefinition(programDocument, new vscode.Position(1, 0));
     assert.strictEqual(missing, undefined, 'a miss must stay a miss');
     console.log('ok  definition provider → local, imported header, and misses');
+
+    // Hover renders the server's markdown as a MarkdownString; a symbol the
+    // server knows nothing about yields no hover at all.
+    const hoverProvider = providers.get('hover');
+    assert.ok(hoverProvider, 'expected a hover provider');
+    const hover = await hoverProvider.provideHover(programDocument, positionOf(program, 'NPString *s'));
+    assert.ok(hover instanceof vscode.Hover);
+    assert.ok(hover.contents.value.startsWith('**class** `NPString`'), hover.contents.value);
+    assert.ok(hover.contents.value.includes('NPString.hje'), hover.contents.value);
+    const noHover = await hoverProvider.provideHover(programDocument, new vscode.Position(1, 0));
+    assert.strictEqual(noHover, undefined);
+    console.log('ok  hover provider → markdown, and nothing for a non-symbol');
+
+    // Completion carries the completion kind (Class = 7) and the detail line.
+    const completionProvider = providers.get('completion');
+    assert.ok(completionProvider, 'expected a completion provider');
+    const prefixPosition = positionOf(program, 'NPString *s');
+    prefixPosition.character += 3; // `NPS` typed
+    const completions = await completionProvider.provideCompletionItems(programDocument, prefixPosition);
+    assert.ok(completions.length > 0, 'expected completion items');
+    assert.ok(completions.every((item) => item.label.startsWith('NPS')), JSON.stringify(completions.map((c) => c.label)));
+    const npstring = completions.find((item) => item.label === 'NPString');
+    assert.ok(npstring, `expected NPString in ${completions.map((c) => c.label)}`);
+    assert.strictEqual(npstring.kind, vscode.CompletionItemKind.Class);
+    assert.strictEqual(npstring.detail, '@interface:NPObject');
+    console.log(`ok  completion provider → ${completions.length} item(s), kinds and details converted`);
 
     // A missing server must not throw: it warns, stays inert, and a settings
     // change brings it back without reloading the window.

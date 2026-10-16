@@ -87,6 +87,8 @@ async function main() {
     assert.strictEqual(init.capabilities.textDocumentSync, 1, 'expected full document sync');
     assert.strictEqual(init.capabilities.documentSymbolProvider, true, 'expected an outline provider');
     assert.strictEqual(init.capabilities.definitionProvider, true, 'expected a definition provider');
+    assert.strictEqual(init.capabilities.hoverProvider, true, 'expected a hover provider');
+    assert.strictEqual(init.capabilities.completionProvider.resolveProvider, false, 'expected inline completions');
     assert.strictEqual(init.serverInfo.name, 'jeti-lsp');
     console.log('ok  initialize handshake');
 

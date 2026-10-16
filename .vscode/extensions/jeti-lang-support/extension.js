@@ -127,6 +127,25 @@ function toLocations(locations) {
   return list.map((location) => new vscode.Location(vscode.Uri.parse(location.uri), toRange(location.range)));
 }
 
+/** LSP `Hover | null` → VS Code's `Hover | undefined`. */
+function toHover(hover) {
+  if (!hover || !hover.contents) return undefined;
+  const contents = hover.contents;
+  const markdown = typeof contents === 'string' ? contents : contents.value || '';
+  if (!markdown) return undefined;
+  const range = hover.range ? toRange(hover.range) : undefined;
+  return new vscode.Hover(new vscode.MarkdownString(markdown), range);
+}
+
+/** LSP `CompletionItem[]` → VS Code's `CompletionItem[]`. */
+function toCompletionItems(items) {
+  return (items || []).map((item) => {
+    const converted = new vscode.CompletionItem(item.label, item.kind ?? vscode.CompletionItemKind.Text);
+    if (item.detail) converted.detail = item.detail;
+    return converted;
+  });
+}
+
 function publish(uriString, diagnostics) {
   const uri = vscode.Uri.parse(uriString);
   collection?.set(uri, (diagnostics || []).map(toDiagnostic));
@@ -202,6 +221,25 @@ function restart() {
           character: position.character,
         });
         return toLocations(locations);
+      },
+    }),
+    vscode.languages.registerHoverProvider(LANGUAGE_ID, {
+      provideHover: async (document, position) => {
+        if (!client) return undefined;
+        return toHover(await client.hover(document.uri.toString(), {
+          line: position.line,
+          character: position.character,
+        }));
+      },
+    }),
+    vscode.languages.registerCompletionItemProvider(LANGUAGE_ID, {
+      provideCompletionItems: async (document, position) => {
+        if (!client) return undefined;
+        const items = await client.completion(document.uri.toString(), {
+          line: position.line,
+          character: position.character,
+        });
+        return toCompletionItems(items);
       },
     }),
     vscode.workspace.onDidOpenTextDocument((document) => {
