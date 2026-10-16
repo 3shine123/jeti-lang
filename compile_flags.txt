@@ -1,0 +1,17 @@
+# Editor configuration for this repository, read by `jeti-lsp` — same idea and
+# same format as clangd's `compile_flags.txt`: one flag per line, applied to
+# every file below this directory. Lines starting with `#` are comments (a jetic
+# extension; clangd itself would hand every line to the compiler).
+
+# Why this file is here, commented out: this repository's tests are ARC-first
+# with an MRC retry — `test_all.py` compiles with ARC and, if the checker
+# rejects manual retain/release, retries with `-fno-jeti-arc` (39 of 218 files
+# take that path). The editor only ever sees one mode, so legacy fixtures like
+# `tests/tt.jeti` show "explicit 'release' not allowed in ARC mode" for code
+# that builds.
+
+# Uncomment the line below to analyze the whole tree in MRC mode, which matches
+# what those files actually build as. In MRC mode the ARC-only rule is off and
+# nothing else changes (the ARC pass never runs in the language server).
+#
+# -fno-jeti-arc

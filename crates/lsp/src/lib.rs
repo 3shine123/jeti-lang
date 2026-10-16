@@ -251,6 +251,9 @@ pub fn apply_flags(
             "fno-checker" | "no-checker" => options.no_checker = true,
             _ => {
                 if let Some(dir) = arg.strip_prefix("-I") {
+                    // A flags file holds one argument per line, so `-I include`
+                    // arrives joined; the space is never intentional.
+                    let dir = dir.trim();
                     if !dir.is_empty() {
                         options.search_dirs.push(resolve(dir));
                     }

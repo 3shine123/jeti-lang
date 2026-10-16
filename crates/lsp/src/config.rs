@@ -125,14 +125,23 @@ impl ConfigCache {
         Some(entries)
     }
 
+    /// Read a `compile_flags.txt`: one flag per line, the whole line being one
+    /// argument (clangd's rule — `-I src` on one line is a single argument, which
+    /// is why the joined form is trimmed).
+    ///
+    /// `#` starts a comment. That is a jetic extension: clangd reads the same
+    /// file and passes every line to the compiler, so a comment line would make
+    /// *its* command unusable — a directory shared with clangd should keep
+    /// comments out of this file.
     fn flags_file(&self, path: &Path) -> Option<ConfigFlags> {
         let text = std::fs::read_to_string(path).ok()?;
         let arguments: Vec<String> = text
             .lines()
             .map(str::trim)
-            .filter(|line| !line.is_empty())
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(str::to_string)
             .collect();
+        // Nothing but comments and blank lines: the project has said nothing.
         if arguments.is_empty() {
             return None;
         }
@@ -284,6 +293,47 @@ mod tests {
         // `-g` is not a diagnostic switch: ignored, not treated as a directory.
         assert_eq!(flags.search_dirs.len(), 1);
         assert!(flags.search_dirs[0].ends_with("include"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn comments_let_a_flag_sit_there_until_it_is_wanted() {
+        let root = std::env::temp_dir().join("jeti_lsp_config_comments");
+        let _ = std::fs::remove_dir_all(&root);
+        write(
+            &root.join("compile_flags.txt"),
+            "# kept here until the project moves to MRC\n# -fno-jeti-arc\n",
+        );
+        write(&root.join("src/a.jeti"), "");
+
+        let mut cache = ConfigCache::default();
+        let document = root.join("src/a.jeti").to_string_lossy().to_string();
+        // Nothing but comments: the project has said nothing, so the editor's
+        // own settings stand.
+        assert!(cache.flags_for(&document, None).is_none());
+
+        // Uncommenting is all it takes.
+        write(&root.join("compile_flags.txt"), "# -fno-jeti-arc\n-fno-jeti-arc\n");
+        let flags = cache.flags_for(&document, None).expect("flags");
+        assert!(flags.no_arc);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_joined_include_path_is_trimmed() {
+        let root = std::env::temp_dir().join("jeti_lsp_config_joined");
+        let _ = std::fs::remove_dir_all(&root);
+        // One argument per line, so a space after `-I` is part of the same line.
+        write(&root.join("compile_flags.txt"), "-I include\n-Isrc\n");
+        write(&root.join("src/a.jeti"), "");
+
+        let mut cache = ConfigCache::default();
+        let flags = cache
+            .flags_for(&root.join("src/a.jeti").to_string_lossy(), None)
+            .expect("flags");
+        assert_eq!(flags.search_dirs.len(), 2, "{:?}", flags.search_dirs);
+        assert!(flags.search_dirs[0].ends_with("include"), "{:?}", flags.search_dirs);
+        assert!(flags.search_dirs[1].ends_with("src"), "{:?}", flags.search_dirs);
         let _ = std::fs::remove_dir_all(&root);
     }
 
