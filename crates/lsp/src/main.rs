@@ -14,36 +14,16 @@
 
 use std::io::{self, BufReader, BufWriter};
 
-use jeti_lsp::{read_message, write_message, AnalysisOptions, Server};
+use jeti_lsp::{apply_flags, read_message, write_message, AnalysisOptions, Server};
 
 fn main() {
+    // The very same parser a project's `compile_commands.json` goes through, so
+    // a flag cannot mean one thing on the command line and another in the file.
+    // Editors pass flags such as `--stdio`; unknown ones are ignored rather than
+    // refusing to start.
+    let args: Vec<String> = std::env::args().collect();
     let mut options = AnalysisOptions::default();
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        // The CLI normalizes `--flag` to `-flag`, so both spellings land here.
-        match arg.as_str() {
-            "--include" | "-I" => {
-                if let Some(dir) = args.next() {
-                    options.search_dirs.push(dir);
-                }
-            }
-            // Only "checked" is the flag+guard backend whose `@throw` rewriting
-            // the checker's reconciliation assumes.
-            "-eh" | "--eh" => {
-                if let Some(backend) = args.next() {
-                    options.eh_checked = backend == "checked";
-                }
-            }
-            "-fno-jeti-arc" | "--fno-jeti-arc" | "-no-arc" | "--no-arc" => options.no_arc = true,
-            "-fno-checker" | "--fno-checker" | "-no-checker" | "--no-checker" => {
-                options.no_checker = true
-            }
-            // Editors pass flags such as `--stdio`: ignore what we do not use
-            // rather than refusing to start.
-            other if other.starts_with('-') => {}
-            other => options.search_dirs.push(other.to_string()),
-        }
-    }
+    apply_flags(&args, None, None, &mut options);
 
     let mut server = Server::new(options);
     let stdin = io::stdin();

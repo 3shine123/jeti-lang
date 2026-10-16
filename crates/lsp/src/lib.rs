@@ -28,6 +28,7 @@ use jeti_cst::source_map::{LspPosition, LspRange, SourceFile};
 use jetic::pipeline::Pipeline;
 use serde_json::{json, Value};
 
+pub mod config;
 pub mod index;
 pub use index::{access_receiver_at, symbol_at, Location, Symbol, SymbolIndex};
 
@@ -192,6 +193,83 @@ impl Default for AnalysisOptions {
             eh_checked: jetic::pipeline::DEFAULT_EH_CHECKED,
         }
     }
+}
+
+/// Apply the diagnostic-relevant flags of a command line to `options`.
+///
+/// The server's own arguments and a project's `compile_commands.json` both go
+/// through this, so a flag means one thing everywhere. `args[0]` is skipped as
+/// the compiler, `source` (when given) is the file being compiled — not a flag
+/// — and `base` resolves relative `-I` directories (a database entry's paths are
+/// relative to its own `directory`; a command line's to the working directory,
+/// which is why the server passes `None`).
+///
+/// Understood: `-I DIR` / `-IDIR` / `--include DIR`, `-eh <checked|legacy|sjlj>`,
+/// `-fno-jeti-arc`, `-fno-checker`. Everything else is ignored — including the
+/// value of `-o`, so an output path can never be mistaken for a directory.
+pub fn apply_flags(
+    args: &[String],
+    base: Option<&std::path::Path>,
+    source: Option<&str>,
+    options: &mut AnalysisOptions,
+) {
+    let value = |index: usize| args.get(index + 1).map(String::as_str);
+    let resolve = |dir: &str| match base {
+        Some(base) => base.join(dir).to_string_lossy().to_string(),
+        None => dir.to_string(),
+    };
+
+    let mut index = 1; // args[0] is the compiler
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if source.is_some_and(|source| names_the_same_file(arg, source)) {
+            index += 1;
+            continue;
+        }
+        match arg.trim_start_matches('-') {
+            "I" | "include" => {
+                if let Some(dir) = value(index) {
+                    options.search_dirs.push(resolve(dir));
+                    index += 2;
+                    continue;
+                }
+            }
+            "eh" => {
+                if let Some(backend) = value(index) {
+                    options.eh_checked = backend == "checked";
+                    index += 2;
+                    continue;
+                }
+            }
+            "o" => {
+                // An output path takes a value; skip it so it is not read as
+                // anything else.
+                index += 2;
+                continue;
+            }
+            "fno-jeti-arc" | "no-arc" => options.no_arc = true,
+            "fno-checker" | "no-checker" => options.no_checker = true,
+            _ => {
+                if let Some(dir) = arg.strip_prefix("-I") {
+                    if !dir.is_empty() {
+                        options.search_dirs.push(resolve(dir));
+                    }
+                }
+                // Any other flag, and any bare word (a file name), is not
+                // something this server acts on.
+            }
+        }
+        index += 1;
+    }
+}
+
+/// Whether an argument names the file being compiled. Databases spell it
+/// relative to the entry's directory while we hold the absolute path, so the
+/// file name is compared as well — a command line names exactly one source file.
+fn names_the_same_file(argument: &str, source: &str) -> bool {
+    let (argument, source) = (std::path::Path::new(argument), std::path::Path::new(source));
+    argument == source
+        || argument.file_name().is_some_and(|name| Some(name) == source.file_name())
 }
 
 /// Diagnostics for `path` with `text` as its content, in LSP wire shape.
@@ -393,6 +471,12 @@ pub struct Server {
     /// What each analysis runs with: search path plus the compiler switches
     /// that change diagnostics.
     options: AnalysisOptions,
+    /// Parsed project configuration (`compile_commands.json` /
+    /// `compile_flags.txt`), cached per file.
+    config: config::ConfigCache,
+    /// Workspace root from `initialize`: the upward search for configuration
+    /// files stops here instead of walking to the filesystem root.
+    root: Option<String>,
     shutdown_received: bool,
 }
 
@@ -405,6 +489,8 @@ impl Server {
             docs: HashMap::new(),
             indexes: HashMap::new(),
             options,
+            config: config::ConfigCache::default(),
+            root: None,
             shutdown_received: false,
         }
     }
@@ -420,7 +506,16 @@ impl Server {
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let id = message.get("id").cloned();
         match method {
-            "initialize" => vec![response(
+            "initialize" => {
+                // Where the project starts: the upward search for configuration
+                // files stops here. `workspaceFolders` is the modern spelling,
+                // `rootUri` the one everything still sends.
+                self.root = message
+                    .pointer("/params/rootUri")
+                    .and_then(Value::as_str)
+                    .or_else(|| message.pointer("/params/workspaceFolders/0/uri").and_then(Value::as_str))
+                    .and_then(uri_to_path);
+                vec![response(
                 id,
                 json!({
                     "capabilities": {
@@ -443,7 +538,8 @@ impl Server {
                         "version": env!("CARGO_PKG_VERSION"),
                     },
                 }),
-            )],
+                )]
+            }
             "initialized" => Vec::new(),
             "shutdown" => {
                 self.shutdown_received = true;
@@ -633,14 +729,18 @@ impl Server {
     /// Analyze `uri` and keep the index, so publishing is the only place the
     /// front end runs for a document. Returns the diagnostics message.
     fn publish_and_index(&mut self, uri: &str) -> Value {
+        let Some(path) = self.docs.get(uri).map(|doc| doc.path.clone()) else {
+            return publish_empty(uri);
+        };
+        // The project's own configuration refines the server's setup, so this
+        // needs the cache before the analysis borrows the documents.
+        let options = self.effective_options(&path);
         // Scoped so the immutable borrows of `self` end before the index is
         // stored (the closure borrows `self.docs`).
         let analyzed = {
-            let Some(doc) = self.docs.get(uri) else {
-                return publish_empty(uri);
-            };
+            let doc = self.docs.get(uri).expect("checked above");
             let text_of = self.text_of();
-            analyze_for_editor(&doc.path, &doc.text, &self.options, &text_of)
+            analyze_for_editor(&doc.path, &doc.text, &options, &text_of)
         };
         self.indexes.insert(uri.to_string(), analyzed.index);
         json!({
@@ -648,6 +748,16 @@ impl Server {
             "method": "textDocument/publishDiagnostics",
             "params": { "uri": uri, "diagnostics": analyzed.diagnostics },
         })
+    }
+
+    /// The options one document is analyzed with: the server's own, refined by
+    /// whatever the project's configuration file says about it.
+    fn effective_options(&mut self, document: &str) -> AnalysisOptions {
+        let mut options = self.options.clone();
+        if let Some(flags) = self.config.flags_for(document, self.root.as_deref()) {
+            flags.merge_into(&mut options);
+        }
+        options
     }
 
     /// Text of any open document, by path (open buffers shadow disk).

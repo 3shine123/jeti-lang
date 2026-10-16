@@ -121,6 +121,68 @@ fn the_arc_switch_reaches_the_analysis() {
     assert_eq!(child.wait().expect("wait").code(), Some(0));
 }
 
+/// A project's own configuration file (`compile_flags.txt`) is found by the
+/// server, with no editor setting and no command-line flag: the editor analyzes
+/// the way the project builds.
+#[test]
+fn a_compile_flags_file_configures_the_analysis() {
+    let root = std::env::temp_dir().join("jeti_lsp_session_config");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).expect("project dirs");
+    std::fs::write(root.join("compile_flags.txt"), "-fno-jeti-arc\n").expect("flags file");
+    let path = root.join("src/legacy.jeti");
+    let mrc = "\
+@interface Node : jeti_root
+@end
+
+@implementation Node
+- (void)dealloc {
+    [_next release];
+    [super dealloc];
+}
+@end
+";
+    std::fs::write(&path, mrc).expect("write source");
+    let uri = format!("file://{}", path.display());
+    let root_uri = format!("file://{}", root.display());
+
+    let (mut child, mut stdin, mut stdout) = spawn(&[]);
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "rootUri": root_uri },
+        })).as_bytes())
+        .expect("write initialize");
+    stdin.flush().expect("flush");
+    read_frame(&mut stdout);
+
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": mrc,
+            }},
+        })).as_bytes())
+        .expect("write didOpen");
+    stdin.flush().expect("flush");
+    let published = read_frame(&mut stdout);
+    assert_eq!(
+        published["params"]["diagnostics"],
+        json!([]),
+        "the project's compile_flags.txt must reach the analysis: {published}"
+    );
+
+    stdin
+        .write_all(frame(&json!({"jsonrpc": "2.0", "id": 9, "method": "shutdown"})).as_bytes())
+        .expect("write shutdown");
+    stdin.write_all(frame(&json!({"jsonrpc": "2.0", "method": "exit"})).as_bytes())
+        .expect("write exit");
+    stdin.flush().expect("flush");
+    drop(stdin);
+    assert_eq!(child.wait().expect("wait").code(), Some(0));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 fn repo_include_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("include")
 }
