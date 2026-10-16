@@ -9,6 +9,20 @@ use std::process::{ChildStdout, Command, Stdio};
 
 use serde_json::{json, Value};
 
+/// Spawn the server under test with `args`.
+fn spawn(args: &[&str]) -> (std::process::Child, std::process::ChildStdin, BufReader<ChildStdout>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jeti-lsp"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn jeti-lsp");
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = BufReader::new(child.stdout.take().expect("stdout"));
+    (child, stdin, stdout)
+}
+
 fn frame(message: &Value) -> String {
     let body = serde_json::to_string(message).unwrap();
     format!("Content-Length: {}\r\n\r\n{}", body.len(), body)
@@ -51,6 +65,62 @@ fn position_in(text: &str, needle: &str, extra: usize) -> Value {
     json!({ "line": line, "character": character })
 }
 
+/// The flag a project that builds MRC passes: the analysis then matches the
+/// build, so legacy `dealloc` code is not reported as an ARC error.
+#[test]
+fn the_arc_switch_reaches_the_analysis() {
+    let dir = std::env::temp_dir().join("jeti_lsp_session_test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("mrc.jeti");
+    let mrc = "\
+@interface Node : jeti_root
+@end
+
+@implementation Node
+- (void)dealloc {
+    [_next release];
+    [super dealloc];
+}
+@end
+";
+    std::fs::write(&path, mrc).expect("write probe file");
+    let uri = format!("file://{}", path.display());
+
+    let (mut child, mut stdin, mut stdout) = spawn(&["-fno-jeti-arc"]);
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {},
+        })).as_bytes())
+        .expect("write initialize");
+    stdin.flush().expect("flush");
+    read_frame(&mut stdout);
+
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": mrc,
+            }},
+        })).as_bytes())
+        .expect("write didOpen");
+    stdin.flush().expect("flush");
+    let published = read_frame(&mut stdout);
+    assert_eq!(
+        published["params"]["diagnostics"],
+        json!([]),
+        "MRC mode must accept manual releases: {published}"
+    );
+
+    stdin
+        .write_all(frame(&json!({"jsonrpc": "2.0", "id": 9, "method": "shutdown"})).as_bytes())
+        .expect("write shutdown");
+    stdin.write_all(frame(&json!({"jsonrpc": "2.0", "method": "exit"})).as_bytes())
+        .expect("write exit");
+    stdin.flush().expect("flush");
+    drop(stdin);
+    assert_eq!(child.wait().expect("wait").code(), Some(0));
+}
+
 fn repo_include_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("include")
 }
@@ -85,16 +155,8 @@ fn server_answers_editors_requests_end_to_end() {
     std::fs::write(&path, "int main(void) { return 0 }\n").expect("write probe file");
     let uri = format!("file://{}", path.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_jeti-lsp"))
-        .arg("--include")
-        .arg(repo_include_dir())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("spawn jeti-lsp");
-    let mut stdin = child.stdin.take().expect("stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+    let include = repo_include_dir().to_string_lossy().to_string();
+    let (mut child, mut stdin, mut stdout) = spawn(&["--include", &include]);
 
     // initialize → response with the capabilities we advertise
     stdin

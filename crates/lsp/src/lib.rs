@@ -163,6 +163,37 @@ pub(crate) fn same_file(a: &str, b: &str) -> bool {
 // Diagnostics
 // ---------------------------------------------------------------------------
 
+/// What an analysis runs with.
+///
+/// The switches mirror the CLI's own flags, because the editor must report what
+/// the user's build actually accepts: a project compiled with `-fno-jeti-arc`
+/// (MRC) must not be told that `[_x release]` is an ARC error. Only switches
+/// that change *diagnostics* are here — codegen and linking are not the editor's
+/// business.
+#[derive(Debug, Clone)]
+pub struct AnalysisOptions {
+    /// `#import` search path (`--include`).
+    pub search_dirs: Vec<String>,
+    /// `-fno-jeti-arc`: analyze in MRC mode.
+    pub no_arc: bool,
+    /// `-fno-checker`: parse, bind and elaborate, but skip the type checker.
+    pub no_checker: bool,
+    /// `-eh checked` (the default) vs `-eh legacy`/`-eh sjlj`.
+    pub eh_checked: bool,
+}
+
+impl Default for AnalysisOptions {
+    /// The CLI's defaults, with its default search path.
+    fn default() -> Self {
+        AnalysisOptions {
+            search_dirs: Pipeline::new().search_dirs,
+            no_arc: false,
+            no_checker: false,
+            eh_checked: jetic::pipeline::DEFAULT_EH_CHECKED,
+        }
+    }
+}
+
 /// Diagnostics for `path` with `text` as its content, in LSP wire shape.
 ///
 /// `text_of` supplies the content of any *other* file a diagnostic points into
@@ -174,7 +205,8 @@ pub fn diagnostics_for(
     search_dirs: &[String],
     text_of: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<Value> {
-    analyze_for_editor(path, text, search_dirs, text_of).diagnostics
+    let options = AnalysisOptions { search_dirs: search_dirs.to_vec(), ..Default::default() };
+    analyze_for_editor(path, text, &options, text_of).diagnostics
 }
 
 /// One analysis run of an open document: what to publish, and what to answer
@@ -199,11 +231,14 @@ fn text_or_disk(text_of: &dyn Fn(&str) -> Option<String>, path: &str) -> Option<
 pub fn analyze_for_editor(
     path: &str,
     text: &str,
-    search_dirs: &[String],
+    options: &AnalysisOptions,
     text_of: &dyn Fn(&str) -> Option<String>,
 ) -> AnalyzedDocument {
     let mut pipeline = Pipeline::new();
-    pipeline.search_dirs = search_dirs_for(path, search_dirs);
+    pipeline.search_dirs = search_dirs_for(path, &options.search_dirs);
+    pipeline.no_arc = options.no_arc;
+    pipeline.no_checker = options.no_checker;
+    pipeline.eh_checked = options.eh_checked;
     let analysis = pipeline.analyze_document(text, path);
 
     // Positions of imported files resolve from the open buffers or from disk —
@@ -355,25 +390,21 @@ pub struct Server {
     /// Symbol index per open document, refreshed by the same analysis run that
     /// produced the last published diagnostics.
     indexes: HashMap<String, SymbolIndex>,
-    /// Extra `#import` search dirs, after the document's own directory.
-    search_dirs: Vec<String>,
+    /// What each analysis runs with: search path plus the compiler switches
+    /// that change diagnostics.
+    options: AnalysisOptions,
     shutdown_received: bool,
 }
 
 impl Server {
-    /// `search_dirs` empty → the CLI's defaults (`.`, `include`,
-    /// `include/Foundation`), so a plain `jeti-lsp` in a project root behaves
-    /// like `jetic` does there.
-    pub fn new(search_dirs: Vec<String>) -> Self {
-        let search_dirs = if search_dirs.is_empty() {
-            Pipeline::new().search_dirs
-        } else {
-            search_dirs
-        };
+    /// An empty [`AnalysisOptions`] is the CLI's default setup (its search path,
+    /// ARC on, `-eh checked`, checker on), so a plain `jeti-lsp` behaves like
+    /// `jetic` does in that directory.
+    pub fn new(options: AnalysisOptions) -> Self {
         Server {
             docs: HashMap::new(),
             indexes: HashMap::new(),
-            search_dirs,
+            options,
             shutdown_received: false,
         }
     }
@@ -609,7 +640,7 @@ impl Server {
                 return publish_empty(uri);
             };
             let text_of = self.text_of();
-            analyze_for_editor(&doc.path, &doc.text, &self.search_dirs, &text_of)
+            analyze_for_editor(&doc.path, &doc.text, &self.options, &text_of)
         };
         self.indexes.insert(uri.to_string(), analyzed.index);
         json!({
@@ -855,7 +886,7 @@ mod tests {
 
     #[test]
     fn initialize_then_didopen_publishes_diagnostics() {
-        let mut server = Server::new(Vec::new());
+        let mut server = Server::new(AnalysisOptions::default());
         let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}});
         let out = server.handle(&init);
         assert_eq!(out.len(), 1);
@@ -977,7 +1008,7 @@ mod tests {
 
     #[test]
     fn a_range_change_moves_the_diagnostics() {
-        let mut server = Server::new(Vec::new());
+        let mut server = Server::new(AnalysisOptions::default());
         let uri = path_to_uri("/tmp/jeti_lsp_unit/incremental.jeti");
         server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
@@ -1019,8 +1050,49 @@ mod tests {
     }
 
     #[test]
+    fn mrc_projects_can_turn_arc_off() {
+        // The case a real editor session hit: legacy MRC code (`dealloc` with
+        // manual releases) is an ARC error under the CLI's defaults, and the
+        // editor must be able to say "this project builds with -fno-jeti-arc"
+        // and stop reporting what the build accepts.
+        let mrc = "\
+@interface Node : jeti_root
+@end
+
+@implementation Node
+- (void)dealloc {
+    [_next release];
+    [super dealloc];
+}
+@end
+";
+        let arc = analyze_for_editor(
+            "/tmp/jeti_lsp_unit/mrc.jeti",
+            mrc,
+            &AnalysisOptions::default(),
+            &no_open_files(),
+        );
+        assert!(
+            arc.diagnostics
+                .iter()
+                .any(|d| d["message"].as_str().unwrap().contains("not allowed in ARC mode")),
+            "{:?}",
+            arc.diagnostics
+        );
+
+        let options = AnalysisOptions { no_arc: true, ..Default::default() };
+        let mrc_mode =
+            analyze_for_editor("/tmp/jeti_lsp_unit/mrc.jeti", mrc, &options, &no_open_files());
+        assert!(mrc_mode.diagnostics.is_empty(), "{:?}", mrc_mode.diagnostics);
+        // Symbols still work in that mode (the index is independent of the
+        // checker's ARC rules).
+        let symbols = mrc_mode.index.document_symbols("/tmp/jeti_lsp_unit/mrc.jeti");
+        assert_eq!(symbols.len(), 2, "{symbols:?}");
+    }
+
+    #[test]
     fn unhandled_request_gets_method_not_found() {
-        let mut server = Server::new(Vec::new());
+        let mut server = Server::new(AnalysisOptions::default());
         let req = json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/rename", "params": {}});
         let out = server.handle(&req);
         assert_eq!(out[0]["error"]["code"], -32601);
@@ -1067,7 +1139,7 @@ int helper(int value) { return value; }
 ";
 
     fn analyze(source: &str) -> AnalyzedDocument {
-        analyze_for_editor("/tmp/jeti_lsp_unit/symbols.jeti", source, &[], &no_open_files())
+        analyze_for_editor("/tmp/jeti_lsp_unit/symbols.jeti", source, &AnalysisOptions::default(), &no_open_files())
     }
 
     #[test]
@@ -1145,7 +1217,7 @@ int helper(int value) { return value; }
 
     #[test]
     fn hover_describes_the_declaration() {
-        let mut server = Server::new(Vec::new());
+        let mut server = Server::new(AnalysisOptions::default());
         let uri = path_to_uri("/tmp/jeti_lsp_unit/hover.jeti");
         server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
@@ -1364,7 +1436,7 @@ int helper(int value, int other) {
 
     #[test]
     fn the_signature_request_answers_from_the_cache() {
-        let mut server = Server::new(Vec::new());
+        let mut server = Server::new(AnalysisOptions::default());
         let uri = path_to_uri("/tmp/jeti_lsp_unit/signature.jeti");
         server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
@@ -1419,7 +1491,7 @@ int helper(int value, int other) {
 
     #[test]
     fn definition_and_outline_requests_answer_from_the_cache() {
-        let mut server = Server::new(Vec::new());
+        let mut server = Server::new(AnalysisOptions::default());
         let uri = path_to_uri("/tmp/jeti_lsp_unit/request.jeti");
         server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
