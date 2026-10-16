@@ -106,6 +106,30 @@ class JetiLanguageClient {
     this.notify('textDocument/didClose', { textDocument: { uri } });
   }
 
+  /**
+   * `textDocument/documentSymbol` → the outline (LSP `DocumentSymbol[]`).
+   * Empty when the server could not analyze the buffer.
+   *
+   * @param {string} uri
+   * @returns {Promise<object[]>}
+   */
+  documentSymbols(uri) {
+    return this.request('textDocument/documentSymbol', { textDocument: { uri } }).then((symbols) => symbols || []);
+  }
+
+  /**
+   * `textDocument/definition` → the declarations of the symbol at `position`,
+   * or `null` when the server knows none (it answers a miss with `null` rather
+   * than a guess).
+   *
+   * @param {string} uri
+   * @param {{line: number, character: number}} position
+   * @returns {Promise<object[] | null>}
+   */
+  definition(uri, position) {
+    return this.request('textDocument/definition', { textDocument: { uri }, position });
+  }
+
   /** `shutdown` + `exit`, then resolve with the server's exit code. */
   async stop({ timeoutMs = 10000 } = {}) {
     const proc = this.process;

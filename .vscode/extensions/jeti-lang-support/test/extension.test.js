@@ -31,9 +31,22 @@ const warnings = [];
 const outputLines = [];
 const collections = new Map();
 const listeners = new Map();
+const providers = new Map();
 
 const vscode = {
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  SymbolKind: {
+    Namespace: 3,
+    Class: 5,
+    Method: 6,
+    Property: 7,
+    Field: 8,
+    Enum: 10,
+    Interface: 11,
+    Function: 12,
+    Variable: 13,
+    Struct: 23,
+  },
   Position: class Position {
     constructor(line, character) {
       this.line = line;
@@ -54,6 +67,22 @@ const vscode = {
       this.source = undefined;
     }
   },
+  DocumentSymbol: class DocumentSymbol {
+    constructor(name, detail, kind, range, selectionRange) {
+      this.name = name;
+      this.detail = detail;
+      this.kind = kind;
+      this.range = range;
+      this.selectionRange = selectionRange;
+      this.children = [];
+    }
+  },
+  Location: class Location {
+    constructor(uri, range) {
+      this.uri = uri;
+      this.range = range;
+    }
+  },
   Uri: {
     parse: (text) => ({ text, toString: () => text }),
     file: (p) => ({ text: pathToFileURL(p).toString(), toString() { return this.text; }, fsPath: p }),
@@ -69,6 +98,8 @@ const vscode = {
         dispose: () => store.clear(),
       };
     },
+    registerDocumentSymbolProvider: (selector, provider) => registerProvider('documentSymbol', provider),
+    registerDefinitionProvider: (selector, provider) => registerProvider('definition', provider),
   },
   window: {
     createOutputChannel: (name) => ({
@@ -101,6 +132,11 @@ const overrides = {};
 function subscribe(kind, listener) {
   if (!listeners.has(kind)) listeners.set(kind, []);
   listeners.get(kind).push(listener);
+  return { dispose: () => {} };
+}
+
+function registerProvider(kind, provider) {
+  providers.set(kind, provider);
   return { dispose: () => {} };
 }
 
@@ -139,6 +175,16 @@ function documentFor(file, text) {
     languageId: 'jeti',
     getText: () => text,
   };
+}
+
+/** The (0-based line, UTF-16 character) an editor reports for `needle`. */
+function positionOf(text, needle) {
+  const index = text.indexOf(needle);
+  if (index < 0) throw new Error(`needle not found: ${needle}`);
+  const line = text.slice(0, index).split('\n').length - 1;
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  // JS strings are UTF-16, so their length *is* the LSP character count.
+  return new vscode.Position(line, index - lineStart);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +255,65 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok(!collection().has('file:///tmp/other.txt'), 'non-jeti documents must not be sent');
     console.log('ok  non-jeti document ignored');
+
+    // Outline and definition go through the registered providers, convert to VS
+    // Code types, and answer from the server's index.
+    const program = [
+      '#import <Foundation/Foundation.hje>',
+      '',
+      '@interface Greeter : NPObject',
+      '- (void)greet:(NPString *)name;',
+      '@end',
+      '',
+      '@implementation Greeter',
+      '- (void)greet:(NPString *)name {',
+      '    [self greet:name];',
+      '}',
+      '@end',
+      '',
+      'int main(void) {',
+      '    NPString *s = @"hi";',
+      '    return 0;',
+      '}',
+      '',
+    ].join('\n');
+    fire('open', documentFor(file, program));
+    // Publishing is the same handler that stores the index, so waiting for the
+    // publish means the outline/definition requests have something to answer.
+    await waitUntil(() => collection().has(uri), 'the opened program to be published');
+    await waitUntil(() => (collection().get(uri) || []).length === 0, 'a clean program');
+
+    const symbolProvider = providers.get('documentSymbol');
+    assert.ok(symbolProvider, 'expected a document symbol provider');
+    const symbols = await symbolProvider.provideDocumentSymbols(documentFor(file, program));
+    const names = symbols.map((symbol) => symbol.name);
+    assert.deepStrictEqual(names, ['Greeter', 'Greeter', 'main'], JSON.stringify(symbols.map((s) => s.name)));
+    assert.strictEqual(symbols[1].kind, vscode.SymbolKind.Class);
+    assert.strictEqual(symbols[1].detail, '@implementation:jeti_root');
+    assert.strictEqual(symbols[1].children.length, 1);
+    assert.strictEqual(symbols[1].children[0].name, 'greet:');
+    assert.strictEqual(symbols[1].children[0].kind, vscode.SymbolKind.Method);
+    console.log('ok  documentSymbol provider → outline with methods');
+
+    const definitionProvider = providers.get('definition');
+    assert.ok(definitionProvider, 'expected a definition provider');
+    const programDocument = documentFor(file, program);
+    const local = await definitionProvider.provideDefinition(programDocument, positionOf(program, 'greet:name'));
+    assert.strictEqual(local.length, 2, JSON.stringify(local));
+    assert.strictEqual(local[0].uri.toString(), uri);
+    assert.strictEqual(local[0].range.start.line, positionOf(program, '- (void)greet:(NPString *)name;').line);
+
+    const imported = await definitionProvider.provideDefinition(programDocument, positionOf(program, 'NPString *s'));
+    assert.strictEqual(imported.length, 1);
+    assert.ok(
+      imported[0].uri.toString().endsWith('include/Foundation/NPString.hje'),
+      `expected a Foundation header, got ${imported[0].uri}`,
+    );
+
+    const missing = await definitionProvider.provideDefinition(programDocument, new vscode.Position(1, 0));
+    assert.strictEqual(missing, undefined, 'a miss must stay a miss');
+    console.log('ok  definition provider → local, imported header, and misses');
+
     // A missing server must not throw: it warns, stays inert, and a settings
     // change brings it back without reloading the window.
     await extension.deactivate();

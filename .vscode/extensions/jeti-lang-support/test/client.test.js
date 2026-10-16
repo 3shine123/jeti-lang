@@ -85,6 +85,8 @@ async function main() {
     // The extension's start(): initialize handshake before any document event.
     const init = await client.start({ rootUri: pathToFileURL(REPO_ROOT).toString() });
     assert.strictEqual(init.capabilities.textDocumentSync, 1, 'expected full document sync');
+    assert.strictEqual(init.capabilities.documentSymbolProvider, true, 'expected an outline provider');
+    assert.strictEqual(init.capabilities.definitionProvider, true, 'expected a definition provider');
     assert.strictEqual(init.serverInfo.name, 'jeti-lsp');
     console.log('ok  initialize handshake');
 

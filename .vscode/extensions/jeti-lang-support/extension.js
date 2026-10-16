@@ -87,19 +87,44 @@ function resolveSearchPath(dir, root) {
   return root ? path.join(root, dir) : dir;
 }
 
-function toDiagnostic(diagnostic) {
-  const range = diagnostic.range || {};
-  const start = range.start || { line: 0, character: 0 };
-  const end = range.end || start;
+function toRange(range) {
+  const start = range?.start || { line: 0, character: 0 };
+  const end = range?.end || start;
   // LSP positions are already 0-based line + UTF-16 character, which is exactly
   // what vscode.Position takes — no unit conversion belongs here.
+  return new vscode.Range(start.line, start.character, end.line, end.character);
+}
+
+function toDiagnostic(diagnostic) {
   const converted = new vscode.Diagnostic(
-    new vscode.Range(start.line, start.character, end.line, end.character),
+    toRange(diagnostic.range),
     diagnostic.message || '',
     SEVERITY.get(diagnostic.severity) ?? vscode.DiagnosticSeverity.Error,
   );
   converted.source = diagnostic.source || 'jeti';
   return converted;
+}
+
+function toDocumentSymbol(symbol) {
+  // Jeti's AST carries one extent per declaration, so the "whole" and the
+  // "selected" range are the same thing.
+  const range = toRange(symbol.range);
+  const converted = new vscode.DocumentSymbol(
+    symbol.name,
+    symbol.detail || '',
+    symbol.kind ?? vscode.SymbolKind.Variable,
+    range,
+    range,
+  );
+  converted.children = (symbol.children || []).map(toDocumentSymbol);
+  return converted;
+}
+
+/** LSP `Location | Location[] | null` → VS Code's `Location[] | undefined`. */
+function toLocations(locations) {
+  if (!locations) return undefined;
+  const list = Array.isArray(locations) ? locations : [locations];
+  return list.map((location) => new vscode.Location(vscode.Uri.parse(location.uri), toRange(location.range)));
 }
 
 function publish(uriString, diagnostics) {
@@ -163,6 +188,22 @@ function restart() {
   // Registered before the first start so the handlers exist no matter how the
   // start goes; every one of them is a no-op while `client` is null.
   context.subscriptions.push(
+    vscode.languages.registerDocumentSymbolProvider(LANGUAGE_ID, {
+      provideDocumentSymbols: async (document) => {
+        if (!client) return [];
+        return (await client.documentSymbols(document.uri.toString())).map(toDocumentSymbol);
+      },
+    }),
+    vscode.languages.registerDefinitionProvider(LANGUAGE_ID, {
+      provideDefinition: async (document, position) => {
+        if (!client) return undefined;
+        const locations = await client.definition(document.uri.toString(), {
+          line: position.line,
+          character: position.character,
+        });
+        return toLocations(locations);
+      },
+    }),
     vscode.workspace.onDidOpenTextDocument((document) => {
       if (client && isJetiDocument(document)) {
         client.openDocument(document.uri.toString(), document.getText());
