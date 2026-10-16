@@ -358,6 +358,10 @@ impl Server {
                         // No `resolveProvider`: everything a completion item
                         // needs (label, kind, detail) is in the same answer.
                         "completionProvider": { "resolveProvider": false },
+                        // `:` is where a keyword selector's next parameter
+                        // starts, so the popup appears exactly when it can say
+                        // something.
+                        "signatureHelpProvider": { "triggerCharacters": [":"] },
                     },
                     "serverInfo": {
                         "name": "jeti-lsp",
@@ -508,6 +512,42 @@ impl Server {
                     })
                     .collect();
                 vec![response(id, json!({ "isIncomplete": false, "items": items }))]
+            }
+            // The signature of the call the cursor is inside, with the parameter
+            // being filled in.
+            "textDocument/signatureHelp" => {
+                let position = request_position(message);
+                let uri = request_uri(message);
+                let mut help = Value::Null;
+                if let (Some(_doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
+                    if let Some(signature) = index.signature_help(position) {
+                        let signatures: Vec<Value> = signature
+                            .signatures
+                            .iter()
+                            .map(|candidate| {
+                                json!({
+                                    "label": candidate.label,
+                                    "parameters": candidate
+                                        .parameters
+                                        .iter()
+                                        .map(|parameter| json!({ "label": parameter }))
+                                        .collect::<Vec<_>>(),
+                                })
+                            })
+                            .collect();
+                        help = json!({
+                            "signatures": signatures,
+                            "activeSignature": signature.active_signature,
+                        });
+                        // A signature with no parameters (a colon-less
+                        // selector) has no parameter to be active in, and LSP
+                        // wants that field omitted rather than out of range.
+                        if !signature.signatures[0].parameters.is_empty() {
+                            help["activeParameter"] = json!(signature.active_parameter);
+                        }
+                    }
+                }
+                vec![response(id, help)]
             }
             "" => Vec::new(),
             other => match id {
@@ -1085,6 +1125,132 @@ int helper(int value) { return value; }
         // Not an access position, and not an identifier.
         assert_eq!(access_receiver_at("w.count", LspPosition { line: 0, character: 4 }), None);
         assert_eq!(access_receiver_at("1.", LspPosition { line: 0, character: 2 }), None);
+    }
+
+    /// A hierarchy plus a two-part selector, a class method and a free function,
+    /// for signature help.
+    const SIGNATURES: &str = "\
+@interface Base : jeti_root
+- (void)baseMethod;
+@end
+
+@interface Widget : Base
+- (void)place:(Widget *)w at:(int)index;
++ (Widget *)makeWith:(int)n;
+@end
+
+@implementation Widget
+- (void)place:(Widget *)w at:(int)index {
+    [self place:w at:index];
+    [self baseMethod];
+    [Widget makeWith:3];
+}
+@end
+
+int helper(int value, int other) {
+    return helper(1, 2);
+}
+";
+
+    #[test]
+    fn signature_help_reports_the_signature_and_the_active_parameter() {
+        let analyzed = analyze(SIGNATURES);
+
+        // Inside the first argument of a two-part selector.
+        let help = analyzed
+            .index
+            .signature_help(position(SIGNATURES, "[self place:w at:index", 12))
+            .expect("a signature");
+        assert_eq!(help.active_parameter, 0);
+        assert_eq!(help.active_signature, 0);
+        assert_eq!(help.signatures[0].label, "- (void)place:(Widget *)w at:(int)index");
+        assert_eq!(help.signatures[0].parameters, vec!["(Widget *)w", "(int)index"]);
+
+        // Inside the second argument.
+        let help = analyzed
+            .index
+            .signature_help(position(SIGNATURES, "[self place:w at:index", 20))
+            .expect("a signature");
+        assert_eq!(help.active_parameter, 1);
+
+        // A class method, and an inherited colon-less one.
+        let help = analyzed
+            .index
+            .signature_help(position(SIGNATURES, "[Widget makeWith:3", 16))
+            .expect("a signature");
+        assert_eq!(help.signatures[0].label, "+ (Widget *)makeWith:(int)n");
+        let help = analyzed
+            .index
+            .signature_help(position(SIGNATURES, "[self place:", 0))
+            .expect("a signature");
+        assert_eq!(help.signatures[0].label, "- (void)place:(Widget *)w at:(int)index");
+
+        // A free call, with the argument index following the commas.
+        let help = analyzed
+            .index
+            .signature_help(position(SIGNATURES, "helper(1, 2", 8))
+            .expect("a signature");
+        assert_eq!(help.active_parameter, 0);
+        assert_eq!(help.signatures[0].label, "int helper(int value, int other)");
+        assert_eq!(help.signatures[0].parameters, vec!["int value", "int other"]);
+        let help = analyzed
+            .index
+            .signature_help(position(SIGNATURES, "helper(1, 2", 12))
+            .expect("a signature");
+        assert_eq!(help.active_parameter, 1);
+
+        // A declaration is not a call: no signature there.
+        assert!(analyzed.index.signature_help(position(SIGNATURES, "int helper", 4)).is_none());
+        // Neither is a nullary send with nothing to fill in.
+        let help = analyzed.index.signature_help(position(SIGNATURES, "[self baseMethod", 6)).expect("a signature");
+        assert!(help.signatures[0].parameters.is_empty());
+        assert_eq!(help.signatures[0].label, "- (void)baseMethod");
+    }
+
+    #[test]
+    fn the_signature_request_answers_from_the_cache() {
+        let mut server = Server::new(Vec::new());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/signature.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": SIGNATURES,
+            }},
+        }));
+
+        // Inside the second argument of `[self place:… at:…]`.
+        let cursor = position(SIGNATURES, "[self place:w at:index", 20);
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 11, "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": cursor.line, "character": cursor.character },
+            },
+        }));
+        let help = &out[0]["result"];
+        assert_eq!(help["activeParameter"], 1);
+        assert_eq!(help["activeSignature"], 0);
+        assert_eq!(help["signatures"][0]["label"], "- (void)place:(Widget *)w at:(int)index");
+        assert_eq!(help["signatures"][0]["parameters"][1]["label"], "(int)index");
+
+        // Outside any call the answer is `null`, so the editor shows nothing.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 12, "method": "textDocument/signatureHelp",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 1, "character": 0 } },
+        }));
+        assert!(out[0]["result"].is_null());
+
+        // A colon-less selector has no parameter, so the field is omitted.
+        let cursor = position(SIGNATURES, "[self baseMethod", 6);
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 13, "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": cursor.line, "character": cursor.character },
+            },
+        }));
+        assert_eq!(out[0]["result"]["signatures"][0]["label"], "- (void)baseMethod");
+        assert!(out[0]["result"].get("activeParameter").is_none(), "{}", out[0]["result"]);
     }
 
     #[test]

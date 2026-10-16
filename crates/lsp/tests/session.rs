@@ -36,10 +36,15 @@ fn read_frame(reader: &mut BufReader<ChildStdout>) -> Value {
     serde_json::from_slice(&body).expect("json body")
 }
 
-/// The (0-based line, UTF-16 character) an editor would report for the start of
-/// the first `needle` in `text`.
+/// The (0-based line, UTF-16 character) an editor would report for the first
+/// `needle` in `text`, `extra` characters into it.
 fn position_of(text: &str, needle: &str) -> Value {
-    let index = text.find(needle).expect("needle in text");
+    position_in(text, needle, 0)
+}
+
+/// [`position_of`], shifted `extra` characters (all test needles are ASCII).
+fn position_in(text: &str, needle: &str, extra: usize) -> Value {
+    let index = text.find(needle).expect("needle in text") + extra;
     let line = text[..index].matches('\n').count();
     let line_start = text[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let character = text[line_start..index].encode_utf16().count();
@@ -56,12 +61,12 @@ const PROGRAM: &str = "\
 #import <Foundation/Foundation.hje>
 
 @interface Greeter : NPObject
-- (void)greet:(NPString *)name;
+- (void)greet:(NPString *)name from:(NPString *)where;
 @end
 
 @implementation Greeter
-- (void)greet:(NPString *)name {
-    [self greet:name];
+- (void)greet:(NPString *)name from:(NPString *)where {
+    [self greet:name from:name];
 }
 @end
 
@@ -161,16 +166,16 @@ fn server_answers_editors_requests_end_to_end() {
     assert_eq!(names, vec!["Greeter", "Greeter", "main"], "{symbols}");
     let methods = symbols["result"][1]["children"].as_array().expect("class members");
     assert_eq!(methods.len(), 1);
-    assert_eq!(methods[0]["name"], "greet:");
-    assert_eq!(methods[0]["detail"], "- greet:");
-    assert_eq!(methods[0]["range"]["start"], position_of(PROGRAM, "- (void)greet:(NPString *)name {"));
+    assert_eq!(methods[0]["name"], "greet:from:");
+    assert_eq!(methods[0]["detail"], "- greet:from:");
+    assert_eq!(methods[0]["range"]["start"], position_of(PROGRAM, "- (void)greet:(NPString *)name from:(NPString *)where {"));
 
     // definition on `greet:` inside the send → the declaration and the
     // implementation, both in this file.
     stdin
         .write_all(frame(&json!({
             "jsonrpc": "2.0", "id": 3, "method": "textDocument/definition",
-            "params": { "textDocument": { "uri": uri }, "position": position_of(PROGRAM, "greet:name") },
+            "params": { "textDocument": { "uri": uri }, "position": position_of(PROGRAM, "greet:name from") },
         })).as_bytes())
         .expect("write definition");
     stdin.flush().expect("flush");
@@ -178,7 +183,7 @@ fn server_answers_editors_requests_end_to_end() {
     let locations = definition["result"].as_array().expect("locations");
     assert_eq!(locations.len(), 2, "{definition}");
     assert_eq!(locations[0]["uri"], uri);
-    assert_eq!(locations[0]["range"]["start"], position_of(PROGRAM, "- (void)greet:(NPString *)name;"));
+    assert_eq!(locations[0]["range"]["start"], position_of(PROGRAM, "- (void)greet:(NPString *)name from:(NPString *)where;"));
 
     // definition on the imported type → a header outside this document, with an
     // absolute `file:` URI the editor can open.
@@ -256,6 +261,23 @@ fn server_answers_editors_requests_end_to_end() {
     let labels: Vec<&str> = items.iter().map(|item| item["label"].as_str().unwrap()).collect();
     assert_eq!(labels, vec!["UTF8String"], "{labels:?}");
     assert_eq!(items[0]["kind"], 2, "CompletionItemKind.Method");
+
+    // signatureHelp inside the second argument of the two-part selector.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 8, "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": position_in(PROGRAM, "[self greet:name from:name", 22),
+            },
+        })).as_bytes())
+        .expect("write signatureHelp");
+    stdin.flush().expect("flush");
+    let help = read_frame(&mut stdout);
+    let signature = &help["result"]["signatures"][0];
+    assert_eq!(help["result"]["activeParameter"], 1, "{help}");
+    assert_eq!(signature["label"], "- (void)greet:(NPString *)name from:(NPString *)where");
+    assert_eq!(signature["parameters"][1]["label"], "(NPString *)where");
 
     // shutdown → response, exit → process ends with status 0
     stdin

@@ -131,6 +131,24 @@ struct ClassInfo {
     members: Vec<MemberEntry>,
 }
 
+/// A callable's signature, as an editor wants it: the label to show, and the
+/// parameter labels inside it (LSP matches them as substrings, so no offsets
+/// have to be tracked).
+#[derive(Debug, Clone)]
+pub struct Signature {
+    pub label: String,
+    pub parameters: Vec<String>,
+}
+
+/// The answer to `textDocument/signatureHelp`: the candidates and which one and
+/// which parameter the cursor is on.
+#[derive(Debug, Clone)]
+pub struct SignatureHelp {
+    pub signatures: Vec<Signature>,
+    pub active_signature: usize,
+    pub active_parameter: usize,
+}
+
 /// A member offered after a receiver: a method selector, a property or an ivar.
 #[derive(Debug, Clone)]
 pub struct MemberEntry {
@@ -142,6 +160,8 @@ pub struct MemberEntry {
     pub is_class_method: bool,
     /// Declared type, for resolving *this* member as a receiver in turn.
     pub type_name: Option<String>,
+    /// Present for methods: what signature help shows.
+    pub signature: Option<Signature>,
 }
 
 /// What is visible at a position: the enclosing method's parameters, `self`, the
@@ -183,8 +203,19 @@ struct SendSite {
     receiver_name: Option<String>,
     /// The receiver's static type, as the checker recorded it.
     receiver_type: Option<String>,
+    /// The selector being sent, for signature help.
+    selector: String,
     /// Every argument expression: a cursor inside one of these is not completing
-    /// the selector.
+    /// the selector, and its index is the active parameter.
+    args: Vec<LspRange>,
+}
+
+/// A free-function call in the edited document (`name(args)`), for signature
+/// help. Function calls are not message sends, so they get their own record.
+#[derive(Debug, Clone)]
+struct CallSite {
+    call: LspRange,
+    name: String,
     args: Vec<LspRange>,
 }
 
@@ -204,6 +235,10 @@ pub struct SymbolIndex {
     scopes: Vec<Scope>,
     /// Message sends of the document being edited, in source order.
     sites: Vec<SendSite>,
+    /// Free-function calls of the document being edited.
+    calls: Vec<CallSite>,
+    /// Free functions by name: what signature help shows for `name(...)`.
+    functions: HashMap<String, Signature>,
 }
 
 impl SymbolIndex {
@@ -302,6 +337,18 @@ impl SymbolIndex {
             // what this loop has.
             if let (Some(name), AstDeclData::Class { .. }) = (&decl.name, &decl.data) {
                 self.register_class(name, &decl.data);
+            }
+            if let (Some(name), AstDeclData::Function { return_type, params, has_variadic, .. }) =
+                (&decl.name, &decl.data)
+            {
+                self.functions.entry(name.clone()).or_insert_with(|| {
+                    function_signature(
+                        name,
+                        return_type.as_deref(),
+                        params.as_deref(),
+                        *has_variadic,
+                    )
+                });
             }
             if let Some(scope) = self.document_scope(decl, container, source_map, document, text_of) {
                 self.scopes.push(scope);
@@ -425,6 +472,7 @@ impl SymbolIndex {
             let mut walk = BodyWalk {
                 locals: &mut scope.locals,
                 sites: &mut self.sites,
+                calls: &mut self.calls,
                 source_map,
                 text: &text,
             };
@@ -468,6 +516,92 @@ impl SymbolIndex {
             }
         }
         site.receiver_type.clone().map(|class| (class, false))
+    }
+
+    /// The signature the cursor is inside a call of, with the parameter it is
+    /// filling in.
+    ///
+    /// Message sends answer from the receiver's class (the same resolution
+    /// member completion uses), free calls from the function table. `None` when
+    /// the cursor is not inside a call this index can type — the editor then
+    /// shows nothing rather than a wrong signature.
+    pub fn signature_help(&self, position: LspPosition) -> Option<SignatureHelp> {
+        // A send: the innermost one containing the cursor.
+        if let Some(site) = self
+            .sites
+            .iter()
+            .filter(|site| range_contains(site.send, position))
+            .max_by_key(|site| (site.send.start.line, site.send.start.character))
+        {
+            let receiver = self.receiver_for_site(site, position)?;
+            let signature = self.method_signature_in(&receiver.0, &site.selector)?;
+            // Several declarations of one selector can differ (a category
+            // overriding it); the first is the one to show, and every candidate
+            // is reported so the editor can offer the rest.
+            let mut signatures = vec![signature];
+            signatures.extend(
+                self.method_signatures_in(&receiver.0, &site.selector)
+                    .into_iter()
+                    .skip(1),
+            );
+            return Some(SignatureHelp {
+                active_parameter: active_parameter(&site.args, position, signatures[0].parameters.len()),
+                active_signature: 0,
+                signatures,
+            });
+        }
+        // A free call: the innermost one containing the cursor.
+        let site = self
+            .calls
+            .iter()
+            .filter(|site| range_contains(site.call, position))
+            .max_by_key(|site| (site.call.start.line, site.call.start.character))?;
+        let signature = self.functions.get(&site.name)?.clone();
+        Some(SignatureHelp {
+            active_parameter: active_parameter(&site.args, position, signature.parameters.len()),
+            active_signature: 0,
+            signatures: vec![signature],
+        })
+    }
+
+    /// The receiver class of a send site, without the "is the cursor in an
+    /// argument" rule: signature help *wants* the argument positions.
+    fn receiver_for_site(&self, site: &SendSite, position: LspPosition) -> Option<(String, bool)> {
+        if let Some(name) = &site.receiver_name {
+            if let Some(resolved) = self.receiver_class(name, position) {
+                return Some(resolved);
+            }
+        }
+        site.receiver_type.clone().map(|class| (class, false))
+    }
+
+    /// Every signature declared for `selector` in `class` or its ancestors.
+    fn method_signatures_in(&self, class: &str, selector: &str) -> Vec<Signature> {
+        let mut signatures: Vec<Signature> = Vec::new();
+        let mut current = Some(class.to_string());
+        let mut depth = 0usize;
+        while let Some(name) = current {
+            depth += 1;
+            if depth > 32 {
+                break;
+            }
+            let Some(info) = self.classes.get(&name) else { break };
+            for member in &info.members {
+                if member.label == selector {
+                    if let Some(signature) = &member.signature {
+                        if !signatures.iter().any(|existing| existing.label == signature.label) {
+                            signatures.push(signature.clone());
+                        }
+                    }
+                }
+            }
+            current = info.super_name.clone();
+        }
+        signatures
+    }
+
+    fn method_signature_in(&self, class: &str, selector: &str) -> Option<Signature> {
+        self.method_signatures_in(class, selector).into_iter().next()
     }
 
     // -- member completion ---------------------------------------------------
@@ -786,7 +920,175 @@ fn class_member(decl: &AstDecl) -> Option<MemberEntry> {
         ),
         _ => return None,
     };
-    Some(MemberEntry { label, kind, detail, is_class_method, type_name })
+    let signature = match (&decl.data, &label) {
+        (AstDeclData::Method { is_class_method, return_type, params, has_variadic, .. }, name) => {
+            Some(method_signature(
+                *is_class_method,
+                name,
+                return_type.as_deref(),
+                params.as_deref(),
+                *has_variadic,
+            ))
+        }
+        _ => None,
+    };
+    Some(MemberEntry { label, kind, detail, is_class_method, type_name, signature })
+}
+
+/// The signature of a method declaration: `- (void)greet:(NPString *)name`.
+///
+/// The label is synthesized here (the AST keeps a method's parameters as CST
+/// nodes with no source extent, so the declaration's text cannot be sliced apart
+/// into parameter labels). Parameter labels are substrings of the label, which
+/// is what LSP matches on.
+fn method_signature(
+    is_class_method: bool,
+    name: &str,
+    return_type: Option<&AstType>,
+    params: Option<&CstParam>,
+    has_variadic: bool,
+) -> Signature {
+    let mut label = format!(
+        "{} ({})",
+        if is_class_method { "+" } else { "-" },
+        return_type.map(render_ast_type).unwrap_or_else(|| "id".to_string())
+    );
+    let mut parameters: Vec<String> = Vec::new();
+    let mut param = params;
+    while let Some(current) = param {
+        let part = current.external_name.clone().unwrap_or_default();
+        let label_text = param_label(current);
+        // Keyword parts are space-separated in the source spelling,
+        // `greet:(NPString *)name from:(NPString *)where`.
+        label.push_str(&format!("{part}:{label_text}"));
+        parameters.push(label_text);
+        param = current.next.as_deref();
+        if param.is_some() {
+            label.push(' ');
+        }
+    }
+    // A colon-less method carries its selector in the declaration's name.
+    if parameters.is_empty() {
+        label.push_str(name);
+    }
+    if has_variadic {
+        label.push_str(", ...");
+    }
+    Signature { label, parameters }
+}
+
+/// `(NPString *)name` — the parameter as it reads in a signature.
+fn param_label(param: &CstParam) -> String {
+    let ty = param
+        .par_type
+        .as_deref()
+        .map(render_cst_type)
+        .unwrap_or_else(|| "id".to_string());
+    match &param.name {
+        Some(name) => format!("({ty}){name}"),
+        None => format!("({ty})"),
+    }
+}
+
+/// The signature of a free function declaration: `int helper(int value)`.
+fn function_signature(
+    name: &str,
+    return_type: Option<&AstType>,
+    params: Option<&CstParam>,
+    has_variadic: bool,
+) -> Signature {
+    let mut parameters: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    let mut param = params;
+    while let Some(current) = param {
+        let ty = current
+            .par_type
+            .as_deref()
+            .map(render_cst_type)
+            .unwrap_or_else(|| "int".to_string());
+        let label_text = match &current.name {
+            Some(name) => format!("{ty} {name}"),
+            None => ty,
+        };
+        parts.push(label_text.clone());
+        parameters.push(label_text);
+        param = current.next.as_deref();
+    }
+    if has_variadic {
+        parts.push("...".to_string());
+    }
+    let label = format!(
+        "{} {name}({})",
+        return_type.map(render_ast_type).unwrap_or_else(|| "void".to_string()),
+        parts.join(", ")
+    );
+    Signature { label, parameters }
+}
+
+/// A type as it reads in a signature. Display-only text: the checker's printer
+/// is private and takes only AST types, while a method's parameters keep their
+/// CST type nodes, so both spellings are rendered here from the same rules.
+fn render_ast_type(ty: &AstType) -> String {
+    render_type(TypeParts {
+        prim: ty.prim,
+        name: ty.name.as_deref(),
+        is_pointer: ty.is_pointer,
+        is_struct: ty.is_struct,
+        type_args: ty.type_args.iter().map(render_ast_type).collect(),
+    })
+}
+
+fn render_cst_type(ty: &CstType) -> String {
+    render_type(TypeParts {
+        prim: ty.prim,
+        name: ty.name.as_deref(),
+        is_pointer: ty.is_pointer,
+        is_struct: ty.is_struct,
+        type_args: ty.type_args.iter().map(render_cst_type).collect(),
+    })
+}
+
+struct TypeParts<'a> {
+    prim: TypePrim,
+    name: Option<&'a str>,
+    is_pointer: bool,
+    is_struct: bool,
+    type_args: Vec<String>,
+}
+
+fn render_type(parts: TypeParts<'_>) -> String {
+    let mut text = match parts.prim {
+        TypePrim::Void => "void".to_string(),
+        TypePrim::Char => "char".to_string(),
+        TypePrim::Short => "short".to_string(),
+        TypePrim::Int => "int".to_string(),
+        TypePrim::Long => "long".to_string(),
+        TypePrim::LongLong => "long long".to_string(),
+        TypePrim::Float => "float".to_string(),
+        TypePrim::Double => "double".to_string(),
+        TypePrim::Bool => "BOOL".to_string(),
+        TypePrim::Signed => "signed".to_string(),
+        TypePrim::Unsigned => "unsigned".to_string(),
+        TypePrim::Id => "id".to_string(),
+        TypePrim::Class => "Class".to_string(),
+        TypePrim::Sel => "SEL".to_string(),
+        TypePrim::Instancetype => "instancetype".to_string(),
+        TypePrim::Named | TypePrim::Param => {
+            parts.name.unwrap_or("?").to_string()
+        }
+    };
+    if parts.is_struct {
+        text = format!("struct {text}");
+    }
+    if !parts.type_args.is_empty() {
+        text.push('<');
+        text.push_str(&parts.type_args.join(", "));
+        text.push('>');
+    }
+    if parts.is_pointer {
+        text.push_str(" *");
+    }
+    text
 }
 
 /// A walk over one method or function body that collects the two things member
@@ -799,6 +1101,7 @@ fn class_member(decl: &AstDecl) -> Option<MemberEntry> {
 struct BodyWalk<'a> {
     locals: &'a mut Vec<(String, String)>,
     sites: &'a mut Vec<SendSite>,
+    calls: &'a mut Vec<CallSite>,
     source_map: &'a SourceMap,
     text: &'a str,
 }
@@ -947,7 +1250,7 @@ impl BodyWalk<'_> {
     /// new one fails the build instead of silently narrowing what is seen.
     fn expr(&mut self, expr: &AstExpr) {
         match &expr.data {
-            AstExprData::MsgSend { receiver, args, .. } => {
+            AstExprData::MsgSend { receiver, args, selector, .. } => {
                 if let (Some(send), Some(receiver_range)) =
                     (self.expr_range(expr), self.expr_range(receiver))
                 {
@@ -959,6 +1262,7 @@ impl BodyWalk<'_> {
                             _ => None,
                         },
                         receiver_type: receiver.expr_type.as_deref().and_then(ast_type_name),
+                        selector: selector.clone(),
                         args: args.iter().filter_map(|arg| self.expr_range(arg)).collect(),
                     });
                 }
@@ -967,7 +1271,14 @@ impl BodyWalk<'_> {
                     self.expr(arg);
                 }
             }
-            AstExprData::FuncCall { callee, args, .. } => {
+            AstExprData::FuncCall { name, callee, args, .. } => {
+                if let Some(range) = self.expr_range(expr) {
+                    self.calls.push(CallSite {
+                        call: range,
+                        name: name.clone(),
+                        args: args.iter().filter_map(|arg| self.expr_range(arg)).collect(),
+                    });
+                }
                 if let Some(callee) = callee {
                     self.expr(callee);
                 }
@@ -1044,6 +1355,21 @@ impl BodyWalk<'_> {
 fn range_contains(range: LspRange, position: LspPosition) -> bool {
     let point = (position.line, position.character);
     (range.start.line, range.start.character) <= point && point <= (range.end.line, range.end.character)
+}
+
+/// Which parameter the cursor is filling in: the argument it sits inside, or how
+/// many arguments start before it (the one being typed), clamped to the
+/// signature's parameter count.
+fn active_parameter(args: &[LspRange], position: LspPosition, parameters: usize) -> usize {
+    if let Some(index) = args.iter().position(|arg| range_contains(*arg, position)) {
+        return index.min(parameters.saturating_sub(1));
+    }
+    let point = (position.line, position.character);
+    let before = args
+        .iter()
+        .filter(|arg| (arg.start.line, arg.start.character) < point)
+        .count();
+    before.min(parameters.saturating_sub(1))
 }
 
 /// True for a plain identifier (so `self.x`, `[a b]` or `1` never reach the
@@ -1276,6 +1602,24 @@ fn is_ident_start(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_calls() {
+        let src = "\
+int helper(int value, int other) { return helper(1, 2); }
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        println!("diagnostics: {:?}", analysis.diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>());
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        println!("calls: {:?}", index.calls);
+        println!("functions: {:?}", index.functions);
+    }
 
     fn at(text: &str, needle: &str, inside: usize) -> LspPosition {
         let column = text.find(needle).expect("needle") + inside;
