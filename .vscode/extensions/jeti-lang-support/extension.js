@@ -52,6 +52,12 @@ function settings() {
   return {
     serverPath: config.get('serverPath') || 'jeti-lsp',
     searchPaths: config.get('searchPaths') || ['include', '.'],
+    // The build switches that change diagnostics. The editor has to agree with
+    // the build, or it reports errors for code the compiler accepts (a legacy
+    // MRC file's manual `release` is an ARC error under the compiler's
+    // defaults, and none at all with `-fno-jeti-arc`).
+    arc: config.get('arc') !== false,
+    flags: config.get('arguments') || [],
   };
 }
 
@@ -167,11 +173,14 @@ function publish(uriString, diagnostics) {
 }
 
 async function start() {
-  const { serverPath, searchPaths } = settings();
+  const { serverPath, searchPaths, arc, flags } = settings();
   const root = workspaceRoot();
   const command = resolveServerPath(serverPath, root);
   const args = [];
   for (const dir of searchPaths) args.push('--include', resolveSearchPath(dir, root));
+  // A project's own flags, in jetic's spelling (`-eh legacy`, `-fno-checker`, …).
+  args.push(...flags);
+  if (!arc) args.push('-fno-jeti-arc');
   const rootUri = root ? vscode.Uri.file(root).toString() : null;
 
   client = new JetiLanguageClient({ command, args, cwd: root, onDiagnostics: publish, onLog: log });

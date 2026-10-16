@@ -169,6 +169,8 @@ const vscode = {
 const defaults = {
   serverPath: 'jeti-lsp',
   searchPaths: ['include', '.'],
+  arc: true,
+  arguments: [],
 };
 const overrides = {};
 
@@ -436,6 +438,24 @@ async function main() {
     });
     await waitUntil(() => (collection().get(uri) || []).length === 0, 'the range edit to be undone');
     console.log('ok  didChange with a range → diagnostics track the edit');
+
+    // Build switches reach the server: `jeti.arc: false` must spawn with
+    // `-fno-jeti-arc`, which is what makes an MRC project stop showing ARC
+    // errors (the analysis then matches the build).
+    overrides.arc = false;
+    overrides.arguments = ['-fno-checker'];
+    outputLines.length = 0;
+    fire('config', { affectsConfiguration: (section) => section === 'jeti' });
+    await waitUntil(
+      () => outputLines.some((line) => line.includes('jeti-lsp started')),
+      'the restarted server with the project flags',
+    );
+    const started = outputLines.find((line) => line.includes('jeti-lsp started'));
+    assert.ok(started.includes('-fno-jeti-arc'), started);
+    assert.ok(started.includes('-fno-checker'), started);
+    console.log('ok  jeti.arc / jeti.arguments → passed to the server');
+    overrides.arc = true;
+    overrides.arguments = [];
 
     // A missing server must not throw: it warns, stays inert, and a settings
     // change brings it back without reloading the window.

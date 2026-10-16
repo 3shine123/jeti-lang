@@ -2,7 +2,7 @@
   "name": "jeti-lang",
   "displayName": "Jeti Language",
   "description": "Syntax highlighting and language support for Jeti — a statically-dispatched Objective-C dialect",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "jeti-lang",
   "engines": {
     "vscode": "^1.80.0"
@@ -56,6 +56,19 @@
             "."
           ],
           "markdownDescription": "Directories passed to the server as `--include`, used to resolve `#import`. Relative entries are resolved against the workspace folder; the directory of each open document is always searched first."
+        },
+        "jeti.arc": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Analyze in ARC mode (the compiler's default). Turn this off for projects built with `-fno-jeti-arc` (manual retain/release), so the editor stops reporting `explicit 'release' not allowed in ARC mode` for code that builds. The setting is passed to the server as `-fno-jeti-arc`."
+        },
+        "jeti.arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra arguments for the language server, using `jetic`'s own spellings. Only the switches that change diagnostics are understood: `-fno-jeti-arc`, `-fno-checker`, `-eh legacy`. Anything else (build output paths, `-g`, …) is ignored — the editor never links or runs code."
         }
       }
     }
