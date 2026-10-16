@@ -31,6 +31,8 @@ jeti-lang/
 │   ├── ownership/ preprocessor/ cpp/ symbol/ ast/ attrs/ cfg/ layout/
 │   ├── lsp/                 # jeti-lsp: LSP server (stdio JSON-RPC, diagnostics)
 │   └── jetic/               # CLI driver + pipeline (main.rs, pipeline.rs)
+├── .vscode/extensions/jeti-lang-support/   # VS Code extension: grammar + LSP client
+│                            #   (extension.js glue, lsp-client.js transport, test/ node harness)
 ├── include/
 │   ├── jeti/                # runtime.h / runtime.c / runtime_freestanding.c
 │   └── Foundation/          # 9 classes, each as a .hje (decl) + .jeti (impl) pair,
@@ -79,6 +81,10 @@ cargo test --workspace           # Rust unit tests
 
 cargo build -p jeti-lsp          # → target/debug/jeti-lsp (LSP server over stdio)
 cargo test -p jeti-lsp           # server unit tests + a real subprocess stdio session
+
+node .vscode/extensions/jeti-lang-support/test/client.test.js     # extension transport ↔ jeti-lsp
+node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue, stubbed `vscode`
+./tools/run-vscode-extension.sh  # Extension Development Host with the extension loaded
 
 ./tools/build-foundation-lib.sh  # build target/foundation/libjetifoundation.a once
 ```

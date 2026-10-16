@@ -267,9 +267,33 @@ jeti-lsp --include include        # speaks LSP over stdin/stdout
 
 Scope today: the lifecycle handshake plus full-document sync
 (`didOpen`/`didChange`/`didClose` → `publishDiagnostics`). Completion, hover,
-go-to-definition, incremental sync and ARC-only diagnostics are not in yet. The
-bundled VS Code extension (`.vscode/extensions/jeti-lang-support`) registers
-syntax highlighting only; its language client is a separate step.
+go-to-definition, incremental sync and ARC-only diagnostics are not in yet.
+
+### VS Code
+
+The bundled extension (`.vscode/extensions/jeti-lang-support`) adds syntax
+highlighting **and** the language client: it spawns `jeti-lsp` and renders the
+diagnostics as squiggles in the editor. Try it in a throwaway window (nothing is
+installed into your own setup):
+
+```bash
+./tools/run-vscode-extension.sh                 # this repository
+./tools/run-vscode-extension.sh ~/my/project    # any Jeti project
+```
+
+The extension looks for the server at `target/debug/jeti-lsp` /
+`target/release/jeti-lsp` in the workspace first (so the Jeti repo itself needs
+no configuration), then on `PATH`. Settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `jeti.serverPath` | `jeti-lsp` | Server executable; a path is used as given, a bare name falls back to `PATH`. |
+| `jeti.searchPaths` | `["include", "."]` | `--include` dirs for `#import` resolution, relative to the workspace folder. |
+
+The client has no npm dependencies (`vscode` + node built-ins only), so the
+workspace needs no `npm install`. Diagnostics come from the compiler's front
+end, so nothing is reported here that `jetic` would not report on the command
+line.
 
 ---
 

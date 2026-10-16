@@ -261,8 +261,27 @@ jeti-lsp --include include        # 在 stdin/stdout 上说 LSP
 
 当前范围：生命周期握手 + 全量文档同步（`didOpen`/`didChange`/`didClose` →
 `publishDiagnostics`）。补全、悬停、跳转定义、incremental sync、ARC 专属诊断尚未实现。
-仓库自带的 VS Code 扩展（`.vscode/extensions/jeti-lang-support`）目前只注册语法高亮，
-它的 language client 是后续独立一步。
+
+### VS Code
+
+仓库自带的扩展（`.vscode/extensions/jeti-lang-support`）除语法高亮外，还包含了 language client：
+它会拉起 `jeti-lsp`，并把诊断渲染成编辑器里的波浪线。用一个临时窗口试（不会装进你自己的编辑器配置）：
+
+```bash
+./tools/run-vscode-extension.sh                 # 本仓库
+./tools/run-vscode-extension.sh ~/my/project    # 任意 Jeti 项目
+```
+
+扩展优先在工作区里找 `target/debug/jeti-lsp` / `target/release/jeti-lsp`（所以在 Jeti 仓库里
+零配置即可用），找不到再用 `PATH`。设置项：
+
+| 设置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `jeti.serverPath` | `jeti-lsp` | 服务器可执行文件；给路径就按路径用，给裸名字则回退到 `PATH`。 |
+| `jeti.searchPaths` | `["include", "."]` | 解析 `#import` 的 `--include` 目录，相对工作区根目录。 |
+
+客户端**没有任何 npm 依赖**（只用 `vscode` 与 node 内建模块），因此不需要 `npm install`。
+诊断来自编译器前端，这里报出的东西与命令行 `jetic` 报出的一致。
 
 ---
 

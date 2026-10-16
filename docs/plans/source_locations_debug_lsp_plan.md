@@ -108,8 +108,27 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
 - 未做（后续阶段）：补全 / 悬停 / 跳转、incremental sync、workspace folders、ARC 专属诊断、
-  `-Werror` 之外的设置协商（`workspace/configuration`），以及**编辑器客户端接线**——`.vscode/extensions/jeti-lang-support`
-  目前只注册语法高亮，还没有 `vscode-languageclient` 客户端去 spawn `jeti-lsp`（需要 npm 依赖，另行决策）。
+  `-Werror` 之外的设置协商（`workspace/configuration`）。
+
+**进展（编辑器客户端 —— 已接线）**
+
+- `.vscode/extensions/jeti-lang-support` 在语法高亮之外加了 language client，分两层：
+  `lsp-client.js` 只做传输与会话状态（**不 import `vscode`**，所以 node harness 能直接驱动真实
+  `jeti-lsp` 二进制）；`extension.js` 只做 VS Code 胶水（设置解析、文档事件转发、
+  `publishDiagnostics` → `DiagnosticCollection`、LSP severity → VS Code severity）。
+- 无 npm 依赖（只用 `vscode` 与 node 内建模块），不需要 `npm install`，因此不引入 `node_modules`
+  和打包工具链。将来要做补全/悬停/跳转这类请求时，再评估换成 `vscode-languageclient`。
+- 设置：`jeti.serverPath`（给路径就按路径；给裸名字先在工作区里找 `target/debug|release/jeti-lsp`，
+  再走 `PATH`）、`jeti.searchPaths`（→ `--include`，相对工作区根；文档自身目录永远优先）。
+  改设置会重启服务器。
+- 试用：`./tools/run-vscode-extension.sh [项目目录]` 起一个 Extension Development Host 窗口
+  （`--extensionDevelopmentPath`，不装进用户自己的编辑器配置）；持久安装走
+  `vsce package` + `code --install-extension`，`.vscodeignore` 保证测试目录不进 VSIX。
+- 验证分工：`test/client.test.js`（真实子进程跑 initialize / didOpen / didChange / didClose /
+  shutdown）与 `test/extension.test.js`（stub 掉 `vscode`，覆盖设置解析、事件转发、
+  LSP→VS Code 诊断换算、非 `jeti` 文档被忽略）都能在 CI 跑；`package.json` 走
+  `vsce package` + 装进临时 `--extensions-dir` 验证过 VS Code 会接受这个清单。
+  **没有**做无头断言的是真实 VS Code 窗口里的交互——那需要人工在 dev host 里看一眼。
 - 回归：`cargo test -p jeti-lsp`（含真实子进程的 stdio 会话集成测试）；CLI 侧 `cargo test --workspace`、`./test_all.sh`、
   `multi_tu` / `eh_matrix` / `eh_diff` 保持全绿（诊断文案形状不变，checker 注释宽度按 clang `~~~~^~~~~` 惯例加宽）。
 
