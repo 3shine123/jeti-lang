@@ -39,6 +39,20 @@ pub struct Prepared {
     pub parser_has_error: bool,
 }
 
+/// What [`Pipeline::analyze_document`] produced: the diagnostics plus the
+/// artifacts a consumer needs to answer questions about the code itself.
+pub struct Analysis {
+    /// Front-end diagnostics, in stage order.
+    pub diagnostics: Vec<Diagnostic>,
+    /// The elaborated AST once every stage that can decide anything has run
+    /// (`None` when an earlier stage failed). Post-desugar, so a consumer sees
+    /// the same shape the checker does.
+    pub ast: Option<jeti_ast::ast::AstUnit>,
+    /// Line/column map of the run: the single resolver for that AST's node
+    /// positions (`SourceMap::span_from_node`).
+    pub source_map: jeti_cst::source_map::SourceMap,
+}
+
 pub struct Pipeline {
     pub has_error: bool,
     pub error_msg: String,
@@ -251,18 +265,38 @@ impl Pipeline {
     ///   parser, binder, elaborator and type checker can decide is.
     /// - Warnings are returned alongside errors instead of being printed.
     pub fn analyze(&mut self, source: &str, filename: &str) -> Vec<Diagnostic> {
+        self.analyze_document(source, filename).diagnostics
+    }
+
+    /// [`Pipeline::analyze`], plus the artifacts callers need to answer
+    /// questions *about* the code rather than report problems in it: the
+    /// elaborated AST (outlines, definition targets) and the [`SourceMap`] that
+    /// resolves that AST's node positions back to real files.
+    ///
+    /// The AST only exists when the front end got far enough to build one — a
+    /// preprocessor, parse, bind or elaborate failure leaves `ast` as `None`
+    /// with whatever diagnostics were collected.
+    ///
+    /// [`SourceMap`]: jeti_cst::source_map::SourceMap
+    pub fn analyze_document(&mut self, source: &str, filename: &str) -> Analysis {
         let Prepared { pre, cst, parser_diags, parser_has_error } =
             match self.prepare(source, filename) {
                 Ok(p) => p,
                 // The preprocessor failed: no positions exist to report against.
-                Err(msg) => return vec![Diagnostic::error(filename, 0, 0, msg)],
+                Err(msg) => {
+                    return Analysis {
+                        diagnostics: vec![Diagnostic::error(filename, 0, 0, msg)],
+                        ast: None,
+                        source_map: Default::default(),
+                    }
+                }
             };
         let sm = pre.source_map.clone();
         let mut diags = parser_diags;
         if parser_has_error {
-            return diags;
+            return Self::stopped(diags, sm);
         }
-        let Some(mut cst) = cst else { return diags };
+        let Some(mut cst) = cst else { return Self::stopped(diags, sm) };
         cst.filename = filename.to_string();
 
         // Step 2: Bind names
@@ -270,16 +304,16 @@ impl Pipeline {
         if binder.bind(&mut cst) != 0 {
             diags.extend(parse_stage_string_diags(
                 &translate_lines(binder.last_error(), &sm), filename, Severity::Error));
-            return diags;
+            return Self::stopped(diags, sm);
         }
         // Step 3: Elaborate CST → AST
         let symtab_for_checker = binder.symtab.clone();
         let mut elaborator = Elaborator::new(Some(binder.symtab));
         if elaborator.run(&cst) != 0 {
             diags.extend(parse_stage_string_diags(&elaborator.last_error(), filename, Severity::Error));
-            return diags;
+            return Self::stopped(diags, sm);
         }
-        let Some(mut ast) = elaborator.take_ast() else { return diags };
+        let Some(mut ast) = elaborator.take_ast() else { return Self::stopped(diags, sm) };
 
         // The desugar passes the checker consumes in `transpile` (checked EH,
         // `@defer`, legacy `@finally`, pattern switches, async bodies) in the
@@ -290,7 +324,7 @@ impl Pipeline {
             let eh = jeti_eh::check_unit(&ast);
             if !eh.errors.is_empty() {
                 diags.extend(parse_stage_string_diags(&translate_lines(&eh.errors.join("\n"), &sm), filename, Severity::Error));
-                return diags;
+                return Self::stopped(diags, sm);
             }
             jeti_eh::desugar_unit(&mut ast);
         } else {
@@ -299,7 +333,7 @@ impl Pipeline {
         let defer_diags = jeti_defer::desugar_unit(&mut ast);
         if !defer_diags.errors.is_empty() {
             diags.extend(parse_stage_string_diags(&translate_lines(&defer_diags.errors.join("\n"), &sm), filename, Severity::Error));
-            return diags;
+            return Self::stopped(diags, sm);
         }
         jeti_pattern::desugar_unit(&mut ast);
 
@@ -311,7 +345,7 @@ impl Pipeline {
         if !async_diags.errors.is_empty() {
             diags.extend(parse_stage_string_diags(
                 &translate_lines(&async_diags.errors.join("\n"), &sm), filename, Severity::Error));
-            return diags;
+            return Self::stopped(diags, sm);
         }
         let (async_errors, async_warnings) = jeti_async::desugar_unit_m2(&mut ast);
         diags.extend(parse_stage_string_diags(
@@ -319,21 +353,31 @@ impl Pipeline {
         if !async_errors.is_empty() {
             diags.extend(parse_stage_string_diags(
                 &translate_lines(&async_errors.join("\n"), &sm), filename, Severity::Error));
-            return diags;
+            return Self::stopped(diags, sm);
         }
 
         // Step 5: Check types
         if !self.no_checker {
             let mut checker = Checker::new(Some(symtab_for_checker));
             checker.no_arc = self.no_arc;
-            checker.source_map = Some(sm);
+            checker.source_map = Some(sm.clone());
             checker.eh_checked = self.eh_checked;
             if checker.check(&mut ast) != 0 {
                 diags.extend(checker.errors_as_diagnostics());
             }
             diags.extend(checker.warnings_as_diagnostics());
         }
-        diags
+        Analysis {
+            diagnostics: diags,
+            ast: Some(ast),
+            source_map: sm,
+        }
+    }
+
+    /// Exit of [`Pipeline::analyze_document`] when a stage failed: the later
+    /// stages had nothing sound to work on, so there is no AST to hand out.
+    fn stopped(diagnostics: Vec<Diagnostic>, source_map: jeti_cst::source_map::SourceMap) -> Analysis {
+        Analysis { diagnostics, ast: None, source_map }
     }
 
     pub fn transpile(&mut self, source: &str, filename: &str) -> Result<String, String> {

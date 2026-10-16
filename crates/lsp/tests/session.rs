@@ -1,9 +1,11 @@
 //! End-to-end: drive the real `jeti-lsp` binary over stdio the way an editor
 //! does — initialize, open a buffer with a syntax error, expect
-//! `publishDiagnostics`, then shut down and exit.
+//! `publishDiagnostics`, fix it, then use the outline and definition requests
+//! (including a jump into an imported Foundation header), and shut down.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{ChildStdout, Command, Stdio};
 
 use serde_json::{json, Value};
 
@@ -13,7 +15,7 @@ fn frame(message: &Value) -> String {
 }
 
 /// Read one `Content-Length`-framed JSON message from the child's stdout.
-fn read_frame(reader: &mut BufReader<std::process::ChildStdout>) -> Value {
+fn read_frame(reader: &mut BufReader<ChildStdout>) -> Value {
     let mut length: Option<usize> = None;
     loop {
         let mut line = String::new();
@@ -34,8 +36,43 @@ fn read_frame(reader: &mut BufReader<std::process::ChildStdout>) -> Value {
     serde_json::from_slice(&body).expect("json body")
 }
 
+/// The (0-based line, UTF-16 character) an editor would report for the start of
+/// the first `needle` in `text`.
+fn position_of(text: &str, needle: &str) -> Value {
+    let index = text.find(needle).expect("needle in text");
+    let line = text[..index].matches('\n').count();
+    let line_start = text[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let character = text[line_start..index].encode_utf16().count();
+    json!({ "line": line, "character": character })
+}
+
+fn repo_include_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("include")
+}
+
+/// A program with a class, a method, a send, and one imported Foundation type
+/// (`NPString`) so definition has somewhere *outside* this file to point.
+const PROGRAM: &str = "\
+#import <Foundation/Foundation.hje>
+
+@interface Greeter : NPObject
+- (void)greet:(NPString *)name;
+@end
+
+@implementation Greeter
+- (void)greet:(NPString *)name {
+    [self greet:name];
+}
+@end
+
+int main(void) {
+    NPString *s = @\"hi\";
+    return 0;
+}
+";
+
 #[test]
-fn server_publishes_diagnostics_for_an_open_buffer() {
+fn server_answers_editors_requests_end_to_end() {
     let dir = std::env::temp_dir().join("jeti_lsp_session_test");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join("session.jeti");
@@ -43,6 +80,8 @@ fn server_publishes_diagnostics_for_an_open_buffer() {
     let uri = format!("file://{}", path.display());
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_jeti-lsp"))
+        .arg("--include")
+        .arg(repo_include_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -64,6 +103,8 @@ fn server_publishes_diagnostics_for_an_open_buffer() {
     let response = read_frame(&mut stdout);
     assert_eq!(response["id"], 1);
     assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 1);
+    assert_eq!(response["result"]["capabilities"]["documentSymbolProvider"], true);
+    assert_eq!(response["result"]["capabilities"]["definitionProvider"], true);
     assert_eq!(response["result"]["serverInfo"]["name"], "jeti-lsp");
 
     // didOpen → publishDiagnostics for the syntax error on line 0
@@ -86,13 +127,13 @@ fn server_publishes_diagnostics_for_an_open_buffer() {
     assert_eq!(diagnostics[0]["severity"], 1);
     assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
 
-    // A clean edit clears the diagnostics on the same buffer.
+    // didChange → the real program: diagnostics clear, and the index is built.
     stdin
         .write_all(frame(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didChange",
             "params": {
                 "textDocument": { "uri": uri, "version": 2 },
-                "contentChanges": [{ "text": "int main(void) { return 0; }\n" }],
+                "contentChanges": [{ "text": PROGRAM }],
             },
         })).as_bytes())
         .expect("write didChange");
@@ -100,13 +141,78 @@ fn server_publishes_diagnostics_for_an_open_buffer() {
     let cleared = read_frame(&mut stdout);
     assert_eq!(cleared["params"]["diagnostics"], json!([]));
 
+    // documentSymbol → the outline of *this* file (imported Foundation decls are
+    // not the editor's outline).
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        })).as_bytes())
+        .expect("write documentSymbol");
+    stdin.flush().expect("flush");
+    let symbols = read_frame(&mut stdout);
+    let names: Vec<&str> = symbols["result"]
+        .as_array()
+        .expect("symbol array")
+        .iter()
+        .map(|symbol| symbol["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["Greeter", "Greeter", "main"], "{symbols}");
+    let methods = symbols["result"][1]["children"].as_array().expect("class members");
+    assert_eq!(methods.len(), 1);
+    assert_eq!(methods[0]["name"], "greet:");
+    assert_eq!(methods[0]["detail"], "- greet:");
+    assert_eq!(methods[0]["range"]["start"], position_of(PROGRAM, "- (void)greet:(NPString *)name {"));
+
+    // definition on `greet:` inside the send → the declaration and the
+    // implementation, both in this file.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 3, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": uri }, "position": position_of(PROGRAM, "greet:name") },
+        })).as_bytes())
+        .expect("write definition");
+    stdin.flush().expect("flush");
+    let definition = read_frame(&mut stdout);
+    let locations = definition["result"].as_array().expect("locations");
+    assert_eq!(locations.len(), 2, "{definition}");
+    assert_eq!(locations[0]["uri"], uri);
+    assert_eq!(locations[0]["range"]["start"], position_of(PROGRAM, "- (void)greet:(NPString *)name;"));
+
+    // definition on the imported type → a header outside this document, with an
+    // absolute `file:` URI the editor can open.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 4, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": uri }, "position": position_of(PROGRAM, "NPString *s") },
+        })).as_bytes())
+        .expect("write definition");
+    stdin.flush().expect("flush");
+    let definition = read_frame(&mut stdout);
+    let locations = definition["result"].as_array().expect("locations");
+    assert_eq!(locations.len(), 1, "{definition}");
+    let target = locations[0]["uri"].as_str().expect("uri");
+    assert!(target.starts_with("file:///"), "absolute uri expected, got {target}");
+    assert!(target.ends_with("include/Foundation/NPString.hje"), "got {target}");
+
+    // A position with no symbol is `null`, never an invented target.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 5, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 1, "character": 0 } },
+        })).as_bytes())
+        .expect("write definition");
+    stdin.flush().expect("flush");
+    let definition = read_frame(&mut stdout);
+    assert!(definition["result"].is_null(), "{definition}");
+
     // shutdown → response, exit → process ends with status 0
     stdin
-        .write_all(frame(&json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown"})).as_bytes())
+        .write_all(frame(&json!({"jsonrpc": "2.0", "id": 9, "method": "shutdown"})).as_bytes())
         .expect("write shutdown");
     stdin.flush().expect("flush");
     let shutdown = read_frame(&mut stdout);
-    assert_eq!(shutdown["id"], 2);
+    assert_eq!(shutdown["id"], 9);
     assert!(shutdown["result"].is_null());
 
     stdin

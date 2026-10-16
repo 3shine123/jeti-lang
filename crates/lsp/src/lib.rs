@@ -28,6 +28,9 @@ use jeti_cst::source_map::{LspPosition, LspRange};
 use jetic::pipeline::Pipeline;
 use serde_json::{json, Value};
 
+pub mod index;
+pub use index::{symbol_at, Location, Symbol, SymbolIndex};
+
 // ---------------------------------------------------------------------------
 // LSP wire framing (Content-Length delimited JSON-RPC over a byte stream)
 // ---------------------------------------------------------------------------
@@ -94,6 +97,25 @@ pub fn path_to_uri(path: &str) -> String {
     uri
 }
 
+/// `file:` URI for a path the compiler reported as the home of a declaration.
+///
+/// Import paths come back relative when a search directory was relative, and a
+/// relative URI would make the editor open the wrong file (or nothing), so such
+/// a path is first resolved against the server's working directory — the same
+/// directory the preprocessor resolved it from.
+fn file_uri(path: &str) -> String {
+    let path = Path::new(path);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let absolute = absolute.canonicalize().unwrap_or(absolute);
+    path_to_uri(&absolute.to_string_lossy())
+}
+
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -124,7 +146,7 @@ fn hex_val(b: u8) -> Option<u8> {
 /// Do two paths name the same file? Exact and `Path`-normalized comparison
 /// first (cheap, and covers `./x` vs `x`), then canonicalization so an editor's
 /// path and the compiler's registered path still line up when one is relative.
-fn same_file(a: &str, b: &str) -> bool {
+pub(crate) fn same_file(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
@@ -152,8 +174,68 @@ pub fn diagnostics_for(
     search_dirs: &[String],
     text_of: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<Value> {
-    // The document's own directory resolves its sibling `#import`s; the
-    // configured dirs (which default to the CLI's) follow.
+    analyze_for_editor(path, text, search_dirs, text_of).diagnostics
+}
+
+/// One analysis run of an open document: what to publish, and what to answer
+/// the requests that ask about the code from.
+pub struct AnalyzedDocument {
+    /// Diagnostics in LSP wire shape (for `textDocument/publishDiagnostics`).
+    pub diagnostics: Vec<Value>,
+    /// Symbol index for `textDocument/documentSymbol` and
+    /// `textDocument/definition`. Empty when the front end produced no AST.
+    pub index: SymbolIndex,
+}
+
+/// File content for positions: an open buffer first (the editor's version, even
+/// unsaved), then the file on disk. A file neither source knows cannot be
+/// projected, and callers skip rather than guess.
+fn text_or_disk(text_of: &dyn Fn(&str) -> Option<String>, path: &str) -> Option<String> {
+    text_of(path).or_else(|| std::fs::read_to_string(path).ok())
+}
+
+/// Analyze one document for the editor: run the compiler front end once, and
+/// derive both the diagnostics and the symbol index from that single run.
+pub fn analyze_for_editor(
+    path: &str,
+    text: &str,
+    search_dirs: &[String],
+    text_of: &dyn Fn(&str) -> Option<String>,
+) -> AnalyzedDocument {
+    let mut pipeline = Pipeline::new();
+    pipeline.search_dirs = search_dirs_for(path, search_dirs);
+    let analysis = pipeline.analyze_document(text, path);
+
+    // Positions of imported files resolve from the open buffers or from disk —
+    // a header the editor never opened still has to project its own columns.
+    // The document being analyzed always resolves to its own text, buffer or
+    // not: it is the buffer we were handed, and it may be unsaved.
+    let resolve = |other: &str| {
+        if same_file(other, path) {
+            Some(text.to_string())
+        } else {
+            text_or_disk(text_of, other)
+        }
+    };
+
+    let diagnostics = analysis
+        .diagnostics
+        .iter()
+        .map(|d| diagnostic_to_json(d, path, text, &resolve))
+        .collect();
+    // The index is built from the same AST the diagnostics came from, so a
+    // request never re-runs the front end; a document whose front end failed
+    // simply has no symbols to offer.
+    let index = match &analysis.ast {
+        Some(ast) => SymbolIndex::build(ast, &analysis.source_map, &resolve),
+        None => SymbolIndex::default(),
+    };
+    AnalyzedDocument { diagnostics, index }
+}
+
+/// Search path for `#import`: the document's own directory first — a sibling
+/// import is the natural spelling — then the configured dirs.
+fn search_dirs_for(path: &str, search_dirs: &[String]) -> Vec<String> {
     let mut dirs: Vec<String> = Vec::new();
     if let Some(parent) = Path::new(path).parent() {
         let dir = parent.to_string_lossy().to_string();
@@ -162,31 +244,25 @@ pub fn diagnostics_for(
         }
     }
     dirs.extend(search_dirs.iter().cloned());
-
-    let mut pipeline = Pipeline::new();
-    pipeline.search_dirs = dirs;
-    pipeline
-        .analyze(text, path)
-        .iter()
-        .map(|d| diagnostic_to_json(d, path, text, text_of))
-        .collect()
+    dirs
 }
 
 /// One diagnostic in LSP shape.
 ///
 /// The byte→UTF-16 projection runs on the text of the file the diagnostic
 /// points into, not on the document being edited — a diagnostic inside an
-/// imported header carries that header's columns.
+/// imported header carries that header's columns. `resolve` supplies that text
+/// (open buffers first, disk second).
 pub fn diagnostic_to_json(
     diagnostic: &Diagnostic,
     main_path: &str,
     main_text: &str,
-    text_of: &dyn Fn(&str) -> Option<String>,
+    resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Value {
     let ownership = if same_file(&diagnostic.file, main_path) {
         Some(main_text.to_string())
     } else {
-        text_of(&diagnostic.file).or_else(|| std::fs::read_to_string(&diagnostic.file).ok())
+        resolve(&diagnostic.file)
     };
     // LSP cannot express "no position": a diagnostic whose file text is not
     // available keeps the file-wide default instead of inventing a column.
@@ -203,8 +279,7 @@ pub fn diagnostic_to_json(
 }
 
 fn range_json(range: LspRange) -> Value {
-    let pos = |p: LspPosition| json!({ "line": p.line, "character": p.character });
-    json!({ "start": pos(range.start), "end": pos(range.end) })
+    index::range_json(range)
 }
 
 fn severity_code(severity: Severity) -> u8 {
@@ -232,6 +307,9 @@ struct Document {
 pub struct Server {
     /// Keyed by the client's URI (the identity the protocol uses).
     docs: HashMap<String, Document>,
+    /// Symbol index per open document, refreshed by the same analysis run that
+    /// produced the last published diagnostics.
+    indexes: HashMap<String, SymbolIndex>,
     /// Extra `#import` search dirs, after the document's own directory.
     search_dirs: Vec<String>,
     shutdown_received: bool,
@@ -249,6 +327,7 @@ impl Server {
         };
         Server {
             docs: HashMap::new(),
+            indexes: HashMap::new(),
             search_dirs,
             shutdown_received: false,
         }
@@ -273,6 +352,8 @@ impl Server {
                         // change. Incremental sync needs range-diff handling and
                         // is a later stage.
                         "textDocumentSync": 1,
+                        "documentSymbolProvider": true,
+                        "definitionProvider": true,
                     },
                     "serverInfo": {
                         "name": "jeti-lsp",
@@ -293,7 +374,7 @@ impl Server {
                 match uri_to_path(uri) {
                     Some(path) => {
                         self.docs.insert(uri.to_string(), Document { path, text: text.to_string() });
-                        vec![self.publish(uri)]
+                        vec![self.publish_and_index(uri)]
                     }
                     None => Vec::new(),
                 }
@@ -310,11 +391,16 @@ impl Server {
                     .and_then(|c| c.last())
                     .and_then(|c| c.get("text"))
                     .and_then(Value::as_str);
-                if let (Some(doc), Some(text)) = (self.docs.get_mut(uri), text) {
-                    doc.text = text.to_string();
-                    return vec![self.publish(uri)];
+                if let Some(text) = text {
+                    if let Some(doc) = self.docs.get_mut(uri) {
+                        doc.text = text.to_string();
+                    }
                 }
-                Vec::new()
+                if self.docs.contains_key(uri) {
+                    vec![self.publish_and_index(uri)]
+                } else {
+                    Vec::new()
+                }
             }
             "textDocument/didClose" => {
                 let uri = message
@@ -322,9 +408,51 @@ impl Server {
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 self.docs.remove(uri);
+                self.indexes.remove(uri);
                 // Diagnostics are owned by the server: clearing them is how the
                 // client is told they are stale.
                 vec![publish_empty(uri)]
+            }
+            // The outline of one document, from the index the last analysis
+            // built — never a second parse of the buffer.
+            "textDocument/documentSymbol" => {
+                let uri = message
+                    .pointer("/params/textDocument/uri")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let symbols = match (self.docs.get(uri), self.indexes.get(uri)) {
+                    (Some(doc), Some(index)) => Value::Array(index.document_symbols(&doc.path)),
+                    _ => Value::Array(Vec::new()),
+                };
+                vec![response(id, symbols)]
+            }
+            // The declarations of the symbol under the cursor. Several
+            // locations are a normal answer (one selector, several classes), so
+            // the client shows the list; no match is `null` rather than a
+            // guess.
+            "textDocument/definition" => {
+                let uri = message
+                    .pointer("/params/textDocument/uri")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let position = message.pointer("/params/position");
+                let position = LspPosition {
+                    line: position
+                        .and_then(|p| p.get("line"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as u32,
+                    character: position
+                        .and_then(|p| p.get("character"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as u32,
+                };
+                let locations = self.definitions(uri, position);
+                let result = if locations.is_empty() {
+                    Value::Null
+                } else {
+                    Value::Array(locations)
+                };
+                vec![response(id, result)]
             }
             "" => Vec::new(),
             other => match id {
@@ -334,22 +462,67 @@ impl Server {
         }
     }
 
-    fn publish(&self, uri: &str) -> Value {
-        let Some(doc) = self.docs.get(uri) else {
-            return publish_empty(uri);
+    /// Analyze `uri` and keep the index, so publishing is the only place the
+    /// front end runs for a document. Returns the diagnostics message.
+    fn publish_and_index(&mut self, uri: &str) -> Value {
+        // Scoped so the immutable borrows of `self` end before the index is
+        // stored (the closure borrows `self.docs`).
+        let analyzed = {
+            let Some(doc) = self.docs.get(uri) else {
+                return publish_empty(uri);
+            };
+            let text_of = self.text_of();
+            analyze_for_editor(&doc.path, &doc.text, &self.search_dirs, &text_of)
         };
-        let text_of = |path: &str| {
+        self.indexes.insert(uri.to_string(), analyzed.index);
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/publishDiagnostics",
+            "params": { "uri": uri, "diagnostics": analyzed.diagnostics },
+        })
+    }
+
+    /// Text of any open document, by path (open buffers shadow disk).
+    fn text_of(&self) -> impl Fn(&str) -> Option<String> + '_ {
+        move |path: &str| {
             self.docs
                 .values()
                 .find(|d| same_file(&d.path, path))
                 .map(|d| d.text.clone())
+        }
+    }
+
+    /// URI for a path the compiler reported.
+    ///
+    /// An open document keeps the URI the client gave us — the editor's own
+    /// identity for that buffer (and canonicalizing it could make the editor
+    /// open a second tab for the same file). Anything else (an imported header)
+    /// is made absolute; see [`file_uri`].
+    fn uri_for(&self, path: &str) -> String {
+        if let Some((uri, _)) = self.docs.iter().find(|(_, doc)| same_file(&doc.path, path)) {
+            return uri.clone();
+        }
+        file_uri(path)
+    }
+
+    /// Declarations of the symbol at `position` in `uri`.
+    fn definitions(&self, uri: &str, position: LspPosition) -> Vec<Value> {
+        let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) else {
+            return Vec::new();
         };
-        let diagnostics = diagnostics_for(&doc.path, &doc.text, &self.search_dirs, &text_of);
-        json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/publishDiagnostics",
-            "params": { "uri": uri, "diagnostics": diagnostics },
-        })
+        let Some(name) = symbol_at(&doc.text, position) else {
+            return Vec::new();
+        };
+        index
+            .definitions(&name)
+            .iter()
+            .map(|location| {
+                json!({
+                    "uri": self.uri_for(&location.path),
+                    "range": range_json(location.range),
+                })
+            })
+            .collect()
     }
 }
 
@@ -522,5 +695,125 @@ mod tests {
         let wire = b"content-length: 2\r\n\r\n{}".to_vec();
         let mut reader = std::io::BufReader::new(std::io::Cursor::new(wire));
         assert_eq!(read_message(&mut reader).unwrap().as_deref(), Some("{}"));
+    }
+
+    /// A self-contained program (no `#import`, so the test needs no headers).
+    const PROGRAM: &str = "\
+typedef struct Point { int x; } Point;
+
+@interface Thing : jeti_root
+- (void)run:(Point)where;
+@end
+
+@implementation Thing
+- (void)run:(Point)where {
+    [self run:where];
+}
+@end
+
+int helper(int value) { return value; }
+";
+
+    fn analyze(source: &str) -> AnalyzedDocument {
+        analyze_for_editor("/tmp/jeti_lsp_unit/symbols.jeti", source, &[], &no_open_files())
+    }
+
+    #[test]
+    fn outline_comes_from_the_index_with_exact_ranges() {
+        let analyzed = analyze(PROGRAM);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        let symbols = analyzed.index.document_symbols("/tmp/jeti_lsp_unit/symbols.jeti");
+        let names: Vec<&str> = symbols.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["Point", "Thing", "Thing", "helper"], "{symbols:#?}");
+
+        // The typedef is a `typedef` detail; the class carries its method.
+        assert_eq!(symbols[0]["kind"], 5);
+        assert_eq!(symbols[0]["detail"], "typedef");
+        assert_eq!(symbols[1]["detail"], "@interface:jeti_root");
+        let methods = symbols[1]["children"].as_array().unwrap();
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0]["name"], "run:");
+        assert_eq!(methods[0]["kind"], 6);
+        assert_eq!(methods[0]["detail"], "- run:");
+        // The declaration extent is the whole `- (void)run:(Point)where;` line,
+        // 0-based line 3 and one past its last character.
+        assert_eq!(methods[0]["range"]["start"], json!({"line": 3, "character": 0}));
+        assert_eq!(methods[0]["range"]["end"], json!({"line": 3, "character": 25}));
+    }
+
+    #[test]
+    fn definition_resolves_the_name_under_the_cursor() {
+        let analyzed = analyze(PROGRAM);
+        let path = "/tmp/jeti_lsp_unit/symbols.jeti";
+
+        // The class name on the `@interface` line, and its use in a send.
+        let position = |line, character| LspPosition { line, character };
+        let name = symbol_at(PROGRAM, position(7, 9)).expect("a symbol under the cursor");
+        assert_eq!(name, "run:");
+        let definitions = analyzed.index.definitions(&name);
+        assert_eq!(definitions.len(), 2, "declaration + implementation");
+
+        let name = symbol_at(PROGRAM, position(2, 11)).expect("a symbol under the cursor");
+        assert_eq!(name, "Thing");
+        let definitions = analyzed.index.definitions(&name);
+        assert_eq!(definitions.len(), 2);
+        assert_eq!(definitions[0].range.start.line, 2);
+        assert_eq!(definitions[0].range.start.character, 0);
+
+        // A name the index does not know is a miss, not a guess.
+        assert!(analyzed.index.definitions("value").is_empty());
+        assert!(analyzed.index.definitions("where").is_empty());
+        assert!(!analyzed.index.definitions(&name).is_empty());
+        let _ = path;
+    }
+
+    #[test]
+    fn a_failed_front_end_offers_no_symbols() {
+        // A parse error stops before elaboration: diagnostics yes, symbols no.
+        let analyzed = analyze("int main(void) { return 0 }\n");
+        assert!(!analyzed.diagnostics.is_empty());
+        assert!(analyzed.index.document_symbols("/tmp/jeti_lsp_unit/broken.jeti").is_empty());
+        assert!(analyzed.index.definitions("main").is_empty());
+    }
+
+    #[test]
+    fn definition_and_outline_requests_answer_from_the_cache() {
+        let mut server = Server::new(Vec::new());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/request.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": PROGRAM,
+            }},
+        }));
+
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 3, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        let names: Vec<&str> = out[0]["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["Point", "Thing", "Thing", "helper"]);
+
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 4, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 2, "character": 11 } },
+        }));
+        let locations = out[0]["result"].as_array().unwrap();
+        assert_eq!(locations.len(), 2);
+        assert_eq!(locations[0]["uri"], uri);
+        assert_eq!(locations[0]["range"]["start"], json!({"line": 2, "character": 0}));
+
+        // No symbol under the cursor is `null`, never a fabricated target.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 5, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": uri }, "position": { "line": 0, "character": 0 } },
+        }));
+        assert!(out[0]["result"].is_null());
     }
 }

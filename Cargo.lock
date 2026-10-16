@@ -248,6 +248,7 @@ version = "0.1.0"
 name = "jeti-lsp"
 version = "0.1.0"
 dependencies = [
+ "jeti-ast",
  "jeti-cst",
  "jetic",
  "serde_json",
