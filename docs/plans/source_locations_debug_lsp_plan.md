@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停与补全（全局名字 + 接收者成员）**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的 signature help/rename 等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停、补全（全局名字 + 接收者成员）与 signature help**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的 rename/incremental sync 等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -45,6 +45,7 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 载体：`crates/cst/src/source_map.rs`（`SourceSpan` / `LspPosition` / `LspRange` / `SourceFile`）、`crates/cst/src/cst.rs`（`CstExpr` / `CstStmt` / `CstDecl` / `CstArm` 的 `end_*`）、`crates/lexer`（`Token` 的 `end_line` / `end_col`）、`crates/ast/src/ast.rs`（`AstExpr` / `AstStmt` / `AstDecl` / `AstArm` 的 `end_*`）。
 - **起点在构造解析函数入口捕获**：parser 原先在节点字面量所在处读 `self.previous`（构造点快照，类/函数因此会落在 `@end` / `}` 上），现改为入口捕获；`parse_function_decl_or_definition` / `parse_typedef` 的起点由调用方传入。语句、声明、函数体、typedef/enum/property/class/protocol/method/namespace/using/块字面量/初始化列表均已覆盖；逗号链后续声明符、ivar、枚举成员等“按名构造”的细节节点保留名字 token 作起点。
 - 降级 pass 克隆节点时按同一规则（`X.line → X.end_line`）保留原 span；新增辅助节点 end 记为 `0`（synthetic）。
+- 后续修正：elaborator 曾把**函数调用的区间取成被调用者（callee）的区间**，于是实参看起来落在调用之外。现在用 CST 节点自身的 end（parser 在 `)` 之后盖的章），`callee(args)` 的区间覆盖整条调用。回归见 `crates/elaborator/tests/ast_spans.rs::a_call_extent_covers_its_arguments`。
 - 回归：`crates/parser/tests/cst_spans.rs`（CST 区间）、`crates/elaborator/tests/ast_spans.rs`（AST 区间）；`-np-map` 端到端 schema 不变。
 
 验收：包含多层 `#import` 的诊断能得到正确文件、行、列；非 ASCII 源码列位置稳定；parser 恢复和既有诊断不退化。
@@ -108,7 +109,7 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
   `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
   绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
-- 未做（后续阶段）：signature help、rename、incremental sync、workspace folders、ARC 专属诊断、
+- 未做（后续阶段）：rename、incremental sync、workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`），以及成员补全里的协议/泛型细化。
 
 **进展（大纲 + 定义跳转 —— 已落地）**
@@ -173,6 +174,24 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 遍历用 `BodyWalk` 显式列出 `AstStmtData` / `AstExprData` 的**全部**变体（不用 `_ =>`），
   所以 AST 新增变体会编译失败，而不是悄悄少收集；没有源位置的合成节点跳过。
 - 未做：协议成员（`id<P>`）与泛型参数替换（`NPArray<T>` 的 `T` 具体化）。
+**进展（signature help —— 已落地）**
+
+- `textDocument/signatureHelp`：光标所在的调用 → 签名 + 当前在填第几个参数。
+  消息发送复用成员补全那套接收者解析（`SendSite` 的 `expr_type` / 作用域 / 类名），
+  自由函数走 `FuncCall` 记录（`CallSite`）查函数签名表。
+- 参数下标由**实参区间**算出（就是成员补全用来区分 selector/实参的那份数据）：光标在某个实参里 → 它的下标；
+  都不在 → 光标之前开始的实参个数（正在输入的那个），并按签名参数个数夹取。
+- 签名 label 是 LSP 侧拼出来的（方法声明的参数是 CST 节点、没有源码区间，无法从声明文本切出参数标签）：
+  `- (void)greet:(NPString *)name from:(NPString *)where`、`int helper(int value, int other)`。
+  `parameters[i].label` 是 label 的子串（LSP 按子串匹配），所以参数高亮不需要额外算偏移。
+  类型渲染是 LSP 自己的小渲染器（checker 的 printer 是私有且只吃 AST 类型，而方法参数是 CST 类型）——
+  **仅用于显示**，不影响任何诊断文本。
+- 触发字符 `:`（关键字 selector 的下一段参数正好从这里开始）。
+- 未做：重载/多候选的排序（现在报文里给出全部候选，`activeSignature` 固定 0）、泛型参数替换后的类型显示。
+- 回归：`cargo test -p jeti-lsp` 现为 26 个单测 + 会话测试（会话里断言两段 selector 的 `activeParameter=1`、
+  label 与参数标签逐字正确）；`test/extension.test.js` 覆盖 `SignatureHelp`/`SignatureInformation`/
+  `ParameterInformation` 的换算。
+
 - 回归：`cargo test -p jeti-lsp` 现为 23 个单测 + 会话测试（会话里断言 `[s UTF8S` 只给出 `UTF8String`；
   单测钉住"receiver/实参位不给成员"、"类接收者只给类方法"、"继承成员可见"、"标量接收者无成员"）；
   `test/extension.test.js` 覆盖同一路径经 VS Code provider 的换算。
