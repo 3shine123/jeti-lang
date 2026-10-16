@@ -44,6 +44,8 @@ jeti-lang/
 │   ├── golden/              # .jeti + expected .out pairs
 │   ├── stress/              # baremetal / hosted / interop (own runners)
 │   └── *.jeti                 # individual integration programs
+├── compile_flags.txt        # editor flags (jeti-lsp, clangd-style); shipped fully
+│                            #   commented — see its header before touching it
 ├── tools/build-foundation-lib.sh   # → target/foundation/libjetifoundation.a
 ├── test_all.py              # full integration suite (test_all.sh = parallel wrapper)
 ├── docs/                    # plans/ (architecture.md — start here), archive/ (history)

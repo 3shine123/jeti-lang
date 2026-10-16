@@ -194,6 +194,12 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 证据：单测覆盖 per-file 命中 / 推断 / 向上搜索在工作区根停止 / 坏 JSON 视为不存在 / `-o` 的值不被当成目录；
   会话测试起真实二进制、只给 `rootUri`，让服务器自己找到 `compile_flags.txt` 并断言零诊断；
   `compile_commands.json` 也用真实探测验证过（MRC 文件 0 诊断）。
+- `compile_flags.txt` 的 `#` 注释是 jetic 的**扩展**（clangd 的实现是"逐行 trim、跳过空行、其余整行作为一个参数"，
+  没有注释语法；注释行会让 clangd 的编译命令变成 unknown argument）。本仓库根目录就放了一个**全注释**的
+  `compile_flags.txt`：默认什么也不做，取消注释 `-fno-jeti-arc` 即可让整棵树按 MRC 分析（对应测试脚本的
+  ARC→MRC 回退）。文件头注释写明了来龙去脉，别当垃圾删掉。
+- 参数解析的一处友好化：`compile_flags.txt` 是"一行一个参数"，所以 `-I include` 会作为一个整体到达，
+  取 `-I` 后面的值时 trim 掉空格（clangd 在这种情况下会失败，这里按用户显然的意图处理）。
 - 不做：`.clangd`（clangd 自己的 YAML 配置，语义不同且需要 YAML 依赖）。
 
 **进展（编辑器与构建一致：诊断开关 —— 已落地）**

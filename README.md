@@ -330,7 +330,11 @@ Both are searched from the document's directory upwards, stopping at the
 workspace root; a directory holding both uses `compile_commands.json`.
 Recognized flags: `-I DIR` / `-IDIR` / `--include DIR`, `-fno-jeti-arc`,
 `-fno-checker`, `-eh checked|legacy|sjlj`. Everything else (`-o`, `-g`, …) is
-ignored, because the editor neither links nor runs code. Project flags *refine*
+ignored, because the editor neither links nor runs code. In `compile_flags.txt`
+a line starting with `#` is a comment, so a flag can sit there commented out
+until it is wanted — a jetic extension: clangd reads the same file and passes
+every line to the compiler, so a directory shared with clangd should keep
+comments out of it. Project flags *refine*
 the settings: directories add, a switch that turns something off stays off, and
 an explicit `-eh` in a file replaces the editor's choice.
 
