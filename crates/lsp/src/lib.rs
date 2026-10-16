@@ -29,7 +29,7 @@ use jetic::pipeline::Pipeline;
 use serde_json::{json, Value};
 
 pub mod index;
-pub use index::{symbol_at, Location, Symbol, SymbolIndex};
+pub use index::{access_receiver_at, symbol_at, Location, Symbol, SymbolIndex};
 
 // ---------------------------------------------------------------------------
 // LSP wire framing (Content-Length delimited JSON-RPC over a byte stream)
@@ -227,7 +227,7 @@ pub fn analyze_for_editor(
     // request never re-runs the front end; a document whose front end failed
     // simply has no symbols to offer.
     let index = match &analysis.ast {
-        Some(ast) => SymbolIndex::build(ast, &analysis.source_map, &resolve),
+        Some(ast) => SymbolIndex::build(ast, &analysis.source_map, &resolve, path),
         None => SymbolIndex::default(),
     };
     AnalyzedDocument { diagnostics, index }
@@ -471,7 +471,7 @@ impl Server {
             "textDocument/completion" => {
                 let position = request_position(message);
                 let uri = request_uri(message);
-                let mut items: Vec<Value> = Vec::new();
+                let mut entries: Vec<(String, u8, String)> = Vec::new();
                 if let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
                     // The name under the cursor is the prefix; a trailing colon
                     // is dropped so `setOb` and `setObject:` both offer
@@ -479,21 +479,34 @@ impl Server {
                     let prefix = symbol_at(&doc.text, position)
                         .map(|name| name.trim_end_matches(':').to_string())
                         .unwrap_or_default();
-                    items = index
-                        .complete(&prefix)
-                        .iter()
-                        .map(|completion| {
-                            let mut item = json!({
-                                "label": completion.label,
-                                "kind": completion.kind,
-                            });
-                            if !completion.detail.is_empty() {
-                                item["detail"] = json!(completion.detail);
-                            }
-                            item
-                        })
-                        .collect();
+                    // Members of the receiver come first: inside a send they are
+                    // what the user is looking for, and the global names follow
+                    // as a fallback (the same list, deduplicated by label).
+                    let receiver = index.send_receiver(position).or_else(|| {
+                        access_receiver_at(&doc.text, position)
+                            .and_then(|name| index.receiver_class(&name, position))
+                    });
+                    if let Some((class, class_receiver)) = receiver {
+                        for member in index.member_completion(&class, class_receiver, &prefix) {
+                            entries.push((member.label, member.kind, member.detail));
+                        }
+                    }
+                    for completion in index.complete(&prefix) {
+                        if !entries.iter().any(|(label, _, _)| *label == completion.label) {
+                            entries.push((completion.label, completion.kind, completion.detail));
+                        }
+                    }
                 }
+                let items: Vec<Value> = entries
+                    .into_iter()
+                    .map(|(label, kind, detail)| {
+                        let mut item = json!({ "label": label, "kind": kind });
+                        if !detail.is_empty() {
+                            item["detail"] = json!(detail);
+                        }
+                        item
+                    })
+                    .collect();
                 vec![response(id, json!({ "isIncomplete": false, "items": items }))]
             }
             "" => Vec::new(),
@@ -976,6 +989,102 @@ int helper(int value) { return value; }
         assert_eq!(items.len(), 1, "{items:?}");
         assert_eq!(items[0]["label"], "Thing");
         assert_eq!(items[0]["kind"], 7);
+    }
+
+    /// Class hierarchy + a local + a class-method send + a scalar local.
+    const MEMBERS: &str = "\
+@interface Base : jeti_root
+- (void)baseMethod;
+@end
+
+@interface Widget : Base
+- (void)widgetMethod:(int)n;
++ (Widget *)make;
+@property int count;
+@end
+
+@implementation Widget
+- (void)widgetMethod:(int)n {
+    Widget *w;
+    int scalar;
+    [self widgetMethod:0];
+    [w widgetMethod:1];
+    [Widget make];
+    [scalar widgetMethod:2];
+}
+@end
+";
+
+    /// 0-based line + UTF-16 character `extra` characters into the first
+    /// occurrence of `needle`.
+    fn position(text: &str, needle: &str, extra: usize) -> LspPosition {
+        let index = text.find(needle).expect("needle") + extra;
+        let line = text[..index].matches('\n').count();
+        let line_start = text[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let character = text[line_start..index].encode_utf16().count();
+        LspPosition { line: line as u32, character: character as u32 }
+    }
+
+    #[test]
+    fn member_completion_follows_the_class_chain() {
+        let analyzed = analyze(MEMBERS);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+        let labels = |members: Vec<index::Completion>| -> Vec<String> {
+            members.into_iter().map(|m| m.label).collect()
+        };
+
+        // An object receiver gets its class's instance members *and* the
+        // inherited ones, but never the class methods.
+        let instance = labels(analyzed.index.member_completion("Widget", false, ""));
+        assert_eq!(instance, vec!["baseMethod", "count", "widgetMethod:"], "{instance:?}");
+        // A class receiver gets the class methods only.
+        let class_methods = labels(analyzed.index.member_completion("Widget", true, ""));
+        assert_eq!(class_methods, vec!["make"]);
+        // The prefix filters, and the completion kind is the completion enum's
+        // (Method = 2).
+        let filtered = analyzed.index.member_completion("Widget", false, "widget");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].label, "widgetMethod:");
+        assert_eq!(filtered[0].kind, 2);
+        assert_eq!(filtered[0].detail, "- widgetMethod:");
+    }
+
+    #[test]
+    fn a_send_completes_the_receivers_members_only_in_selector_position() {
+        let analyzed = analyze(MEMBERS);
+
+        // `[self …` — the enclosing method's class, for a selector position.
+        let receiver = analyzed.index.send_receiver(position(MEMBERS, "[self widgetMethod", 6));
+        assert_eq!(receiver, Some(("Widget".to_string(), false)));
+
+        // `[w …` — a local, resolved through the scope.
+        let receiver = analyzed.index.send_receiver(position(MEMBERS, "[w widgetMethod", 3));
+        assert_eq!(receiver, Some(("Widget".to_string(), false)));
+
+        // `[Widget …` — a class receiver, so class methods answer.
+        let receiver = analyzed.index.send_receiver(position(MEMBERS, "[Widget make", 8));
+        assert_eq!(receiver, Some(("Widget".to_string(), true)));
+
+        // On the receiver itself, and inside an argument: not selector
+        // positions, so no members (completion falls back to global names).
+        assert_eq!(analyzed.index.send_receiver(position(MEMBERS, "[w widgetMethod", 1)), None);
+        assert_eq!(analyzed.index.send_receiver(position(MEMBERS, "[w widgetMethod:1", 16)), None);
+        // A scalar receiver has no members to offer, and neither does an
+        // unknown name.
+        assert_eq!(analyzed.index.send_receiver(position(MEMBERS, "[scalar widgetMethod", 8)), None);
+    }
+
+    #[test]
+    fn dot_access_resolves_its_receiver_from_the_text() {
+        // The AST has no node for `w.` until the member name is typed, so this
+        // one case reads the text.
+        let text = "    w.count;\n";
+        assert_eq!(access_receiver_at(text, LspPosition { line: 0, character: 6 }).as_deref(), Some("w"));
+        let text = "    node->next;\n";
+        assert_eq!(access_receiver_at(text, LspPosition { line: 0, character: 10 }).as_deref(), Some("node"));
+        // Not an access position, and not an identifier.
+        assert_eq!(access_receiver_at("w.count", LspPosition { line: 0, character: 4 }), None);
+        assert_eq!(access_receiver_at("1.", LspPosition { line: 0, character: 2 }), None);
     }
 
     #[test]

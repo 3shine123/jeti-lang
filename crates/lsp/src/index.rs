@@ -27,8 +27,9 @@
 
 use std::collections::HashMap;
 
-use jeti_ast::ast::{AstDecl, AstDeclData, AstUnit};
+use jeti_ast::ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit};
 use jeti_cst::source_map::{LspPosition, LspRange, SourceMap};
+use jeti_cst::{CstParam, CstType, TypePrim};
 use serde_json::{json, Value};
 
 use crate::same_file;
@@ -122,6 +123,71 @@ fn completion_kind(symbol_kind: u8) -> u8 {
 /// stops a pathological index from producing a megabyte of JSON.
 const COMPLETION_LIMIT: usize = 2000;
 
+/// One class as member completion needs it: its ancestors' names and its own
+/// members, all keyed by the class's lookup name.
+#[derive(Debug, Default)]
+struct ClassInfo {
+    super_name: Option<String>,
+    members: Vec<MemberEntry>,
+}
+
+/// A member offered after a receiver: a method selector, a property or an ivar.
+#[derive(Debug, Clone)]
+pub struct MemberEntry {
+    pub label: String,
+    /// LSP `SymbolKind` number (converted to `CompletionItemKind` on the way out).
+    pub kind: u8,
+    pub detail: String,
+    /// Class methods answer to class receivers, instance members to objects.
+    pub is_class_method: bool,
+    /// Declared type, for resolving *this* member as a receiver in turn.
+    pub type_name: Option<String>,
+}
+
+/// What is visible at a position: the enclosing method's parameters, `self`, the
+/// enclosing class's ivars, and the locals declared in the body — plus, as a
+/// fallback for any position, the file's globals.
+///
+/// Scopes are coarse on purpose: one per method or function rather than one per
+/// block. Block-level shadowing inside a single method is therefore flattened
+/// (later declarations win), which is what a completion list can live with.
+#[derive(Debug, Default)]
+pub struct Scope {
+    /// Extent of the scope; `None` for file-scope names, which apply everywhere
+    /// in the document.
+    pub range: Option<LspRange>,
+    /// Enclosing method or function name (for labels and debugging).
+    pub owner: String,
+    /// `self`'s class, inside a method.
+    pub self_type: Option<String>,
+    /// Visible names → their declared class name.
+    pub locals: Vec<(String, String)>,
+}
+
+/// A message send in the edited document.
+///
+/// This exists because the *text* cannot tell a selector position from an
+/// argument position (`[a do:x |]` versus `[a do:thing|]`), while the AST can:
+/// the cursor is a selector position exactly when it is inside the send but
+/// outside its receiver and every argument. The checker's `expr_type` also
+/// types a receiver that is itself an expression (`[[a make] |]`), which no
+/// amount of text scanning could do.
+#[derive(Debug, Clone)]
+struct SendSite {
+    /// The whole `[...]` expression.
+    send: LspRange,
+    /// The receiver expression.
+    receiver: LspRange,
+    /// The receiver's name when it is a plain variable or `self` (so a local's
+    /// declared type can answer when the checker left the node untyped).
+    receiver_name: Option<String>,
+    /// The receiver's static type, as the checker recorded it.
+    receiver_type: Option<String>,
+    /// Every argument expression: a cursor inside one of these is not completing
+    /// the selector.
+    args: Vec<LspRange>,
+}
+
 /// The declaration index of one analysis run.
 #[derive(Debug, Default)]
 pub struct SymbolIndex {
@@ -131,6 +197,13 @@ pub struct SymbolIndex {
     /// name are normal: a method implemented in two classes, a class split
     /// across headers.
     by_name: HashMap<String, Vec<Symbol>>,
+    /// Class name → its members and ancestor, from every file in the
+    /// compilation (a local's type is usually declared in a header).
+    classes: HashMap<String, ClassInfo>,
+    /// Scopes of the document being edited.
+    scopes: Vec<Scope>,
+    /// Message sends of the document being edited, in source order.
+    sites: Vec<SendSite>,
 }
 
 impl SymbolIndex {
@@ -144,6 +217,7 @@ impl SymbolIndex {
         ast: &AstUnit,
         source_map: &SourceMap,
         text_of: &dyn Fn(&str) -> Option<String>,
+        document: &str,
     ) -> SymbolIndex {
         let mut cache: HashMap<String, Option<String>> = HashMap::new();
         let mut lookup = |path: &str| -> Option<String> {
@@ -153,7 +227,7 @@ impl SymbolIndex {
                 .clone()
         };
         let mut index = SymbolIndex::default();
-        index.roots = index.visit(&ast.decls, None, source_map, &mut lookup);
+        index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
         index
     }
 
@@ -218,19 +292,259 @@ impl SymbolIndex {
         decls: impl IntoIterator<Item = &'a AstDecl>,
         container: Option<&str>,
         source_map: &SourceMap,
+        document: &str,
         text_of: &mut impl FnMut(&str) -> Option<String>,
     ) -> Vec<Symbol> {
         let mut out = Vec::new();
         for decl in decls {
+            // Member tables and scopes are collected on the way down: both need
+            // the declaration plus its enclosing container, which is exactly
+            // what this loop has.
+            if let (Some(name), AstDeclData::Class { .. }) = (&decl.name, &decl.data) {
+                self.register_class(name, &decl.data);
+            }
+            if let Some(scope) = self.document_scope(decl, container, source_map, document, text_of) {
+                self.scopes.push(scope);
+            }
             let Some(mut symbol) = self.symbol_for(decl, container, source_map, text_of) else {
                 continue;
             };
-            symbol.children = self.visit(nested_decls(decl), Some(&symbol.name), source_map, text_of);
+            let lookup = symbol.lookup.clone();
+            symbol.children = self.visit(
+                nested_decls(decl),
+                Some(&lookup),
+                source_map,
+                document,
+                text_of,
+            );
             self.record(&symbol);
             out.push(symbol);
         }
         out
     }
+
+    /// Record a class's members and ancestor, from any file (a local's type is
+    /// usually declared in a header). Declaration and implementation merge into
+    /// one entry; the first non-empty ancestor wins, since an `@implementation`
+    /// records only the implicit root.
+    fn register_class(&mut self, name: &str, data: &AstDeclData) {
+        let AstDeclData::Class { super_name, methods, properties, ivars, impl_vars, .. } = data else {
+            return;
+        };
+        let entry = self.classes.entry(name.to_string()).or_default();
+        if entry.super_name.is_none() {
+            entry.super_name = super_name.clone();
+        }
+        let members = methods
+            .iter()
+            .chain(properties.iter())
+            .chain(ivars.iter())
+            .chain(impl_vars.iter())
+            .filter_map(class_member);
+        for member in members {
+            if !entry.members.iter().any(|existing| existing.label == member.label) {
+                entry.members.push(member);
+            }
+        }
+    }
+
+    /// The scope a declaration opens in the document being edited (`None` for
+    /// declarations elsewhere, and for kinds that open none).
+    fn document_scope(
+        &mut self,
+        decl: &AstDecl,
+        container: Option<&str>,
+        source_map: &SourceMap,
+        document: &str,
+        text_of: &mut impl FnMut(&str) -> Option<String>,
+    ) -> Option<Scope> {
+        let (params, body, self_type) = match &decl.data {
+            AstDeclData::Method { params, body, .. } => {
+                (params.as_deref(), body.as_deref(), container)
+            }
+            AstDeclData::Function { params, body, .. } => (params.as_deref(), body.as_deref(), None),
+            AstDeclData::Variable { .. } => {
+                // A file-scope variable is visible everywhere in the document.
+                let path = decl_path(decl, source_map)?;
+                if !same_file(&path, document) || container.is_some() {
+                    return None;
+                }
+                let name = decl.name.clone()?;
+                let type_name = match &decl.data {
+                    AstDeclData::Variable { var_type, .. } => var_type.as_deref().and_then(ast_type_name),
+                    _ => None,
+                }?;
+                return Some(Scope {
+                    range: None,
+                    owner: "<file>".to_string(),
+                    self_type: None,
+                    locals: vec![(name, type_name)],
+                });
+            }
+            _ => return None,
+        };
+
+        let path = decl_path(decl, source_map)?;
+        if !same_file(&path, document) {
+            return None;
+        }
+        let span = source_map.span_from_node(
+            (decl.line as u32, decl.col as u32),
+            (decl.end_line as u32, decl.end_col as u32),
+        );
+        let text = text_of(&path)?;
+        let mut scope = Scope {
+            range: Some(span.to_lsp_range(&text)),
+            owner: decl.name.clone().unwrap_or_default(),
+            self_type: self_type.map(str::to_string),
+            locals: Vec::new(),
+        };
+
+        // Parameters.
+        let mut param = params;
+        while let Some(current) = param {
+            if let (Some(name), Some(ty)) = (&current.name, current.par_type.as_deref()) {
+                if let Some(class) = cst_type_name(ty) {
+                    scope.locals.push((name.clone(), class));
+                }
+            }
+            param = current.next.as_deref();
+        }
+        // The enclosing class's ivars are visible by name inside its methods.
+        if let Some(class) = self_type {
+            if let Some(info) = self.classes.get(class) {
+                for member in &info.members {
+                    if let (Some(class_name), false) = (&member.type_name, member.is_class_method) {
+                        scope.locals.push((member.label.clone(), class_name.clone()));
+                    }
+                }
+            }
+        }
+        // Locals declared in the body, and the sends they contain.
+        if let Some(body) = body {
+            let mut walk = BodyWalk {
+                locals: &mut scope.locals,
+                sites: &mut self.sites,
+                source_map,
+                text: &text,
+            };
+            walk.stmt(body);
+        }
+        Some(scope)
+    }
+
+    /// The class whose members answer a completion at `position`, when the
+    /// cursor sits in the *selector* position of a message send.
+    ///
+    /// `None` when the cursor is on the receiver or on an argument (those are
+    /// not selector positions), when the send is unknown, or when the receiver's
+    /// type cannot be determined (an `id`, a scalar, an expression the checker
+    /// did not type) — completion then offers the global names instead of
+    /// guessing.
+    pub fn send_receiver(&self, position: LspPosition) -> Option<(String, bool)> {
+        // Innermost send wins: it starts last of the sends containing the cursor.
+        let site = self
+            .sites
+            .iter()
+            .filter(|site| range_contains(site.send, position))
+            .max_by_key(|site| (site.send.start.line, site.send.start.character))?;
+        // The cursor sitting on the receiver is not a selector position. A
+        // class-name receiver's node is rewritten over the whole send by the
+        // elaborator (its span carries no receiver-only information), so that
+        // check only applies when the recorded receiver is narrower than the
+        // send.
+        let receiver_is_precise = site.receiver != site.send;
+        if (receiver_is_precise && range_contains(site.receiver, position))
+            || site.args.iter().any(|arg| range_contains(*arg, position))
+        {
+            return None;
+        }
+        // A named receiver resolves through the scopes first: a local knows its
+        // declared type, and a class receiver calls class methods rather than
+        // instance ones.
+        if let Some(name) = &site.receiver_name {
+            if let Some(resolved) = self.receiver_class(name, position) {
+                return Some(resolved);
+            }
+        }
+        site.receiver_type.clone().map(|class| (class, false))
+    }
+
+    // -- member completion ---------------------------------------------------
+
+    /// The scope whose extent contains `position`, smallest first, falling back
+    /// to the file scope (locals of the enclosing method, then globals).
+    pub fn scope_at(&self, position: LspPosition) -> Option<&Scope> {
+        let containing = self
+            .scopes
+            .iter()
+            .filter(|scope| {
+                scope
+                    .range
+                    .is_some_and(|range| range_contains(range, position))
+            })
+            .min_by_key(|scope| scope.range.map(|range| range.end.line - range.start.line));
+        containing.or_else(|| self.scopes.iter().find(|scope| scope.range.is_none()))
+    }
+
+    /// What a receiver name means at `position`: the class to complete members
+    /// of, and whether the receiver is a class (so only class methods answer).
+    ///
+    /// `self` resolves through the enclosing method; a name resolves through the
+    /// scopes or, failing that, through the classes themselves.
+    pub fn receiver_class(&self, name: &str, position: LspPosition) -> Option<(String, bool)> {
+        let scope = self.scope_at(position);
+        if name == "self" {
+            return scope.and_then(|scope| scope.self_type.clone()).map(|class| (class, false));
+        }
+        if !is_identifier(name) {
+            return None;
+        }
+        if let Some(scope) = scope {
+            // Later declarations win (block-level shadowing flattened).
+            if let Some((_, class)) = scope.locals.iter().rev().find(|(local, _)| local == name) {
+                return Some((class.clone(), false));
+            }
+        }
+        self.classes.contains_key(name).then(|| (name.to_string(), true))
+    }
+
+    /// Members of `class`, walking up the ancestor chain, filtered to what a
+    /// receiver of that kind can call (class methods for a class receiver,
+    /// instance members for an object) and by `prefix`.
+    pub fn member_completion(&self, class: &str, class_receiver: bool, prefix: &str) -> Vec<Completion> {
+        let mut members: Vec<MemberEntry> = Vec::new();
+        let mut current = Some(class.to_string());
+        let mut depth = 0usize;
+        while let Some(name) = current {
+            // A malformed hierarchy must not loop forever.
+            depth += 1;
+            if depth > 32 {
+                break;
+            }
+            let Some(info) = self.classes.get(&name) else { break };
+            for member in &info.members {
+                if member.is_class_method == class_receiver
+                    && member.label.starts_with(prefix)
+                    && !members.iter().any(|existing| existing.label == member.label)
+                {
+                    members.push(member.clone());
+                }
+            }
+            current = info.super_name.clone();
+        }
+        members.sort_by(|a, b| a.label.cmp(&b.label));
+        members
+            .into_iter()
+            .map(|member| Completion {
+                label: member.label,
+                kind: completion_kind(member.kind),
+                detail: member.detail,
+            })
+            .collect()
+    }
+
+    // -- building ------------------------------------------------------------
 
     /// Index `symbol` under its lookup name, plus its short (unqualified) form
     /// so a reference written without the namespace prefix still resolves.
@@ -383,6 +697,364 @@ fn nested_decls<'a>(decl: &'a AstDecl) -> Vec<&'a AstDecl> {
         AstDeclData::Namespace(decls) => decls.iter().collect(),
         _ => Vec::new(),
     }
+}
+
+/// The file a declaration lives in, or `None` when it has no source origin.
+fn decl_path(decl: &AstDecl, source_map: &SourceMap) -> Option<String> {
+    let span = source_map.span_from_node(
+        (decl.line as u32, decl.col as u32),
+        (decl.end_line as u32, decl.end_col as u32),
+    );
+    (!span.is_synthetic()).then(|| source_map.registry().path_of(span.file).to_string())
+}
+
+/// The class name a type denotes, when it denotes one. Scalars, `void`, `id`
+/// and `instancetype` have no members to complete (protocol members would need
+/// the protocol side of the index, which is not there yet).
+fn ast_type_name(ty: &AstType) -> Option<String> {
+    match ty.prim {
+        TypePrim::Named => ty.name.clone().or_else(|| ty.class_ref.clone()),
+        TypePrim::Class => ty.class_ref.clone().or_else(|| ty.name.clone()),
+        TypePrim::Void
+        | TypePrim::Char
+        | TypePrim::Short
+        | TypePrim::Int
+        | TypePrim::Long
+        | TypePrim::LongLong
+        | TypePrim::Float
+        | TypePrim::Double
+        | TypePrim::Bool
+        | TypePrim::Signed
+        | TypePrim::Unsigned
+        | TypePrim::Id
+        | TypePrim::Instancetype
+        | TypePrim::Param
+        | TypePrim::Sel => None,
+    }
+}
+
+/// [`ast_type_name`] for a parameter, which keeps its **CST** type node
+/// (`AstDeclData::Method` stores `CstParam`s verbatim).
+fn cst_type_name(ty: &CstType) -> Option<String> {
+    match ty.prim {
+        TypePrim::Named | TypePrim::Class => ty.name.clone(),
+        TypePrim::Void
+        | TypePrim::Char
+        | TypePrim::Short
+        | TypePrim::Int
+        | TypePrim::Long
+        | TypePrim::LongLong
+        | TypePrim::Float
+        | TypePrim::Double
+        | TypePrim::Bool
+        | TypePrim::Signed
+        | TypePrim::Unsigned
+        | TypePrim::Id
+        | TypePrim::Instancetype
+        | TypePrim::Param
+        | TypePrim::Sel => None,
+    }
+}
+
+/// One class member (method, property, ivar) as member completion needs it.
+fn class_member(decl: &AstDecl) -> Option<MemberEntry> {
+    let label = decl.name.clone()?;
+    let (kind, detail, is_class_method, type_name) = match &decl.data {
+        AstDeclData::Method { is_class_method, .. } => (
+            kind::METHOD,
+            format!("{} {label}", if *is_class_method { "+" } else { "-" }),
+            *is_class_method,
+            None,
+        ),
+        AstDeclData::Property { prop_type, .. } => (
+            kind::PROPERTY,
+            String::new(),
+            false,
+            prop_type.as_deref().and_then(ast_type_name),
+        ),
+        AstDeclData::Ivar { ivar_type, .. } => (
+            kind::FIELD,
+            String::new(),
+            false,
+            ivar_type.as_deref().and_then(ast_type_name),
+        ),
+        AstDeclData::Variable { var_type, .. } => (
+            kind::FIELD,
+            String::new(),
+            false,
+            var_type.as_deref().and_then(ast_type_name),
+        ),
+        _ => return None,
+    };
+    Some(MemberEntry { label, kind, detail, is_class_method, type_name })
+}
+
+/// A walk over one method or function body that collects the two things member
+/// completion needs from a body: the locals it declares, and the message sends
+/// in it (see [`SendSite`]).
+///
+/// Nodes are resolved through [`SourceMap::span_from_node`] + `to_lsp_range`, so
+/// the recorded extents are in the editor's own coordinates; a node the
+/// compiler synthesized has no source origin and is skipped.
+struct BodyWalk<'a> {
+    locals: &'a mut Vec<(String, String)>,
+    sites: &'a mut Vec<SendSite>,
+    source_map: &'a SourceMap,
+    text: &'a str,
+}
+
+impl BodyWalk<'_> {
+    fn range(&self, line: usize, col: usize, end_line: usize, end_col: usize) -> Option<LspRange> {
+        let span = self.source_map.span_from_node(
+            (line as u32, col as u32),
+            (end_line as u32, end_col as u32),
+        );
+        (!span.is_synthetic()).then(|| span.to_lsp_range(self.text))
+    }
+
+    fn expr_range(&self, expr: &AstExpr) -> Option<LspRange> {
+        self.range(expr.line, expr.col, expr.end_line, expr.end_col)
+    }
+
+    /// Locals declared by one declaration (including a `T *a, *b;` chain) and by
+    /// anything declared inside its initializer.
+    fn decl(&mut self, decl: &AstDecl) {
+        let mut current = Some(decl);
+        while let Some(declaration) = current {
+            let AstDeclData::Variable { var_type, init, next, .. } = &declaration.data else {
+                return;
+            };
+            if let (Some(name), Some(ty)) = (&declaration.name, var_type.as_deref()) {
+                if let Some(class) = ast_type_name(ty) {
+                    self.locals.push((name.clone(), class));
+                }
+            }
+            if let Some(init) = init {
+                self.expr(init);
+            }
+            current = next.as_deref();
+        }
+    }
+
+    fn param(&mut self, param: &CstParam) {
+        // A parameter's `external_name` is a selector part; the body refers to
+        // it by `name`.
+        if let (Some(name), Some(ty)) = (&param.name, param.par_type.as_deref()) {
+            if let Some(class) = cst_type_name(ty) {
+                self.locals.push((name.clone(), class));
+            }
+        }
+    }
+
+    fn stmt(&mut self, stmt: &AstStmt) {
+        match &stmt.data {
+            AstStmtData::Compound(statements) => {
+                for statement in statements {
+                    self.stmt(statement);
+                }
+            }
+            AstStmtData::Decl(decl) => self.decl(decl),
+            AstStmtData::Expr(expr) => self.expr(expr),
+            AstStmtData::If { cond, then, else_ } => {
+                self.expr(cond);
+                self.stmt(then);
+                if let Some(otherwise) = else_ {
+                    self.stmt(otherwise);
+                }
+            }
+            AstStmtData::Switch { expr, body } => {
+                self.expr(expr);
+                self.stmt(body);
+            }
+            AstStmtData::SwitchPat { expr, arms, default_body, .. } => {
+                self.expr(expr);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    self.stmt(&arm.body);
+                }
+                if let Some(body) = default_body {
+                    self.stmt(body);
+                }
+            }
+            AstStmtData::Case { value, body } => {
+                self.expr(value);
+                self.stmt(body);
+            }
+            AstStmtData::Default(body)
+            | AstStmtData::Autoreleasepool(body)
+            | AstStmtData::NoArc(body)
+            | AstStmtData::Defer(body)
+            | AstStmtData::Finally(body) => self.stmt(body),
+            AstStmtData::While { cond, body } => {
+                self.expr(cond);
+                self.stmt(body);
+            }
+            AstStmtData::Do { body, cond } => {
+                self.stmt(body);
+                self.expr(cond);
+            }
+            AstStmtData::For { init, cond, incr, body } => {
+                if let Some(init) = init {
+                    self.stmt(init);
+                }
+                if let Some(cond) = cond {
+                    self.expr(cond);
+                }
+                if let Some(incr) = incr {
+                    self.expr(incr);
+                }
+                self.stmt(body);
+            }
+            AstStmtData::ForIn { var, collection, body } => {
+                self.expr(var);
+                self.expr(collection);
+                self.stmt(body);
+            }
+            AstStmtData::Try { try_block, catches, finally_block } => {
+                self.stmt(try_block);
+                for catch in catches {
+                    self.stmt(catch);
+                }
+                if let Some(finally) = finally_block {
+                    self.stmt(finally);
+                }
+            }
+            AstStmtData::Catch { param, body } => {
+                self.param(param);
+                self.stmt(body);
+            }
+            AstStmtData::Synchronized { lock, body } => {
+                self.expr(lock);
+                self.stmt(body);
+            }
+            AstStmtData::Return(Some(expr)) | AstStmtData::Throw(Some(expr)) => self.expr(expr),
+            AstStmtData::Asm { outputs, inputs, .. } => {
+                for operand in outputs.iter().chain(inputs.iter()) {
+                    self.expr(&operand.expr);
+                }
+            }
+            AstStmtData::Return(None)
+            | AstStmtData::Throw(None)
+            | AstStmtData::Goto(_)
+            | AstStmtData::Label(_) => {}
+        }
+    }
+
+    /// Walk an expression far enough to find the sends in it and any
+    /// declarations inside its block literals. Every variant is listed, so a
+    /// new one fails the build instead of silently narrowing what is seen.
+    fn expr(&mut self, expr: &AstExpr) {
+        match &expr.data {
+            AstExprData::MsgSend { receiver, args, .. } => {
+                if let (Some(send), Some(receiver_range)) =
+                    (self.expr_range(expr), self.expr_range(receiver))
+                {
+                    self.sites.push(SendSite {
+                        send,
+                        receiver: receiver_range,
+                        receiver_name: match &receiver.data {
+                            AstExprData::VarRef { name, .. } => Some(name.clone()),
+                            _ => None,
+                        },
+                        receiver_type: receiver.expr_type.as_deref().and_then(ast_type_name),
+                        args: args.iter().filter_map(|arg| self.expr_range(arg)).collect(),
+                    });
+                }
+                self.expr(receiver);
+                for arg in args {
+                    self.expr(arg);
+                }
+            }
+            AstExprData::FuncCall { callee, args, .. } => {
+                if let Some(callee) = callee {
+                    self.expr(callee);
+                }
+                for arg in args {
+                    self.expr(arg);
+                }
+            }
+            AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => self.expr(obj),
+            AstExprData::Unary { operand, .. } => self.expr(operand),
+            AstExprData::Binary { left, right, .. } => {
+                self.expr(left);
+                self.expr(right);
+            }
+            AstExprData::Assign { target, value } => {
+                self.expr(target);
+                self.expr(value);
+            }
+            AstExprData::Cast { expr, .. }
+            | AstExprData::Boxed(expr)
+            | AstExprData::Paren(expr)
+            | AstExprData::Await { inner: expr } => self.expr(expr),
+            AstExprData::ArrayLit(items)
+            | AstExprData::InitList(items)
+            | AstExprData::Comma(items) => {
+                for item in items {
+                    self.expr(item);
+                }
+            }
+            AstExprData::DesignatedInit { expr, .. } => self.expr(expr),
+            AstExprData::DictLit { keys, values } => {
+                for entry in keys.iter().chain(values.iter()) {
+                    self.expr(entry);
+                }
+            }
+            AstExprData::Subscript { object, key } => {
+                self.expr(object);
+                self.expr(key);
+            }
+            AstExprData::Sizeof { expr, .. } => {
+                if let Some(expr) = expr {
+                    self.expr(expr);
+                }
+            }
+            AstExprData::Ternary { cond, then, else_ } => {
+                self.expr(cond);
+                self.expr(then);
+                self.expr(else_);
+            }
+            AstExprData::Block { params, body, .. } => {
+                for (ty, name) in params {
+                    if let Some(class) = ast_type_name(ty) {
+                        self.locals.push((name.clone(), class));
+                    }
+                }
+                if let Some(body) = body {
+                    self.stmt(body);
+                }
+            }
+            AstExprData::Int(_)
+            | AstExprData::Float(_)
+            | AstExprData::FloatRaw(_)
+            | AstExprData::Char(_)
+            | AstExprData::String(_)
+            | AstExprData::AtString(_)
+            | AstExprData::Bool(_)
+            | AstExprData::VarRef { .. }
+            | AstExprData::Selector(_)
+            | AstExprData::TypeLiteral(_)
+            | AstExprData::Alignof(_) => {}
+        }
+    }
+}
+
+fn range_contains(range: LspRange, position: LspPosition) -> bool {
+    let point = (position.line, position.character);
+    (range.start.line, range.start.character) <= point && point <= (range.end.line, range.end.character)
+}
+
+/// True for a plain identifier (so `self.x`, `[a b]` or `1` never reach the
+/// scope/class lookups as if they were a name).
+fn is_identifier(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    match bytes.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == b'_' || first == b'$' => {}
+        _ => return false,
+    }
+    bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$')
 }
 
 pub(crate) fn range_json(range: LspRange) -> Value {
@@ -568,6 +1240,34 @@ fn is_ident_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
 }
 
+/// The receiver name of a `.` / `->` access the cursor sits right after, while
+/// the member name is still being typed (`obj.` and `obj->`).
+///
+/// This is the one member position the AST cannot answer: the property/ivar
+/// node does not exist until its name has been written. Message sends go through
+/// [`SymbolIndex::send_receiver`] instead, which is exact.
+pub fn access_receiver_at(text: &str, position: LspPosition) -> Option<String> {
+    let offset = jeti_cst::source_map::SourceFile::lsp_to_offset(text, position)?;
+    let bytes = text.as_bytes();
+    let mut cursor = offset.min(bytes.len());
+    if cursor >= 2 && &bytes[cursor - 2..cursor] == b"->" {
+        cursor -= 2;
+    } else if cursor >= 1 && bytes[cursor - 1] == b'.' {
+        cursor -= 1;
+    } else {
+        return None;
+    }
+    let mut start = cursor;
+    while start > 0 && is_ident_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    if start == cursor {
+        return None;
+    }
+    let name = &text[start..cursor];
+    is_identifier(name).then(|| name.to_string())
+}
+
 /// Identifier *start* byte.
 fn is_ident_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$'
@@ -577,7 +1277,6 @@ fn is_ident_start(byte: u8) -> bool {
 mod tests {
     use super::*;
 
-    /// Position of the `inside`-th UTF-16 unit of the first `needle` occurrence.
     fn at(text: &str, needle: &str, inside: usize) -> LspPosition {
         let column = text.find(needle).expect("needle") + inside;
         LspPosition { line: 0, character: column as u32 }

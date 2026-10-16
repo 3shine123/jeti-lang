@@ -67,6 +67,7 @@ const PROGRAM: &str = "\
 
 int main(void) {
     NPString *s = @\"hi\";
+    [s UTF8String];
     return 0;
 }
 ";
@@ -238,6 +239,23 @@ fn server_answers_editors_requests_end_to_end() {
     let npstring = items.iter().find(|item| item["label"] == "NPString").expect("NPString item");
     // CompletionItemKind.Class = 7 (SymbolKind numbers are different).
     assert_eq!(npstring["kind"], 7);
+
+    // Member completion: inside a send, the receiver's own class answers. The
+    // cursor sits at `[s UTF8S`, so either the receiver's members or nothing.
+    let mut position = position_of(PROGRAM, "[s UTF8S");
+    position["character"] = json!(position["character"].as_u64().unwrap() + 8);
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "id": 8, "method": "textDocument/completion",
+            "params": { "textDocument": { "uri": uri }, "position": position },
+        })).as_bytes())
+        .expect("write completion");
+    stdin.flush().expect("flush");
+    let completion = read_frame(&mut stdout);
+    let items = completion["result"]["items"].as_array().expect("items");
+    let labels: Vec<&str> = items.iter().map(|item| item["label"].as_str().unwrap()).collect();
+    assert_eq!(labels, vec!["UTF8String"], "{labels:?}");
+    assert_eq!(items[0]["kind"], 2, "CompletionItemKind.Method");
 
     // shutdown → response, exit → process ends with status 0
     stdin
