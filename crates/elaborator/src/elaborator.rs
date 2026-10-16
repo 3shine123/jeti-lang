@@ -174,6 +174,10 @@ impl Elaborator {
 
     fn convert_expr(&mut self, ce: &CstExpr) -> Option<AstExpr> {
         let line = ce.line; let col = ce.col;
+        // The CST node's own end. Named separately because the arms below arm
+        // shadow `ce` with the *converted callee*, and a call's extent is the
+        // whole `callee(args)`, not the callee alone.
+        let cst_end = (ce.end_line, ce.end_col);
         let ae = match &ce.data {
             CstExprData::Await { inner } => AstExpr {
                 kind: AstExprKind::Await, expr_type: None, line, col,
@@ -381,8 +385,8 @@ impl Elaborator {
                         // Block invocation on ivar — store callee expression
                         AstExpr { kind: AstExprKind::FuncCall, expr_type: None, line, col,
                             data: AstExprData::FuncCall { func: None, name, callee: Some(Box::new(ce.clone())), args: args_list },
-                            end_line: ce.end_line,
-                            end_col: ce.end_col, }
+                            end_line: cst_end.0,
+                            end_col: cst_end.1, }
                     } else {
                         let func_sym = self.symtab.as_ref()
                             .and_then(|st| st.lookup(&name))
@@ -390,14 +394,14 @@ impl Elaborator {
                             .map(|s| s.name.clone());
                         AstExpr { kind: AstExprKind::FuncCall, expr_type: None, line, col,
                             data: AstExprData::FuncCall { func: func_sym, name, callee: None, args: args_list },
-                            end_line: ce.end_line,
-                            end_col: ce.end_col, }
+                            end_line: cst_end.0,
+                            end_col: cst_end.1, }
                     }
                 } else {
                     AstExpr { kind: AstExprKind::FuncCall, expr_type: None, line, col,
                         data: AstExprData::FuncCall { func: None, name, callee: None, args: args_list },
-                        end_line: ce.end_line,
-                        end_col: ce.end_col, }
+                        end_line: cst_end.0,
+                        end_col: cst_end.1, }
                 }
             }
             CstExprData::Subscript { object, key } => {

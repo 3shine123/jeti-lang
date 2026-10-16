@@ -82,6 +82,36 @@ fn elaboration_copies_the_cst_extent_onto_the_ast() {
 }
 
 #[test]
+fn a_call_extent_covers_its_arguments() {
+    // The call's extent is the whole `callee(args)`, not just the callee — the
+    // elaborator used to copy the converted callee's end here, which made every
+    // argument look like it fell outside its call (LSP hover/signature help and
+    // any range query read that span).
+    let src = "int add(int a, int b);\nint use(void) {\n    return add(1, 22);\n}\n";
+    let unit = elaborate(src);
+    let body = body_of(&unit, "use");
+    match &body.data {
+        AstStmtData::Compound(stmts) => match &stmts[0].data {
+            AstStmtData::Return(Some(call)) => {
+                // `    return add(1, 22);` — the call starts at `add` (column 12)
+                // and ends just past the `)`, before the `;`.
+                assert_eq!(extent_expr(call), (3, 12, 3, 22));
+                match &call.data {
+                    AstExprData::FuncCall { args, .. } => {
+                        assert_eq!(args.len(), 2);
+                        assert_eq!(extent_expr(&args[0]), (3, 16, 3, 17), "the `1`");
+                        assert_eq!(extent_expr(&args[1]), (3, 19, 3, 21), "the `22`");
+                    }
+                    other => panic!("expected a call: {other:?}"),
+                }
+            }
+            other => panic!("expected a return: {other:?}"),
+        },
+        other => panic!("expected a compound body: {other:?}"),
+    }
+}
+
+#[test]
 fn synthesized_nodes_report_zero_ends() {
     // `x = 1;` inside a `while` — lowering/elaboration injects no `self` here,
     // but the point is the invariant: any node the compiler invents ends at 0
