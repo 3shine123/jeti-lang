@@ -313,6 +313,15 @@ no configuration), then on `PATH`. Settings:
 | --- | --- | --- |
 | `jeti.serverPath` | `jeti-lsp` | Server executable; a path is used as given, a bare name falls back to `PATH`. |
 | `jeti.searchPaths` | `["include", "."]` | `--include` dirs for `#import` resolution, relative to the workspace folder. |
+| `jeti.arc` | `true` | Analyze in ARC mode (the compiler's default). Turn it **off** for projects built with `-fno-jeti-arc`. |
+| `jeti.arguments` | `[]` | Extra server flags in `jetic`'s spelling: `-fno-jeti-arc`, `-fno-checker`, `-eh legacy`. |
+
+The last two settings exist because the editor has to agree with your build.
+By default the server analyzes exactly as `jetic` does — ARC on, checker on — so
+legacy manual-retain/release code shows `explicit 'release' not allowed in ARC
+mode` **because that is what the compiler reports** (the test suite only builds
+those files because it retries with MRC). Tell the editor how you build and the
+warnings go away for code that builds.
 
 The client has no npm dependencies (`vscode` + node built-ins only), so the
 workspace needs no `npm install`. Diagnostics come from the compiler's front

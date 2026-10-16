@@ -174,6 +174,25 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 遍历用 `BodyWalk` 显式列出 `AstStmtData` / `AstExprData` 的**全部**变体（不用 `_ =>`），
   所以 AST 新增变体会编译失败，而不是悄悄少收集；没有源位置的合成节点跳过。
 - 未做：协议成员（`id<P>`）与泛型参数替换（`NPArray<T>` 的 `T` 具体化）。
+**进展（编辑器与构建一致：诊断开关 —— 已落地）**
+
+- 起因：在编辑器里打开一个 MRC 风格的测试文件（`tests/tt.jeti`，`dealloc` 里手写 `[_next release]`），
+  波浪线报 `explicit 'release' not allowed in ARC mode`。**这不是误报**：`jetic tests/tt.jeti -o …`
+  在同样的 65:9 报同样的错，`-fno-jeti-arc` 下则完全干净。该文件之所以在测试里能过，是因为
+  **MRC 重试在 `test_all.py` 里**（第 223 行依次试 ARC / MRC），`jetic` 自己不做这件事。
+  也就是说：编辑器和编译器说的话一致，缺的是"编辑器不知道这个项目是 MRC 构建的"。
+- 修法：`jeti-lsp` 接受 CLI 自己的诊断相关开关 —— `-fno-jeti-arc`、`-fno-checker`、`-eh checked|legacy|sjlj`
+  （只接受**改变诊断**的那些；`-o`/`-g` 之类与编辑器无关，直接忽略）。这些开关经
+  `AnalysisOptions` 进入每次分析的 `Pipeline`（`no_arc` / `no_checker` / `eh_checked`），
+  与 `transpile` 用的是同一批字段。
+- 扩展侧：`jeti.arc`（布尔，默认 true；关掉即 `-fno-jeti-arc`）与 `jeti.arguments`（字符串数组，
+  用 `jetic` 的拼写传项目自己的开关）。改设置会重启服务器。
+- 证据：`tests/tt.jeti` 在默认下 7 条诊断，加 `-fno-jeti-arc` 后 **0 条**；单测钉住"同一段 MRC 代码：
+  默认报 ARC 错误 / `no_arc` 下干净且符号索引照常"，会话测试用真实二进制跑 `-fno-jeti-arc` 断言零诊断，
+  `test/extension.test.js` 断言 `jeti.arc:false` + `jeti.arguments` 确实进入 spawn 参数。
+- 边界（仍然诚实）：编辑器只报告"按这些开关编译时会报什么"；它不链接、不运行，
+  也不替用户猜项目该怎么构建——构建设置由用户显式说明。
+
 **进展（增量同步 —— 已落地）**
 
 - `textDocumentSync: 2`（Incremental）。`didChange` 按 LSP 规定**顺序**应用每条 change：带 `range` 的做区间替换，

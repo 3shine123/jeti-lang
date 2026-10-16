@@ -291,6 +291,13 @@ signature help 显示光标所在调用的签名并高亮正在填的参数（`:
 | --- | --- | --- |
 | `jeti.serverPath` | `jeti-lsp` | 服务器可执行文件；给路径就按路径用，给裸名字则回退到 `PATH`。 |
 | `jeti.searchPaths` | `["include", "."]` | 解析 `#import` 的 `--include` 目录，相对工作区根目录。 |
+| `jeti.arc` | `true` | 按 ARC 模式分析（编译器默认）。用 `-fno-jeti-arc` 构建的项目请关掉。 |
+| `jeti.arguments` | `[]` | 额外的服务器参数，用 `jetic` 的拼写：`-fno-jeti-arc`、`-fno-checker`、`-eh legacy`。 |
+
+后两项存在的原因是：**编辑器必须和你的构建一致**。默认情况下服务器完全按 `jetic` 的默认分析
+（ARC 开、checker 开），所以手写 retain/release 的旧代码会显示
+`explicit 'release' not allowed in ARC mode` —— **因为编译器就是这么报的**（那些测试文件能过，是因为
+测试脚本会再用 MRC 重试一遍）。告诉编辑器你是怎么构建的，能过的代码就不再报错。
 
 客户端**没有任何 npm 依赖**（只用 `vscode` 与 node 内建模块），因此不需要 `npm install`。
 诊断来自编译器前端，这里报出的东西与命令行 `jetic` 报出的一致。
