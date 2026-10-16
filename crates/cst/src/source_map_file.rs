@@ -44,21 +44,22 @@
 //!   — the field is a plain string so consumers must treat unknown kinds as
 //!   synthetic-ish and keep parsing).
 //!
-//! JSON is written by hand: `jeti-cst` is intentionally dependency-free and
-//! this schema is write-only for the compiler (the reader lives in the
-//! future LSP/debugger-adapter consumers, 阶段 6).
+//! JSON is written and read through `serde` (the reader is what the 阶段 6
+//! LSP/debugger-adapter consumers use; the writer stays the compiler's). The
+//! on-disk schema above is unchanged: `src_id` / `src_line_start` /
+//! `src_line_end` are omitted for synthetic regions exactly as documented.
 //!
 //! Paths are stored exactly as emitted into the `#line` directives; on
 //! Windows a backslash is JSON-escaped (`\\`), which is valid JSON and
 //! round-trips.
 
-use std::fmt::Write as _;
+use serde::{Deserialize, Serialize};
 
 /// Bumped on any schema change; consumers must refuse unknown versions.
 pub const SOURCE_MAP_VERSION: u64 = 1;
 
 /// One `#include`d / `#import`ed source file named by the `#line` stream.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceEntry {
     pub id: u64,
     pub path: String,
@@ -68,14 +69,14 @@ pub struct SourceEntry {
 }
 
 /// Identity of the generated C artifact the mappings refer to.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeneratedArtifact {
     pub path: String,
     pub hash: String,
 }
 
 /// One contiguous generated-C line range attributed to one source position.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Mapping {
     /// Byte offset of the region's first character in the generated C.
     pub c_start: u64,
@@ -91,19 +92,24 @@ pub struct Mapping {
     /// 1 for an empty last line).
     pub c_end_line: u32,
     pub c_end_col: u32,
-    /// Index into `sources[]`, or `None` for synthetic regions.
+    /// Index into `sources[]`; `None` for synthetic regions (field omitted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub src_id: Option<u64>,
-    /// 1-based source line the region starts at (the `#line` value).
-    pub src_line_start: u32,
-    /// 1-based source line the region ends at (start + C line count - 1).
-    pub src_line_end: u32,
+    /// 1-based source line the region starts at (the `#line` value); `None`
+    /// for synthetic regions (field omitted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub src_line_start: Option<u32>,
+    /// 1-based source line the region ends at (start + C line count - 1);
+    /// `None` for synthetic regions (field omitted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub src_line_end: Option<u32>,
     /// Generation category; see the module docs for version-1 values.
     pub kind: String,
     pub synthetic: bool,
 }
 
 /// The complete sidecar document.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceMapFile {
     pub version: u64,
     pub generator: String,
@@ -131,69 +137,23 @@ impl SourceMapFile {
     /// Serialize to pretty JSON (2-space indent). Ordering is enforced here so
     /// the same build always produces byte-identical output.
     pub fn to_json(&self) -> String {
-        let mut sources: Vec<&SourceEntry> = self.sources.iter().collect();
-        sources.sort_by_key(|s| s.id);
-        let mut mappings: Vec<&Mapping> = self.mappings.iter().collect();
-        mappings.sort_by_key(|m| m.c_start);
+        let mut doc = self.clone();
+        doc.sources.sort_by_key(|s| s.id);
+        doc.mappings.sort_by_key(|m| m.c_start);
+        serde_json::to_string_pretty(&doc).expect("SourceMapFile always serializes")
+    }
 
-        let mut out = String::new();
-        let w = &mut out;
-        let _ = writeln!(w, "{{");
-        let _ = writeln!(w, "  \"version\": {},", self.version);
-        let _ = writeln!(w, "  \"generator\": \"{}\",", json_escape(&self.generator));
-        let _ = writeln!(
-            w,
-            "  \"primary_source\": \"{}\",",
-            json_escape(&self.primary_source)
-        );
-        let _ = writeln!(w, "  \"generated\": {{");
-        let _ = writeln!(
-            w,
-            "    \"path\": \"{}\",",
-            json_escape(&self.generated.path)
-        );
-        let _ = writeln!(w, "    \"hash\": \"{}\"", json_escape(&self.generated.hash));
-        let _ = writeln!(w, "  }},");
-        if sources.is_empty() {
-            let _ = writeln!(w, "  \"sources\": [],");
-        } else {
-            let _ = writeln!(w, "  \"sources\": [");
-            for (i, s) in sources.iter().enumerate() {
-                let comma = if i + 1 == sources.len() { "" } else { "," };
-                let _ = writeln!(w, "    {{");
-                let _ = writeln!(w, "      \"id\": {},", s.id);
-                let _ = writeln!(w, "      \"path\": \"{}\",", json_escape(&s.path));
-                let _ = writeln!(w, "      \"hash\": \"{}\"", json_escape(&s.hash));
-                let _ = writeln!(w, "    }}{}", comma);
-            }
-            let _ = writeln!(w, "  ],");
+    /// Parse a sidecar document. An unknown `version` is refused so a consumer
+    /// never trusts a schema it does not understand (阶段 6 LSP/debugger).
+    pub fn from_json(text: &str) -> Result<SourceMapFile, String> {
+        let doc: SourceMapFile = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if doc.version != SOURCE_MAP_VERSION {
+            return Err(format!(
+                "unsupported source-map version {} (expected {})",
+                doc.version, SOURCE_MAP_VERSION
+            ));
         }
-        if mappings.is_empty() {
-            let _ = writeln!(w, "  \"mappings\": []");
-        } else {
-            let _ = writeln!(w, "  \"mappings\": [");
-            for (i, m) in mappings.iter().enumerate() {
-                let comma = if i + 1 == mappings.len() { "" } else { "," };
-                let _ = writeln!(w, "    {{");
-                let _ = writeln!(w, "      \"c_start\": {},", m.c_start);
-                let _ = writeln!(w, "      \"c_end\": {},", m.c_end);
-                let _ = writeln!(w, "      \"c_start_line\": {},", m.c_start_line);
-                let _ = writeln!(w, "      \"c_start_col\": {},", m.c_start_col);
-                let _ = writeln!(w, "      \"c_end_line\": {},", m.c_end_line);
-                let _ = writeln!(w, "      \"c_end_col\": {},", m.c_end_col);
-                if let Some(id) = m.src_id {
-                    let _ = writeln!(w, "      \"src_id\": {},", id);
-                    let _ = writeln!(w, "      \"src_line_start\": {},", m.src_line_start);
-                    let _ = writeln!(w, "      \"src_line_end\": {},", m.src_line_end);
-                }
-                let _ = writeln!(w, "      \"kind\": \"{}\",", json_escape(&m.kind));
-                let _ = writeln!(w, "      \"synthetic\": {}", m.synthetic);
-                let _ = writeln!(w, "    }}{}", comma);
-            }
-            let _ = writeln!(w, "  ]");
-        }
-        let _ = writeln!(w, "}}");
-        out
+        Ok(doc)
     }
 }
 
@@ -214,27 +174,6 @@ pub fn hash_tag(data: &[u8]) -> String {
     format!("fnv1a64:{:016x}", fnv1a64(data))
 }
 
-/// Escape a string for embedding inside a JSON string literal. Control
-/// characters are emitted as `\u00XX`; everything else (including UTF-8
-/// multibyte sequences) passes through raw, which is valid JSON.
-fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,13 +185,41 @@ mod tests {
         assert_eq!(hash_tag(b"a"), "fnv1a64:af63dc4c8601ec8c");
     }
 
+    /// Paths and hashes with quotes / backslashes / newlines survive a
+    /// serialize → parse round trip (serde owns the escaping now).
     #[test]
-    fn json_escapes_quotes_and_control_chars() {
-        assert_eq!(json_escape("say \"hi\""), "say \\\"hi\\\"");
-        assert_eq!(json_escape("a\\b"), "a\\\\b");
-        assert_eq!(json_escape("l1\nl2\tend"), "l1\\nl2\\tend");
-        assert_eq!(json_escape("\u{01}"), "\\u0001");
-        assert_eq!(json_escape("héllo→"), "héllo→");
+    fn json_round_trips_awkward_paths() {
+        let mut f = SourceMapFile::new(
+            "jetic",
+            "dir with \"quotes\"/main.jeti",
+            GeneratedArtifact {
+                path: "a\\b\\main.c".into(),
+                hash: hash_tag(b"C"),
+            },
+        );
+        f.sources = vec![SourceEntry {
+            id: 0,
+            path: "weird\tname\n.jeti".into(),
+            hash: String::new(),
+        }];
+        let json = f.to_json();
+        assert!(json.contains("\\t") && json.contains("\\n"));
+        let back = SourceMapFile::from_json(&json).expect("round trip");
+        assert_eq!(back, f);
+        assert_eq!(back.primary_source, "dir with \"quotes\"/main.jeti");
+        assert_eq!(back.generated.path, "a\\b\\main.c");
+    }
+
+    #[test]
+    fn from_json_refuses_unknown_version() {
+        let f = SourceMapFile::new(
+            "jetic",
+            "main.jeti",
+            GeneratedArtifact { path: "main.c".into(), hash: String::new() },
+        );
+        let json = f.to_json().replace("\"version\": 1", "\"version\": 99");
+        let err = SourceMapFile::from_json(&json).unwrap_err();
+        assert!(err.contains("unsupported source-map version 99"), "got: {err}");
     }
 
     #[test]
@@ -286,8 +253,8 @@ mod tests {
                 c_end_line: 45,
                 c_end_col: 3,
                 src_id: None,
-                src_line_start: 0,
-                src_line_end: 0,
+                src_line_start: None,
+                src_line_end: None,
                 kind: "synthetic".into(),
                 synthetic: true,
             },
@@ -299,8 +266,8 @@ mod tests {
                 c_end_line: 39,
                 c_end_col: 42,
                 src_id: Some(0),
-                src_line_start: 3,
-                src_line_end: 40,
+                src_line_start: Some(3),
+                src_line_end: Some(40),
                 kind: "source".into(),
                 synthetic: false,
             },
@@ -315,7 +282,16 @@ mod tests {
         // Source mapping keeps its span.
         assert!(json.contains("\"src_line_start\": 3,"));
         assert!(json.contains("\"src_line_end\": 40,"));
-        // Document closes and parses as balanced braces.
+        // Document closes and parses back; serialization normalized the
+        // mapping order, so the parsed document is the sorted form.
         assert!(json.trim_end().ends_with('}'));
+        let back = SourceMapFile::from_json(&json).unwrap();
+        assert_eq!(back.sources, f.sources);
+        assert_eq!(back.mappings.len(), 2);
+        assert_eq!((back.mappings[0].c_start, back.mappings[1].c_start), (10, 500));
+        assert_eq!(back.mappings[0].src_line_start, Some(3));
+        assert_eq!(back.mappings[0].src_line_end, Some(40));
+        assert!(back.mappings[1].synthetic);
+        assert_eq!(back.mappings[1].src_id, None);
     }
 }

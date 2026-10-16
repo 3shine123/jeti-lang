@@ -274,7 +274,7 @@ pub fn extract_source_map(c_text: &str, opts: &ExtractOptions) -> SourceMapFile 
             content = content.saturating_sub(1);
         }
         let (src_id, src_line_start, src_line_end, kind, synthetic) = if ev.synthetic {
-            (None, 0, 0, "synthetic", true)
+            (None, None, None, "synthetic", true)
         } else {
             let id = paths.iter().position(|p| *p == ev.file.as_str()).map(|p| p as u64);
             // Unreachable: ev is non-synthetic, so its file is in `paths`.
@@ -284,8 +284,8 @@ pub fn extract_source_map(c_text: &str, opts: &ExtractOptions) -> SourceMapFile 
             };
             (
                 Some(id),
-                ev.n,
-                ev.n.saturating_add(last - first),
+                Some(ev.n),
+                Some(ev.n.saturating_add(last - first)),
                 "source",
                 false,
             )
@@ -354,8 +354,8 @@ mod tests {
             c_text.find("#line 1 \"<jeti-generated>\"").unwrap() as u64
         );
         assert_eq!(a.src_id, Some(1));
-        assert_eq!(a.src_line_start, 3);
-        assert_eq!(a.src_line_end, 4);
+        assert_eq!(a.src_line_start, Some(3));
+        assert_eq!(a.src_line_end, Some(4));
         assert_eq!(a.c_start_col, 1);
         assert_eq!(a.c_end_col, 11); // "int b = 2;" is 10 bytes → exclusive col 11
         // Region B: synthetic, no src fields.
@@ -368,8 +368,8 @@ mod tests {
         // Region C: last mapped line reaches EOF including its newline.
         let c = &m.mappings[2];
         assert_eq!(c.src_id, Some(0));
-        assert_eq!(c.src_line_start, 7);
-        assert_eq!(c.src_line_end, 7);
+        assert_eq!(c.src_line_start, Some(7));
+        assert_eq!(c.src_line_end, Some(7));
         assert_eq!(c.c_start, c_text.find("return7;").unwrap() as u64);
         assert_eq!(c.c_end, c_text.len() as u64);
     }
@@ -383,8 +383,8 @@ mod tests {
         assert_eq!(m.mappings.len(), 1);
         assert_eq!(m.mappings[0].src_id, Some(0));
         // Directive occupies physical line 2, so it numbers line 3 as src 2.
-        assert_eq!(m.mappings[0].src_line_start, 2);
-        assert_eq!(m.mappings[0].src_line_end, 2);
+        assert_eq!(m.mappings[0].src_line_start, Some(2));
+        assert_eq!(m.mappings[0].src_line_end, Some(2));
     }
 
     #[test]
@@ -404,7 +404,7 @@ mod tests {
         let r = &m.mappings[0];
         assert_eq!(r.c_start_line, 4);
         assert_eq!(r.c_end_line, 4);
-        assert_eq!(r.src_line_start, 4);
+        assert_eq!(r.src_line_start, Some(4));
         assert_eq!(r.c_start, c_text.find("x;").unwrap() as u64);
     }
 

@@ -58,6 +58,74 @@ impl SourceFile {
         // Column in bytes +1, matching the existing parser convention.
         (offset - line_start + 1) as u32
     }
+
+    /// Convert a 1-based `(line, column)` — column counted in **UTF-8 bytes**,
+    /// the internal convention — to a byte offset, clamped to the file length.
+    /// `None` when the line does not exist.
+    ///
+    /// This needs only the registry's line-start table, so byte offsets are
+    /// available on the legacy path too (plan §31: offsets are the precise
+    /// identity; rows/columns are for display).
+    pub fn line_col_to_offset(&self, line: u32, col: u32) -> Option<usize> {
+        let base = self.line_to_offset(line)?;
+        Some((base + col.saturating_sub(1) as usize).min(self.len))
+    }
+
+    /// Convert a byte offset to a 1-based `(line, column-in-UTF-8-bytes)`.
+    pub fn offset_to_line_col(&self, offset: usize) -> (u32, u32) {
+        let line = self.offset_to_line(offset);
+        let base = self.line_to_offset(line).unwrap_or(0);
+        (line, offset.saturating_sub(base) as u32 + 1)
+    }
+
+    /// Byte offset → LSP position (**0-based line, 0-based UTF-16 column**).
+    ///
+    /// LSP counts columns in UTF-16 code units, so non-ASCII text differs from
+    /// the byte column: an emoji is one Unicode scalar but two UTF-16 units,
+    /// and each CJK character is one unit in three UTF-8 bytes. `text` must be
+    /// the file's content (plan §32: the unit conversion lives at the LSP
+    /// boundary — never mix the two systems).
+    pub fn offset_to_lsp(text: &str, offset: usize) -> LspPosition {
+        let offset = offset.min(text.len());
+        let line_start = text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line = text[..line_start].bytes().filter(|&b| b == b'\n').count() as u32;
+        let character = text[line_start..offset].encode_utf16().count() as u32;
+        LspPosition { line, character }
+    }
+
+    /// LSP position (**0-based line, 0-based UTF-16 column**) → byte offset.
+    ///
+    /// `None` when the line does not exist or the column runs past the line's
+    /// end (LSP positions must stay within the line). A column landing inside a
+    /// surrogate pair resolves to the start of that scalar (best effort).
+    pub fn lsp_to_offset(text: &str, pos: LspPosition) -> Option<usize> {
+        let line_start = line_start_of(text, pos.line)?;
+        let line_end = text[line_start..]
+            .find('\n')
+            .map(|i| line_start + i)
+            .unwrap_or(text.len());
+        let mut units = 0u32;
+        for (i, ch) in text[line_start..line_end].char_indices() {
+            if units >= pos.character {
+                return Some(line_start + i);
+            }
+            units += ch.len_utf16() as u32;
+        }
+        if units == pos.character { Some(line_end) } else { None }
+    }
+}
+
+/// Byte offset of the start of a **0-based** line, or `None` past the end.
+fn line_start_of(text: &str, line: u32) -> Option<usize> {
+    let mut start = 0usize;
+    let mut n = line;
+    while n > 0 {
+        let nl = text[start..].find('\n')?;
+        start += nl + 1;
+        if start > text.len() { return None; }
+        n -= 1;
+    }
+    Some(start)
 }
 
 /// Registry of all source files in one compilation. `SourceId 0` is reserved
@@ -119,21 +187,94 @@ pub enum SpanOrigin {
     Synthetic,
 }
 
-/// A half-open `[start, end)` byte range in a registered source file.
-/// Rows/columns are derived for display; bytes are the precise identity.
+/// LSP-facing position: **0-based line, 0-based UTF-16 code-unit column**.
+///
+/// The LSP protocol encodes positions this way, while Jeti's internal model is
+/// 1-based lines with UTF-8 byte columns. Every crossing of the LSP boundary
+/// must go through [`SourceFile::offset_to_lsp`] / [`SourceFile::lsp_to_offset`]
+/// (or [`SourceSpan::to_lsp_range`]) — the two unit systems are never mixed
+/// (plan §32).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct LspPosition {
+    pub line: u32,
+    pub character: u32,
+}
+
+/// LSP-facing half-open range `[start, end)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LspRange {
+    pub start: LspPosition,
+    pub end: LspPosition,
+}
+
+/// A half-open `[start, end)` range in a registered source file.
+///
+/// Position fields are 1-based; `end_*` is the position **one past** the last
+/// character (exclusive), mirroring the `Mapping` schema in
+/// [`crate::source_map_file`]. `start_byte` / `end_byte` are offsets into the
+/// file text and are `None` only when the file was registered without a line
+/// table (legacy paths); when present they are the precise identity for
+/// slicing and incremental parsing (plan §31).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceSpan {
     pub file: SourceId,
     /// 1-based start line.
     pub start_line: u32,
-    /// 1-based end line (inclusive in line terms for diagnostics display).
+    /// 1-based start column (UTF-8 bytes).
+    pub start_col: u32,
+    /// 1-based end line (exclusive end position).
     pub end_line: u32,
+    /// 1-based end column (UTF-8 bytes, exclusive).
+    pub end_col: u32,
+    /// Byte offset of the first character, when known.
+    pub start_byte: Option<usize>,
+    /// Byte offset one past the last character, when known.
+    pub end_byte: Option<usize>,
     pub origin: SpanOrigin,
 }
 
 impl SourceSpan {
     pub fn is_synthetic(&self) -> bool {
         self.origin == SpanOrigin::Synthetic
+    }
+
+    /// A zero-width span at one position (what a line-level resolution can
+    /// honestly report before the parser supplies an end position).
+    fn point(
+        file: SourceId, line: u32, col: u32,
+        byte: Option<usize>, origin: SpanOrigin,
+    ) -> SourceSpan {
+        SourceSpan {
+            file,
+            start_line: line,
+            start_col: col,
+            end_line: line,
+            end_col: col,
+            start_byte: byte,
+            end_byte: byte,
+            origin,
+        }
+    }
+
+    /// The LSP range for this span, in the file's text.
+    ///
+    /// Prefers the recorded byte offsets (exact); otherwise converts the
+    /// 1-based line/byte-column fields. This is the single place the internal
+    /// model is projected onto LSP's UTF-16 coordinates.
+    pub fn to_lsp_range(&self, text: &str) -> LspRange {
+        let to_pos = |line: u32, col: u32, byte: Option<usize>| match byte {
+            Some(b) => SourceFile::offset_to_lsp(text, b),
+            None => match line_start_of(text, line.saturating_sub(1)) {
+                Some(base) => {
+                    SourceFile::offset_to_lsp(text, base + col.saturating_sub(1) as usize)
+                }
+                None => LspPosition::default(),
+            },
+        };
+        LspRange {
+            start: to_pos(self.start_line, self.start_col, self.start_byte),
+            end: to_pos(self.end_line, self.end_col, self.end_byte),
+        }
     }
 }
 
@@ -267,25 +408,95 @@ impl SourceMap {
         (String::new(), l)
     }
 
-    /// Structured variant of [`locate`] for new consumers.
+    /// Structured line-level resolution: the span covers `inlined_line`, as a
+    /// zero-width point at column 1. Consumers that know the node's extent use
+    /// [`Self::span_from_inline`] instead.
     pub fn locate_span(&self, inlined_line: usize) -> SourceSpan {
         let l = inlined_line as u32;
         for r in &self.regions {
             if l >= r.out_start && l <= r.out_end {
-                return SourceSpan {
-                    file: r.file,
-                    start_line: r.src_start + (l - r.out_start),
-                    end_line: r.src_start + (l - r.out_start),
-                    origin: r.origin,
-                };
+                let src_line = r.src_start + (l - r.out_start);
+                let byte = self
+                    .registry
+                    .get(r.file)
+                    .and_then(|f| f.line_col_to_offset(src_line, 1));
+                return SourceSpan::point(r.file, src_line, 1, byte, r.origin);
             }
         }
+        SourceSpan::point(0, l, 1, None, SpanOrigin::Synthetic)
+    }
+
+    /// Resolve an inline-buffer position pair to a source [`SourceSpan`].
+    ///
+    /// `start` and `end` are 1-based `(line, column)` in the flattened buffer
+    /// the lexer/parser saw — exactly what CST/AST nodes carry today. The result
+    /// names the real file, the source lines, the macro-adjusted columns
+    /// (expansion output resolves to its invocation site, plan stage 1) and the
+    /// byte offsets into that file.
+    ///
+    /// The span is synthetic when either endpoint (or the line) is synthetic, so
+    /// a caller can tell "this came from real source" from "the compiler made
+    /// this up".
+    pub fn span_from_inline(&self, start: (u32, u32), end: (u32, u32)) -> SourceSpan {
+        let s = self.map_inline_pos(start.0, start.1);
+        let e = self.map_inline_pos(end.0, end.1);
+        let (start_byte, end_byte, file, sl, sc, el, ec, origin) = match (s, e) {
+            (Some((sf, sl, sc, so)), Some((ef, el, ec, eo))) => {
+                // Prefer the start endpoint's file identity; a span never
+                // crosses files in the inline buffer (an `#import` boundary is
+                // a separate region).
+                let sb = self.registry.get(sf).and_then(|f| f.line_col_to_offset(sl, sc));
+                let eb = if sf == ef {
+                    self.registry.get(sf).and_then(|f| f.line_col_to_offset(el, ec))
+                } else {
+                    None
+                };
+                let origin = if so == SpanOrigin::Synthetic || eo == SpanOrigin::Synthetic {
+                    SpanOrigin::Synthetic
+                } else {
+                    SpanOrigin::Source
+                };
+                (sb, eb, sf, sl, sc, el, ec, origin)
+            }
+            // Either endpoint unmapped: a synthetic point, no file identity.
+            (s, e) => {
+                let (line, col) = match (s, e) {
+                    (Some((_, l, c, _)), _) => (l, c),
+                    (_, Some((_, l, c, _))) => (l, c),
+                    _ => (start.0, start.1),
+                };
+                (None, None, 0, line, col, line, col, SpanOrigin::Synthetic)
+            }
+        };
         SourceSpan {
-            file: 0,
-            start_line: l,
-            end_line: l,
-            origin: SpanOrigin::Synthetic,
+            file,
+            start_line: sl,
+            start_col: sc,
+            end_line: el,
+            end_col: ec,
+            start_byte,
+            end_byte,
+            origin,
         }
+    }
+
+    /// Map one inline-buffer `(line, col)` to `(file, source line, source col,
+    /// origin)`, applying the macro column correction. `None` when the inline
+    /// line is not covered by any region.
+    fn map_inline_pos(&self, line: u32, col: u32) -> Option<(SourceId, u32, u32, SpanOrigin)> {
+        for r in &self.regions {
+            if line >= r.out_start && line <= r.out_end {
+                let src_line = r.src_start + (line - r.out_start);
+                let (src_col, col_origin) = self.adjust_col(line as usize, col);
+                let origin = if r.origin == SpanOrigin::Synthetic || col_origin == SpanOrigin::Synthetic {
+                    SpanOrigin::Synthetic
+                } else {
+                    SpanOrigin::Source
+                };
+                return Some((r.file, src_line, src_col, origin));
+            }
+        }
+        None
     }
 }
 
@@ -451,5 +662,97 @@ mod tests {
         assert_eq!(s.file, a);
         assert_eq!(s.start_line, 6);
         assert!(!s.is_synthetic());
+        // Line-level resolution is a zero-width point at column 1.
+        assert_eq!((s.start_col, s.end_line, s.end_col), (1, 6, 1));
+    }
+
+    #[test]
+    fn span_from_inline_maps_start_end_and_bytes() {
+        // Source file with six lines; the flattened buffer starts at source
+        // line 5, so inline line 1 == source line 5.
+        let mut reg = SourceRegistry::new();
+        // line_starts = [0,3,6,9,12,17]; line 5 starts at 12, line 6 at 17.
+        let a = reg.add("a.jeti", "l1\nl2\nl3\nl4\naaaa\nbbbb\n");
+        let regions = vec![LineRegion {
+            out_start: 1,
+            out_end: 2,
+            file: a,
+            src_start: 5,
+            origin: SpanOrigin::Source,
+        }];
+        let sm = SourceMap::from_regions(regions, reg);
+        // Inline (1,2)..(2,3) -> source (5,2)..(6,3).
+        let s = sm.span_from_inline((1, 2), (2, 3));
+        assert_eq!(s.file, a);
+        assert_eq!((s.start_line, s.start_col), (5, 2));
+        assert_eq!((s.end_line, s.end_col), (6, 3));
+        assert_eq!(s.start_byte, Some(13));
+        assert_eq!(s.end_byte, Some(19));
+        assert_eq!(s.origin, SpanOrigin::Source);
+        assert!(!s.is_synthetic());
+
+        // An unmapped inline line degrades to a synthetic point (file 0).
+        let s2 = sm.span_from_inline((9, 1), (9, 4));
+        assert_eq!(s2.file, 0);
+        assert!(s2.is_synthetic());
+        assert_eq!(s2.start_byte, None);
+    }
+
+    #[test]
+    fn span_to_lsp_range_uses_utf16_columns() {
+        // "héllo" — é is 2 bytes, 1 UTF-16 unit. "中文" — 3 bytes, 1 unit each.
+        let text = "héllo 中文";
+        let mut reg = SourceRegistry::new();
+        let f = reg.add("u.jeti", text);
+        let regions = vec![LineRegion {
+            out_start: 1, out_end: 1, file: f, src_start: 1, origin: SpanOrigin::Source,
+        }];
+        let sm = SourceMap::from_regions(regions, reg);
+        // Bytes 0..6 = "héllo" (1 + 2 + 1 + 1 + 1); UTF-16 units 0..5 (é is one
+        // unit despite being two bytes).
+        let sp = sm.span_from_inline((1, 1), (1, 7));
+        assert_eq!(sp.start_byte, Some(0));
+        assert_eq!(sp.end_byte, Some(6));
+        let r = sp.to_lsp_range(text);
+        assert_eq!(r.start, LspPosition { line: 0, character: 0 });
+        assert_eq!(r.end, LspPosition { line: 0, character: 5 });
+        // 中文: bytes 7..13, UTF-16 units 6..8 -> proves the unit conversion.
+        let sp2 = sm.span_from_inline((1, 8), (1, 14));
+        let r2 = sp2.to_lsp_range(text);
+        assert_eq!(r2.start, LspPosition { line: 0, character: 6 });
+        assert_eq!(r2.end, LspPosition { line: 0, character: 8 });
+    }
+
+    #[test]
+    fn utf16_position_round_trips_with_astral_chars() {
+        // "a😀b" — 😀 is 4 UTF-8 bytes and 2 UTF-16 code units.
+        let text = "a😀b\nsecond";
+        // offset of 'b' is 5 bytes.
+        assert_eq!(
+            SourceFile::offset_to_lsp(text, 5),
+            LspPosition { line: 0, character: 3 }
+        );
+        assert_eq!(SourceFile::lsp_to_offset(text, LspPosition { line: 0, character: 3 }), Some(5));
+        // Line 1 ("second") starts at byte 7 (0-based): line 1, char 0.
+        assert_eq!(
+            SourceFile::offset_to_lsp(text, 7),
+            LspPosition { line: 1, character: 0 }
+        );
+        assert_eq!(SourceFile::lsp_to_offset(text, LspPosition { line: 1, character: 6 }), Some(13));
+        // Past the end of the line / file -> None.
+        assert_eq!(SourceFile::lsp_to_offset(text, LspPosition { line: 1, character: 99 }), None);
+        assert_eq!(SourceFile::lsp_to_offset(text, LspPosition { line: 9, character: 0 }), None);
+    }
+
+    #[test]
+    fn line_col_offset_round_trips() {
+        let mut reg = SourceRegistry::new();
+        let id = reg.add("x.jeti", "one\ntwo\nthree");
+        let f = reg.get(id).unwrap();
+        assert_eq!(f.line_col_to_offset(2, 3), Some(6));
+        assert_eq!(f.offset_to_line_col(6), (2, 3));
+        // Column past the file end clamps to the length.
+        assert_eq!(f.line_col_to_offset(3, 999), Some(f.len));
+        assert_eq!(f.line_col_to_offset(99, 1), None);
     }
 }
