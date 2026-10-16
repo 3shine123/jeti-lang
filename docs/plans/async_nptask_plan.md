@@ -3,7 +3,7 @@
 > 状态：**设计定稿（2026-10-09 定案）；入口语义已实施**——hosted 语句位自动驱动已落地
 > （`crates/async`：`drive_entry_call` / `lower_task_starts_expr(drive=true)`），golden 37 绿；
 > Foundation `NPTask.hje/.jeti` 薄壳与单态化接线尚未实施（见 §实施计划）。本文取代 `NPAsync<T>` 声明标记旧案（见
-> `doc/archive/agents-history-2026-10.md` "NPAsync<T> 声明标记"节，该案被本设计反转）。
+> `docs/archive/agents-history-2026-10.md` "NPAsync<T> 声明标记"节，该案被本设计反转）。
 > `@await` 的表达式位语法（`@` 前缀、状态机 desugar、C++20 式"体内自证"判定）沿用既有
 > M1/M2 定案，不在本文重复；本文只定义**声明侧标记、任务类型与调度语义**的新一轮反转。
 >
@@ -204,7 +204,7 @@ void  jeti_sched_run(void);            /* 泵：跑完就绪队列中所有可�
 | checker 变量/参数位拒绝 NPAsync | 删（变量位合法是本设计反转点） |
 | `check_unit` NPAsync 对账表 + warning | 改写为 async 修饰符对账（阶段 B，位置不变） |
 | archive 文档 NPAsync 节 | 标注"已被 NPTask 定案反转（2026-10-09）→ doc/async_nptask_plan.md"，按惯例保留原文 |
-| `doc/architecture.md`、`ROADMAP.md` async 节 | 阶段 D 完成后同步更新 |
+| `docs/plans/architecture.md`、`ROADMAP.md` async 节 | 阶段 D 完成后同步更新 |
 | golden 既有 NPAsync 用例 | 阶段 D 改写为 async 修饰符形态，逐字节重录 |
 
 ## 非目标

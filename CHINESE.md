@@ -248,6 +248,24 @@ cargo test --workspace
 
 ---
 
+### 编辑器支持（LSP）
+
+`jeti-lsp` 是一个 stdio 语言服务器，为正在编辑的缓冲区报出**语法、类型与 async 诊断**。
+它跑的是编译器自己的前端（`Pipeline::analyze`），因此诊断与 CLI 完全一致——不是另一套会说谎的
+linter；位置只跨协议边界一次，走共享的 `SourceSpan` 模型（1 基 byte 列 → LSP UTF-16 code unit）。
+
+```bash
+cargo build -p jeti-lsp           # → target/debug/jeti-lsp
+jeti-lsp --include include        # 在 stdin/stdout 上说 LSP
+```
+
+当前范围：生命周期握手 + 全量文档同步（`didOpen`/`didChange`/`didClose` →
+`publishDiagnostics`）。补全、悬停、跳转定义、incremental sync、ARC 专属诊断尚未实现。
+仓库自带的 VS Code 扩展（`.vscode/extensions/jeti-lang-support`）目前只注册语法高亮，
+它的 language client 是后续独立一步。
+
+---
+
 ## 语言特性
 
 ### 类系统

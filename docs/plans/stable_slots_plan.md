@@ -1,13 +1,13 @@
 # 稳定 vtable 槽位（3b）实施计划
 
 > **本文是 stable slots / multi-TU 迁移历史和决策记录。**
-> 当前架构请阅读 `doc/architecture.md`。
+> 当前架构请阅读 `docs/plans/architecture.md`。
 >
 > 状态：**已完成**——R1/R2/R3 已于 2026-10-02/03 落地并全量验证（见 §9–§11）；
 > 原验收用例 `tests/multi_tu/11_vtable_private_slots/` 已从 `EXPECT_FAIL` 摘牌转为
 > `expected.txt` 正向比对。下文按时间顺序保留计划、探索、回退与验证记录；
 > 与现状不符的表述（`Foundation.decl.hje`、`-fstrong-metadata`、`jeti_metaInit` 旧限制等）
-> 为历史记录：**当前状态见 §11 / `doc/architecture.md`**。
+> 为历史记录：**当前状态见 §11 / `docs/plans/architecture.md`**。
 > 原始验收目标：“待实施。验收用例已入库：`tests/multi_tu/11_vtable_private_slots/`”
 
 ## 1. 问题
@@ -213,7 +213,7 @@ sig：库 TU == 客户 TU（0xbe99f65a63e20021）
 >
 > 顺带修掉一个与本计划无关的既有 ARC 缺陷：`full_syntax_test.jeti` 的 intern 字符串
 > heap-use-after-free（`test_all` 里那唯一一个 `SUSPECT` 来源）→ 已修复，见
-> `doc/arc_intern_uaf.md`，回归守护 `tests/arc_intern/`。
+> `docs/plans/arc_intern_uaf.md`，回归守护 `tests/arc_intern/`。
 
 ## 9. R2 落地：按类归属（2026-10-02）
 
@@ -247,7 +247,7 @@ sig：库 TU == 客户 TU（0xbe99f65a63e20021）
 ### 仍未做（`-fstrong-metadata` 为何还不能删）
 
 > 历史记录：本小节的两项阻塞已在 §9 更新与 §11 方案 A 落地中全部清偿，
-> `-fstrong-metadata` 已删除；当前状态见 `doc/architecture.md` §6/§7。
+> `-fstrong-metadata` 已删除；当前状态见 `docs/plans/architecture.md` §6/§7。
 
 自动判据覆盖不到**库自身**：`tools/build-foundation-lib.sh` 编译的是
 `include/Foundation/Foundation.hje`，其 `@implementation` 全部来自 `#import "*.jeti"`，

@@ -6,7 +6,7 @@
 
 ## Language / compiler gaps
 
-- [ ] **Source locations, debug info, and LSP foundation** — current diagnostics map some expanded lines back through the preprocessor, but AST nodes lack a unified file/start/end span and generated C has no source-aware `#line` directives. Plan: `docs/plans/source_locations_debug_lsp_plan.md`. First ship shared SourceSpan/source mapping and `#line` diagnostics; then Clang `-g`/`-O0` debug builds and a versioned `.jeti.map`; finally use the same locations for LSP and debugger adapters. LSP syntax/diagnostics can start directly from AST before native debugging is complete.
+- [ ] **Source locations, debug info, and LSP foundation** — shared `SourceSpan` (CST/AST nodes carry 1-based line + byte columns + half-open end), UTF-16 conversion, `#line` emission, `-g`/`-O0` debug builds and the versioned `.jeti.map` sidecar are in. **LSP diagnostics MVP is in** (`crates/lsp`, binary `jeti-lsp`: stdio JSON-RPC, full-sync `didOpen/didChange/didClose` → `publishDiagnostics`, syntax + type + async diagnostics from `Pipeline::analyze`, positions projected through `SourceSpan::to_lsp_range`). Still missing, in plan order: LSP completion/hover/definition, incremental sync, ARC-only diagnostics, and the debugger adapter that consumes `.jeti.map` for Jeti breakpoints/stack frames. Plan: `docs/plans/source_locations_debug_lsp_plan.md`.
 - [x] **Generic class-method return instantiation (single TU)** — `[Box<NPString *> defaultValue]`
   substitutes T in the checker's result type and in the specialized vtable fn-ptr casts;
   ARC ownership on the returned T is correct (no extra release at the call site).

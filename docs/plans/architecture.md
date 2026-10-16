@@ -1,7 +1,7 @@
 # Jeti 当前架构
 
 > 本文是当前架构的**唯一事实来源**，面向新贡献者。
-> 历史决策与迁移过程见：`doc/stable_slots_plan.md`（stable slots / multi-TU 迁移史）、`doc/arc_intern_uaf.md`（ARC intern UAF 修复记录）。
+> 历史决策与迁移过程见：`docs/plans/stable_slots_plan.md`（stable slots / multi-TU 迁移史）、`docs/plans/arc_intern_uaf.md`（ARC intern UAF 修复记录）。
 > 用户向文档见 `README.md` / `CHINESE.md`。
 
 ## 1. 编译流程
@@ -115,7 +115,7 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 - **主模型是编译期单态化**：`Box<T>` / `NPArray<T>` / `NPDictionary<K,V>` 等泛型类按使用点实例化（专属结构体、方法副本、vtable/元数据，`T` 以 `TypePrim::Param` 哨兵按参数名替换）；checker 把接收者的 `type_args` 代入方法签名做元素类型检查。
 - **裸容器拼写保留擦除兼容行为**：不带实参的 `NPArray`（无 `<...>`）按 `id` 擦除处理，行为与历史版本一致、零迁移；裸 → 特化赋值会发 warning（`-Werror` 可升级），特化 → 裸静默。
 - `@[...]` 字面量全元素同型时推断为 `NPArray<X>`，混合回退裸 `NPArray`。
-- **协议约束（`T : Proto`）**：类级 bound，编译期强制。接受 ObjC 拼写 `T : id<Summable>`（剥 `id<>` 按裸协议名存储）、裸名 `T : Summable`、类指针 bound `T : NSObject *`。checker 在**显式特化的实例化点**（变量声明）验证实参：违约报 error（一次报齐）；逃逸通道——`id`/`instancetype`/嵌套类型参数槽/未解析类（forward 壳）/无法解析的 bound 名——一律放行（漏报优于误报）。继承规则：子类必须重申父类 bound（显式拼写，`.hje` 读者看到全部约束）、不得弱化（重申的 bound 须相等或更具体：协议在父 bound 继承链上 / 类是父 bound 子类）；实例化沿类链检查可证明位置的祖先 bound。裸拼写（无 type_args）永不触发（擦除兼容）；`-fno-checker` 关闭；**bound 不进 codegen，golden 输出逐字节不变**。不支持方法级约束。设计定稿见 `doc/generic_bounds_plan.md`。
+- **协议约束（`T : Proto`）**：类级 bound，编译期强制。接受 ObjC 拼写 `T : id<Summable>`（剥 `id<>` 按裸协议名存储）、裸名 `T : Summable`、类指针 bound `T : NSObject *`。checker 在**显式特化的实例化点**（变量声明）验证实参：违约报 error（一次报齐）；逃逸通道——`id`/`instancetype`/嵌套类型参数槽/未解析类（forward 壳）/无法解析的 bound 名——一律放行（漏报优于误报）。继承规则：子类必须重申父类 bound（显式拼写，`.hje` 读者看到全部约束）、不得弱化（重申的 bound 须相等或更具体：协议在父 bound 继承链上 / 类是父 bound 子类）；实例化沿类链检查可证明位置的祖先 bound。裸拼写（无 type_args）永不触发（擦除兼容）；`-fno-checker` 关闭；**bound 不进 codegen，golden 输出逐字节不变**。不支持方法级约束。设计定稿见 `docs/plans/generic_bounds_plan.md`。
 
 ## 9. 异常处理：checked 默认，legacy 回退
 
@@ -132,7 +132,7 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 - **泛型类方法返回类型的实例化**不完整（`ROADMAP.md`）。
 - **无 debug info**（不生成 DWARF）。
 
-源码位置当前只由预处理器逐行 `SourceMap` 支持部分诊断回映；AST 尚无统一文件级完整 span，codegen 也未发射 `#line`。因此上面的“无 debug info”仍是现状。SourceSpan、source map、Clang DWARF、LSP/debugger 的目标与阶段计划见 `doc/source_locations_debug_lsp_plan.md`。
+源码位置当前只由预处理器逐行 `SourceMap` 支持部分诊断回映；AST 尚无统一文件级完整 span，codegen 也未发射 `#line`。因此上面的“无 debug info”仍是现状。SourceSpan、source map、Clang DWARF、LSP/debugger 的目标与阶段计划见 `docs/plans/source_locations_debug_lsp_plan.md`。
 
 ## 11. 推荐命令示例
 

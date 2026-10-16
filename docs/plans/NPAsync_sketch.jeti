@@ -1,5 +1,5 @@
 // ⚠️ 已取代：本草案的 `@launch` + Foundation `NPAsync` 类方案未采纳；现行设计见
-// doc/async_nptask_plan.md（`async` 返回类型前修饰符 + 真类型 `NPTask<T>`）。原文按惯例保留。
+// docs/plans/async_nptask_plan.md（`async` 返回类型前修饰符 + 真类型 `NPTask<T>`）。原文按惯例保留。
 // NPAsync 设计草稿 —— 把 C++ 的 async/await 示例逐行直译成 jeti/objc
 //
 // 分工（对应 C++ 的两层）：

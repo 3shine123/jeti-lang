@@ -29,6 +29,7 @@ jeti-lang/
 │   ├── codegen/             # AST → C99
 │   ├── arc/ eh/ async/ defer/ pattern/ trace/               # lowering passes (pipeline order)
 │   ├── ownership/ preprocessor/ cpp/ symbol/ ast/ attrs/ cfg/ layout/
+│   ├── lsp/                 # jeti-lsp: LSP server (stdio JSON-RPC, diagnostics)
 │   └── jetic/               # CLI driver + pipeline (main.rs, pipeline.rs)
 ├── include/
 │   ├── jeti/                # runtime.h / runtime.c / runtime_freestanding.c
@@ -75,6 +76,9 @@ cargo test --workspace           # Rust unit tests
 ./tests/eh_diff/run_eh_diff.sh           # JETIC= must be an absolute path
 ./tests/strong_metadata/run_strong_metadata_test.sh
 ./tests/arc_intern/run_arc_intern_test.sh
+
+cargo build -p jeti-lsp          # → target/debug/jeti-lsp (LSP server over stdio)
+cargo test -p jeti-lsp           # server unit tests + a real subprocess stdio session
 
 ./tools/build-foundation-lib.sh  # build target/foundation/libjetifoundation.a once
 ```
@@ -155,4 +159,14 @@ cargo test --workspace           # Rust unit tests
   Do not add a parallel line-number/source-map mechanism: follow
   `docs/plans/source_locations_debug_lsp_plan.md` and keep diagnostics, generated-C mappings,
   LSP, and debugger support on the shared SourceSpan/SourceMap model.
+- **One position projection, at the boundary:** internal positions are 1-based
+  lines with **byte** columns; LSP needs 0-based UTF-16 code units. The crossing
+  happens exactly once, in `SourceSpan::to_lsp_range` (fed by
+  `Diagnostic::to_source_span` / `SourceMap::span_from_node`). Never re-derive a
+  column in a consumer, never mix the two unit systems, and never invent a range
+  for a node without a source origin (`end == 0` → zero-width, at the start).
+- **LSP diagnostics come from the compiler front end:** `Pipeline::analyze` is the
+  single entry (`crates/lsp` must not grow its own parser/checker chain); it runs
+  the same stage order as `transpile`, sharing `Pipeline::prepare`. New front-end
+  stages/fatality rules must be mirrored there, not duplicated.
 - **Destructive git ops need user approval.**

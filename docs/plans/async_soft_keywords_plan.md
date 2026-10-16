@@ -1,7 +1,7 @@
 # async/await 软关键字 + 异步代码块 设计定稿
 
 > 状态:**设计定稿(2026-10-10 定案),未实施**。
-> 本文是 `doc/async_nptask_plan.md` 的修正案:**取代**其三处定案——签名形态
+> 本文是 `docs/plans/async_nptask_plan.md` 的修正案:**取代**其三处定案——签名形态
 > (第四代 `(async NPTask<T>)`)、`@await` 拼写、以及"不引入 try await +
 > `@try` 跨 await 禁止"(§9:`try await` 引入,与 `@try` 共存,用户示例实证);
 > 其余定案全部继续沿用:lazy 任务、语句位自动驱动(hosted)、机制/调度分层、

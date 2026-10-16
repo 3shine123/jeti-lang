@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；阶段 5–6 仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `doc/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 的诊断 MVP 骨架已实施**（`crates/lsp` 的 `jeti-lsp`，语法/类型诊断走 `Pipeline::analyze`，位置经共享 SourceSpan 投影到 UTF-16）；阶段 5 与阶段 6 的补全/跳转等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -92,6 +92,26 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 调试器适配器消费 sidecar，把 Jeti 断点转换成可执行源码行/PC，把生成 C 栈帧和运行时 crash 位置映射回 Jeti。
 - source map 同时支持展开导入源与主 TU，并允许一条 Jeti 语句映射到多段 C。
 - 先支持 LLDB/GDB 的文件行断点与栈帧回映；单步、变量显示和 async await 逐步扩展。
+
+**进展（语法/类型诊断 MVP —— 骨架已落地）**
+
+- 新增 crate `crates/lsp`（`jeti-lsp`，lib + bin）。bin 只做 stdio 帧读写；协议状态机、诊断投影和 URI 处理都在 lib 里，可在无子进程的情况下测试。
+- 诊断来源是编译器自己的前端：`Pipeline::analyze`（`crates/jetic/src/pipeline.rs`）按 CLI 同样的顺序跑
+  preprocess → parse → bind → elaborate →（checked EH / `@defer` / legacy `@finally` / pattern / async desugar）→ checker，
+  返回结构化 `Diagnostic`，**不做 ARC、不做 codegen**。因此 LSP 报出的就是 CLI 会报的同一条诊断，没有第二套 linter。
+  与 `transpile` 共享 `Pipeline::prepare`（预处理 + 解析），前端装配只有一份。
+- 位置只跨界一次：`Diagnostic::to_source_span()` → `SourceSpan::to_lsp_range(text)`，即 byte 列 → UTF-16 code unit
+  的唯一投影点（§32）。诊断指向的文件决定用哪份文本做投影（导入头文件用头文件自己的列）。
+- 已支持的协议子集：`initialize` / `initialized` / `shutdown` / `exit`，`textDocument/didOpen|didChange|didClose`，
+  **full sync**（`textDocumentSync: 1`），服务端推送 `textDocument/publishDiagnostics`（错误=1，警告=2，note=3，`source: "jeti"`）。
+- 诊断宽度：parser 诊断本来就用 token 长度给出 `end_col`；checker 的 error/warning 录制点已从单 caret 升级到
+  `check_error_over` / `check_warning_over`（节点同一行且有更宽的 span 时用节点自身区间，否则退回单 caret，
+  绝不编造区间）。合成节点（`end == 0`）与多行节点保持单 caret。
+- 未做（后续阶段）：补全 / 悬停 / 跳转、incremental sync、workspace folders、ARC 专属诊断、
+  `-Werror` 之外的设置协商（`workspace/configuration`），以及**编辑器客户端接线**——`.vscode/extensions/jeti-lang-support`
+  目前只注册语法高亮，还没有 `vscode-languageclient` 客户端去 spawn `jeti-lsp`（需要 npm 依赖，另行决策）。
+- 回归：`cargo test -p jeti-lsp`（含真实子进程的 stdio 会话集成测试）；CLI 侧 `cargo test --workspace`、`./test_all.sh`、
+  `multi_tu` / `eh_matrix` / `eh_diff` 保持全绿（诊断文案形状不变，checker 注释宽度按 clang `~~~~^~~~~` 惯例加宽）。
 
 ## 回归矩阵
 

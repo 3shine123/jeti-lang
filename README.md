@@ -251,6 +251,28 @@ cargo test --workspace
 
 ---
 
+### Editor Support (LSP)
+
+`jeti-lsp` is a stdio language server that reports **syntax, type and async
+diagnostics** for the buffer you are editing. It runs the compiler's own front
+end (`Pipeline::analyze`), so the findings are exactly what the CLI reports —
+never a second, drifting linter — and every position crosses the protocol
+boundary through the shared `SourceSpan` model (1-based byte columns → LSP
+UTF-16 code units) exactly once.
+
+```bash
+cargo build -p jeti-lsp           # → target/debug/jeti-lsp
+jeti-lsp --include include        # speaks LSP over stdin/stdout
+```
+
+Scope today: the lifecycle handshake plus full-document sync
+(`didOpen`/`didChange`/`didClose` → `publishDiagnostics`). Completion, hover,
+go-to-definition, incremental sync and ARC-only diagnostics are not in yet. The
+bundled VS Code extension (`.vscode/extensions/jeti-lang-support`) registers
+syntax highlighting only; its language client is a separate step.
+
+---
+
 ## Language Features
 
 ### Class System
