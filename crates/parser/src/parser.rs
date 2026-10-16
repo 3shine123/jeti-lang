@@ -68,7 +68,8 @@ impl<'a> Parser<'a> {
             current,
             previous: Token {
                 kind: TokenKind::Eof, keyword: KeywordKind::None,
-                start: 0, length: 0, line: 0, column: 0, char_val: 0, int_suffix: 0,
+                start: 0, length: 0, line: 0, column: 0, end_line: 0, end_col: 0,
+                char_val: 0, int_suffix: 0,
             },
             has_error: false,
             error_count: 0,
@@ -231,6 +232,9 @@ impl<'a> Parser<'a> {
     fn remap_token_col(sm: &Option<jeti_cst::SourceMap>, token: &mut Token) {
         if let Some(sm) = sm {
             token.column = sm.adjust_col(token.line, token.column as u32).0 as usize;
+            // The end column needs the same correction; a macro that shifted
+            // this line shifts it for the token's end too.
+            token.end_col = sm.adjust_col(token.end_line, token.end_col as u32).0 as usize;
         }
     }
 
@@ -598,7 +602,10 @@ impl<'a> Parser<'a> {
                 return CstPattern::Const(Box::new(CstExpr {
                     kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0,
                     data: CstExprData::Integer(0),
-                }));
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+}));
             }
             // Dangling comparison: operator token starts the pattern; the
             // missing left operand is the switch subject (spliced at lowering).
@@ -636,7 +643,10 @@ impl<'a> Parser<'a> {
             None => CstPattern::Const(Box::new(CstExpr {
                 kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0,
                 data: CstExprData::Integer(0),
-            })),
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+})),
         }
     }
 
@@ -653,7 +663,10 @@ impl<'a> Parser<'a> {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: 17, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -687,10 +700,16 @@ impl<'a> Parser<'a> {
                 left: Box::new(CstExpr {
                     kind: CstExprKind::Ident, expr_type: None, line, col,
                     data: CstExprData::Ident(String::new()),
-                }),
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+}),
                 right: Box::new(rhs),
             },
-        })
+        
+            end_line: self.previous.end_line,
+            end_col: self.previous.end_col,
+})
     }
 
     /// Lookahead for the unambiguously-cast shape `( X * ... )`: from the
@@ -1345,9 +1364,11 @@ else if self.match_keyword(KeywordKind::Typeof) {
     fn mk_npnumber_send(&self, selector: &str, arg: CstExpr, line: usize, col: usize) -> CstExpr {
         CstExpr {
             kind: CstExprKind::MessageSend, expr_type: None, line, col,
+            end_line: line, end_col: col,
             data: CstExprData::Message {
                 receiver: Box::new(CstExpr {
                     kind: CstExprKind::Ident, expr_type: None, line, col,
+                    end_line: line, end_col: col,
                     data: CstExprData::Ident("NPNumber".into()),
                 }),
                 selector: selector.to_string(),
@@ -1355,8 +1376,8 @@ else if self.match_keyword(KeywordKind::Typeof) {
             },
         }
     }
-
     fn parse_primary(&mut self) -> Option<CstExpr> {
+        let (pri_line, pri_col) = (self.current.line, self.current.column);
         // Soft keyword `await` — suspension-point operator
         // (doc/async_soft_keywords_plan.md §3). Operator only in
         // expression-prefix position followed by a unary-start token
@@ -1389,9 +1410,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             let inner = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Await, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Await { inner: Box::new(inner) },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         // Async block literal (§5.1): `async ^…` — the flag sits BEFORE `^`,
         // and the block layout is exactly the plain block's (`^` Return-type?
@@ -1427,13 +1451,19 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     kind: CstExprKind::Ident, expr_type: None,
                     line, col,
                     data: CstExprData::Ident(text.clone()),
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
                 if let Some(qn) = self.parse_qualified_name_from(&ident_expr) {
                     return Some(CstExpr {
                         kind: CstExprKind::Ident, expr_type: None,
                         line, col,
                         data: CstExprData::Ident(qn),
-                    });
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+});
                 }
             }
             return Some(CstExpr {
@@ -1441,7 +1471,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 expr_type: None,
                 line, col,
                 data: CstExprData::Ident(text),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         if self.current.kind == TokenKind::Keyword {
@@ -1454,55 +1487,76 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 return Some(CstExpr {
                     kind: CstExprKind::Ident,
                     expr_type: None,
-                    line: self.previous.line,
-                    col: self.previous.column,
+line: pri_line,
+                    col: pri_col,
                     data: CstExprData::Ident(text),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+});
             }
         }
 
         if self.match_keyword(KeywordKind::Self_) {
             return Some(CstExpr {
                 kind: CstExprKind::Self_, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Ident("self".into()),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Super) {
             return Some(CstExpr {
                 kind: CstExprKind::Super, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Ident("super".into()),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Cmd) {
             return Some(CstExpr {
                 kind: CstExprKind::Cmd, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Ident("_cmd".into()),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Nil) {
             return Some(CstExpr {
                 kind: CstExprKind::Nil, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Ident("nil".into()),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Null) {
             return Some(CstExpr {
                 kind: CstExprKind::Null, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Ident("NULL".into()),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Yes) || self.match_keyword(KeywordKind::No) {
             let val = self.previous.keyword == KeywordKind::Yes;
             return Some(CstExpr {
                 kind: CstExprKind::Bool, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Bool(val),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Integer) {
             let text = self.previous_text();
@@ -1533,9 +1587,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             } else { None };
             return Some(CstExpr {
                 kind: CstExprKind::Integer, expr_type: expr_type.map(Box::new),
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Integer(val),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Float) {
             let raw = self.previous_text().to_string();
@@ -1544,17 +1601,23 @@ else if self.match_keyword(KeywordKind::Typeof) {
             if raw.ends_with(|c: char| c == 'i' || c == 'I' || c == 'j' || c == 'J') {
                 return Some(CstExpr {
                     kind: CstExprKind::Float, expr_type: None,
-                    line: self.previous.line, col: self.previous.column,
+                    line: pri_line, col: pri_col,
                     data: CstExprData::FloatRaw(raw),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+});
             }
             let text = raw.trim_end_matches(|c: char| c == 'f' || c == 'F');
             let val = text.parse::<f64>().unwrap_or(0.0);
             return Some(CstExpr {
                 kind: CstExprKind::Float, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Float(val),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::String) {
             let mut text = self.previous_text().to_string();
@@ -1566,17 +1629,23 @@ else if self.match_keyword(KeywordKind::Typeof) {
             }
             return Some(CstExpr {
                 kind: CstExprKind::String, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::String(text),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::AtString) {
             let text = self.previous_text().to_string();
             return Some(CstExpr {
                 kind: CstExprKind::AtString, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::AtString(text),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         // `@123` / `@1.5` — NPNumber boxing literal. Desugared to a normal
         // class-method send (`[NPNumber numberWithInt:123]` /
@@ -1594,12 +1663,18 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 CstExpr {
                     kind: CstExprKind::Float, expr_type: None, line, col,
                     data: CstExprData::Float(text.parse::<f64>().unwrap_or(0.0)),
-                }
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+}
             } else {
                 CstExpr {
                     kind: CstExprKind::Integer, expr_type: None, line, col,
                     data: CstExprData::Integer(text.parse::<i64>().unwrap_or_else(|_| text.parse::<u64>().unwrap_or(0) as i64)),
-                }
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+}
             };
             let selector = if is_float {
                 "numberWithDouble:"
@@ -1618,7 +1693,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
             let arg = CstExpr {
                 kind: CstExprKind::Integer, expr_type: None, line, col,
                 data: CstExprData::Integer(val),
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
             return Some(self.mk_npnumber_send("numberWithBool:", arg, line, col));
         }
         // `@'c'` — boxed character literal.
@@ -1629,7 +1707,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
             let arg = CstExpr {
                 kind: CstExprKind::Char, expr_type: None, line, col,
                 data: CstExprData::Char(val),
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
             return Some(self.mk_npnumber_send("numberWithChar:", arg, line, col));
         }
         // `@(expr)` — boxed expression. The parser has no types, so the
@@ -1643,14 +1724,20 @@ else if self.match_keyword(KeywordKind::Typeof) {
             return inner.map(|e| CstExpr {
                 kind: CstExprKind::Boxed, expr_type: None, line, col,
                 data: CstExprData::Boxed(Box::new(e)),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Char) {
             return Some(CstExpr {
                 kind: CstExprKind::Char, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Char(self.previous.char_val),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // @selector(...)
@@ -1696,9 +1783,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::RParen, "expected ')' after @selector");
             return Some(CstExpr {
                 kind: CstExprKind::Selector, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Selector(sel),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // @protocol(...)
@@ -1712,9 +1802,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::RParen, "expected ) after @protocol");
             return Some(CstExpr {
                 kind: CstExprKind::Protocol, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Protocol(proto),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // @encode(...)
@@ -1724,9 +1817,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::RParen, "expected ) after @encode");
             return Some(CstExpr {
                 kind: CstExprKind::Encode, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Encode(ty),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // ( expression ) or (type)cast
@@ -1780,11 +1876,15 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         let expr = self.parse_unary();
                         return Some(CstExpr {
                             kind: CstExprKind::Cast, expr_type: None,
-                            line: self.previous.line, col: self.previous.column,
+                            line: pri_line, col: pri_col,
                             data: CstExprData::Cast { target_type: ct, expr: Box::new(expr.unwrap_or_else(||
-                                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }
+                                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
                             ))},
-                        });
+                        
+                            end_line: self.previous.end_line,
+                            end_col: self.previous.end_col,
+});
                     }
                 }
             }
@@ -1792,9 +1892,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::RParen, "expected ')' after expression");
             return expr.map(|e| CstExpr {
                 kind: CstExprKind::Paren, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Paren(Box::new(e)),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // Block literal: ^(params) { ... }
@@ -1815,9 +1918,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::RBracket, "expected ']' after array literal");
             return Some(CstExpr {
                 kind: CstExprKind::ArrayLit, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::ArrayLit(elements),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.check(TokenKind::LBracket) {
             // In-message bare-`await` ban: record the depth at this message's
@@ -1864,9 +1970,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         };
                         receiver = Some(CstExpr {
                             kind: CstExprKind::Ident, expr_type: None,
-                            line: self.previous.line, col: self.previous.column,
+                            line: pri_line, col: pri_col,
                             data: CstExprData::Ident(rstr),
-                        });
+                        
+                            end_line: self.previous.end_line,
+                            end_col: self.previous.end_col,
+});
                     }
                 }
                 if receiver.is_none() {
@@ -1949,7 +2058,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         kind: CstExprKind::Ident, expr_type: None,
                         line: 0, col: 0,
                         data: CstExprData::Ident(part),
-                    });
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+});
                 }
             }
             // If no args were parsed, it's a zero-arg message
@@ -1968,22 +2080,29 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 }
                 return Some(CstExpr {
                     kind: CstExprKind::ArrayLit, expr_type: None,
-                    line: self.previous.line, col: self.previous.column,
+                    line: pri_line, col: pri_col,
                     data: CstExprData::ArrayLit(elems),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+});
             }
 
             return Some(CstExpr {
                 kind: CstExprKind::MessageSend, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::Message {
                     receiver: Box::new(receiver.unwrap_or_else(||
-                        CstExpr { kind: CstExprKind::Ident, expr_type: None, line: 0, col: 0, data: CstExprData::Ident("self".into()) }
+                        CstExpr { kind: CstExprKind::Ident, expr_type: None, line: 0, col: 0, data: CstExprData::Ident("self".into()) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
                     )),
                     selector,
                     args,
                 },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // @[...] array literal
@@ -2021,9 +2140,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::RBracket, "expected ']' after array literal");
             return Some(CstExpr {
                 kind: CstExprKind::ArrayLit, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::ArrayLit(elements),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         if self.match_token(TokenKind::LBrace) {
@@ -2065,15 +2187,21 @@ else if self.match_keyword(KeywordKind::Typeof) {
             if is_dict || keys.is_empty() {
                 return Some(CstExpr {
                     kind: CstExprKind::DictLit, expr_type: None,
-                    line: self.previous.line, col: self.previous.column,
+                    line: pri_line, col: pri_col,
                     data: CstExprData::DictLit { keys, values },
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+});
             }
             return Some(CstExpr {
                 kind: CstExprKind::ArrayLit, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: pri_line, col: pri_col,
                 data: CstExprData::ArrayLit(keys),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         // @(number) — @( produces LParen (for @), then LParen (for ()
@@ -2084,6 +2212,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_init_list_or_dict(&mut self) -> Option<CstExpr> {
+        let (il_line, il_col) = (self.previous.line, self.previous.column);
         let mut elements = Vec::new();
         while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
             // C99 designated initializer: `.field = e` / `[i] = e` / `[2].y = e`.
@@ -2102,9 +2231,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
         self.consume(TokenKind::RBrace, "expected '}'");
         Some(CstExpr {
             kind: CstExprKind::InitList, expr_type: None,
-            line: self.previous.line, col: self.previous.column,
+            line: il_line, col: il_col,
             data: CstExprData::InitList(elements),
-        })
+        
+            end_line: self.previous.end_line,
+            end_col: self.previous.end_col,
+})
     }
 
     /// Parse one C99 designated initializer entry: a chain of `.field` /
@@ -2146,7 +2278,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 designators,
                 expr: Box::new(expr),
             },
-        })
+        
+            end_line: self.previous.end_line,
+            end_col: self.previous.end_col,
+})
     }
 
     /// Async block literal (§5.1): `async` already consumed. Accepted form:
@@ -2202,6 +2337,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
         return_type: Option<Box<CstType>>,
         is_async: bool,
     ) -> Option<CstExpr> {
+        let (bl_line, bl_col) = (self.previous.line, self.previous.column);
         let mut params: Option<Box<CstParam>> = None;
         let mut param_count = 0;
 
@@ -2322,7 +2458,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
             let body = self.parse_compound_statement();
             return Some(CstExpr {
                 kind: CstExprKind::Block, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: bl_line, col: bl_col,
                 data: CstExprData::Block {
                     params,
                     param_count,
@@ -2330,12 +2466,15 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     body: body.map(Box::new),
                     is_async,
                 },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
 
         Some(CstExpr {
             kind: CstExprKind::Block, expr_type: None,
-            line: self.previous.line, col: self.previous.column,
+            line: bl_line, col: bl_col,
             data: CstExprData::Block {
                 params,
                 param_count,
@@ -2343,10 +2482,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 body: None,
                 is_async,
             },
-        })
+        
+            end_line: self.previous.end_line,
+            end_col: self.previous.end_col,
+})
     }
 
     fn parse_postfix(&mut self) -> Option<CstExpr> {
+        let (pf_line, pf_col) = (self.current.line, self.current.column);
         let mut expr = self.parse_primary()?;
         loop {
             // Namespace qualifier: expr::name (e.g. Engine::Core::WeaponSystem)
@@ -2365,7 +2508,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         kind: CstExprKind::Ident, expr_type: None,
                         line: expr.line, col: expr.col,
                         data: CstExprData::Ident(qualified),
-                    };
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+};
                     continue; // Check for more :: qualifiers
                 } else {
                     break;
@@ -2384,7 +2530,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             object: Box::new(expr),
                             property: prop,
                         },
-                    };
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+};
                 } else {
                     break;
                 }
@@ -2399,10 +2548,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     data: CstExprData::Subscript {
                         object: Box::new(expr),
                         key: Box::new(key.unwrap_or_else(||
-                            CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }
+                            CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
                         )),
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
             }
             // Arrow access: expr->property
             else if self.match_token(TokenKind::Arrow) {
@@ -2417,7 +2570,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             object: Box::new(expr),
                             property: prop,
                         },
-                    };
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+};
                 } else {
                     break;
                 }
@@ -2432,9 +2588,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         if let Some(ty) = self.parse_type_full() {
                             args.push(CstExpr {
                                 kind: CstExprKind::TypeLiteral, expr_type: None,
-                                line: self.previous.line, col: self.previous.column,
+                                line: pf_line, col: pf_col,
                                 data: CstExprData::TypeLiteral(ty),
-                            });
+                            
+                                end_line: self.previous.end_line,
+                                end_col: self.previous.end_col,
+});
                             if !self.match_token(TokenKind::Comma) { break; }
                             continue;
                         }
@@ -2452,7 +2611,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         callee: Box::new(expr),
                         args,
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
             }
             // Postfix ++/--
             else if self.match_token(TokenKind::Incr) {
@@ -2464,7 +2626,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         operand: Box::new(expr),
                         is_postfix: true,
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
             }
             else if self.match_token(TokenKind::Decr) {
                 expr = CstExpr {
@@ -2475,7 +2640,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         operand: Box::new(expr),
                         is_postfix: true,
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
             } else {
                 break;
             }
@@ -2484,69 +2652,94 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_unary(&mut self) -> Option<CstExpr> {
+        let (un_line, un_col) = (self.current.line, self.current.column);
         if self.match_token(TokenKind::Incr) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 1, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Decr) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 2, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Star) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 3, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Ampersand) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 4, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Minus) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 5, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Plus) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 6, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Tilde) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 7, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         if self.match_token(TokenKind::Exclam) {
             let operand = self.parse_unary()?;
             return Some(CstExpr {
                 kind: CstExprKind::Unary, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Unary { op: 8, operand: Box::new(operand), is_postfix: false },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         // sizeof / sizeof(type)
         if self.match_keyword(KeywordKind::Sizeof) {
@@ -2583,9 +2776,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         if is_real_type {
                             return Some(CstExpr {
                                 kind: CstExprKind::Sizeof, expr_type: None,
-                                line: self.previous.line, col: self.previous.column,
+                                line: un_line, col: un_col,
                                 data: CstExprData::Sizeof { type_expr: ty, expr: None },
-                            });
+                            
+                                end_line: self.previous.end_line,
+                                end_col: self.previous.end_col,
+});
                         }
                         // Simple identifier that is not a known type, or a
                         // compound operand like `a[0]` / `s.field` — parse_type_full
@@ -2603,18 +2799,24 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 self.consume(TokenKind::RParen, "expected ')' after sizeof");
                 return expr.map(|e| CstExpr {
                     kind: CstExprKind::Sizeof, expr_type: None,
-                    line: self.previous.line, col: self.previous.column,
+                    line: un_line, col: un_col,
                     data: CstExprData::Sizeof { type_expr: CstType::new(TypePrim::Void), expr: Some(Box::new(e)) },
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+});
             }
             // Paren-less form: `sizeof expr` (C99 §6.5.3). The paren path above
             // already returned; here the operand is a unary expression.
             let operand = self.parse_unary();
             return operand.map(|e| CstExpr {
                 kind: CstExprKind::Sizeof, expr_type: None,
-                line: self.previous.line, col: self.previous.column,
+                line: un_line, col: un_col,
                 data: CstExprData::Sizeof { type_expr: CstType::new(TypePrim::Void), expr: Some(Box::new(e)) },
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         // __alignof__ / __alignof(type)
         if self.match_keyword(KeywordKind::Alignof) {
@@ -2623,9 +2825,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     self.consume(TokenKind::RParen, "expected ')' after alignof");
                     return Some(CstExpr {
                         kind: CstExprKind::Alignof, expr_type: None,
-                        line: self.previous.line, col: self.previous.column,
+                        line: un_line, col: un_col,
                         data: CstExprData::Alignof(ty),
-                    });
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+});
                 }
             }
         }
@@ -2647,7 +2852,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: op_val, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2666,7 +2874,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: op_val, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2685,7 +2896,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: op_val, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2706,7 +2920,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: op_val, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2725,7 +2942,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: op_val, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2738,7 +2958,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: 14, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2751,7 +2974,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: 15, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2764,7 +2990,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: 16, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2777,7 +3006,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: 17, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2790,7 +3022,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
                 data: CstExprData::Binary { op: 18, left: Box::new(expr), right: Box::new(right) },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2809,7 +3044,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     true_expr: Box::new(true_expr),
                     false_expr: Box::new(false_expr),
                 },
-            };
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+};
         }
         Some(expr)
     }
@@ -2830,7 +3068,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         kind: CstExprKind::Assign, expr_type: None,
                         line: expr.line, col: expr.col,
                         data: CstExprData::Assign { target: Box::new(expr), value: Box::new(value) },
-                    });
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+});
                 }
                 let op_val = match op {
                     TokenKind::PlusAssign => 100, TokenKind::MinusAssign => 101,
@@ -2844,7 +3085,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     kind: CstExprKind::Binary, expr_type: None,
                     line: expr.line, col: expr.col,
                     data: CstExprData::Binary { op: op_val, left: Box::new(expr), right: Box::new(value) },
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+});
             }
         }
         Some(expr)
@@ -2864,7 +3108,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstExprKind::Comma, expr_type: None,
                 line, col,
                 data: CstExprData::Comma(exprs),
-            });
+            
+                end_line: self.previous.end_line,
+                end_col: self.previous.end_col,
+});
         }
         Some(expr)
     }
@@ -2878,7 +3125,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
             kind: CstStmtKind::Expr,
             line: e.line, column: e.col,
             data: CstStmtData::Expr(e),
-        })
+        
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
+})
     }
 
     // ─── Inline assembly ────────────────────────────────────────────────────
@@ -2892,7 +3142,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
             kind: CstStmtKind::Asm,
             line, column,
             data: CstStmtData::Asm { is_volatile, is_goto, template, outputs, inputs, clobbers, labels },
-        })
+        
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
+})
     }
 
     fn parse_asm_body(&mut self) -> Option<(bool, bool, String, Vec<CstAsmOperand>, Vec<CstAsmOperand>, Vec<String>, Vec<String>)> {
@@ -3009,6 +3262,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_compound_statement(&mut self) -> Option<CstStmt> {
+        // Capture the `{` position: the node is built after the closing brace,
+        // where `self.previous` is `}`, so reading the start from `previous`
+        // (as this used to) pointed the whole block at its own last line.
+        let (start_line, start_col) = (self.current.line, self.current.column);
         self.consume(TokenKind::LBrace, "expected '{'");
         let mut stmts = Vec::new();
         while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
@@ -3040,16 +3297,20 @@ else if self.match_keyword(KeywordKind::Typeof) {
         self.consume(TokenKind::RBrace, "expected '}'");
         Some(CstStmt {
             kind: CstStmtKind::Compound,
-            line: self.previous.line, column: self.previous.column,
+            line: start_line, column: start_col,
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
             data: CstStmtData::Compound(stmts),
         })
     }
 
     fn parse_statement(&mut self) -> Option<CstStmt> {
+        let (stmt_line, stmt_col) = (self.current.line, self.current.column);
         // `#pragma mark ...` pass-through — kept at its source position.
         if self.current.kind == TokenKind::Keyword && self.current.keyword == KeywordKind::Pragma {
             if let Some(d) = self.parse_raw_pragma_decl() {
-                return Some(CstStmt { kind: CstStmtKind::Decl, line: d.line, column: d.column, data: CstStmtData::Decl(d) });
+                return Some(CstStmt { kind: CstStmtKind::Decl, line: d.line, column: d.column, data: CstStmtData::Decl(d) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+});
             }
         }
         // Label: `ident:` at statement start (used by asm goto and plain C goto)
@@ -3067,7 +3328,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     kind: CstStmtKind::Label,
                     line, column,
                     data: CstStmtData::Label(label),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
         }
         // Jump statements
@@ -3084,7 +3348,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstStmtKind::Return,
                 line: kw_line, column: kw_col,
                 data: CstStmtData::Return(expr.map(Box::new)),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Break) {
             let (kw_line, kw_col) = (self.previous.line, self.previous.column);
@@ -3093,7 +3360,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstStmtKind::Break,
                 line: kw_line, column: kw_col,
                 data: CstStmtData::Return(None),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Continue) {
             let (kw_line, kw_col) = (self.previous.line, self.previous.column);
@@ -3102,7 +3372,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 kind: CstStmtKind::Continue,
                 line: kw_line, column: kw_col,
                 data: CstStmtData::Return(None),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Goto) {
             let label = if self.current.kind == TokenKind::Identifier {
@@ -3113,9 +3386,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::Semicolon, "expected ';' after goto");
             return Some(CstStmt {
                 kind: CstStmtKind::Goto,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Goto(label),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::Asm) {
             return self.parse_asm_statement();
@@ -3127,9 +3403,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
             self.consume(TokenKind::Semicolon, "expected ';' after @throw");
             return Some(CstStmt {
                 kind: CstStmtKind::Throw,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Throw(expr.map(Box::new)),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
         // `@throws` in statement position is a misuse — the exception
         // annotation is a declaration tail (`- (void)f throws(...);`), not a
@@ -3155,56 +3434,71 @@ else if self.match_keyword(KeywordKind::Typeof) {
         if self.match_keyword(KeywordKind::If) {
             self.consume(TokenKind::LParen, "expected '(' after if");
             let cond = self.parse_expression().unwrap_or_else(||
-                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }
+                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
             );
             self.consume(TokenKind::RParen, "expected ')' after if condition");
             let then_branch = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             let else_branch = if self.match_keyword(KeywordKind::Else) {
                 self.parse_statement().map(Box::new)
             } else { None };
             return Some(CstStmt {
                 kind: CstStmtKind::If,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::If { cond: Box::new(cond), then_branch, else_branch },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // While
         if self.match_keyword(KeywordKind::While) {
             self.consume(TokenKind::LParen, "expected '(' after while");
             let cond = self.parse_expression().unwrap_or_else(||
-                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }
+                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
             );
             self.consume(TokenKind::RParen, "expected ')' after while condition");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::While,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::While { cond: Box::new(cond), body },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // Do-while
         if self.match_keyword(KeywordKind::Do) {
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             self.consume_keyword(KeywordKind::While, "expected 'while' after do body");
             self.consume(TokenKind::LParen, "expected '(' after while");
             let cond = self.parse_expression().unwrap_or_else(||
-                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }
+                CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
             );
             self.consume(TokenKind::RParen, "expected ')' after while condition");
             self.consume(TokenKind::Semicolon, "expected ';' after do-while");
             return Some(CstStmt {
                 kind: CstStmtKind::Do,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Do { body, cond: Box::new(cond) },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // For / For-in
@@ -3239,11 +3533,13 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 let coll_line = self.previous.line;
                 let coll_col = self.previous.column;
                 let collection = self.parse_expression().unwrap_or_else(|| {
-                    CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }
+                    CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}
                 });
                 self.consume(TokenKind::RParen, "expected ')' after for-in collection");
                 let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                    Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                    Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
                 );
                 // Desugar:
                 // { T *__jeti_fi = <coll> (borrowed, not owned);
@@ -3256,7 +3552,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 let mk_ident = |name: &str, line: usize, col: usize| CstExpr {
                     kind: CstExprKind::Ident, expr_type: None, line, col,
                     data: CstExprData::Ident(name.to_string()),
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
                 let mk_msg = |recv: CstExpr, sel: &str, arg: Option<CstExpr>, line: usize, col: usize| CstExpr {
                     kind: CstExprKind::MessageSend, expr_type: None, line, col,
                     data: CstExprData::Message {
@@ -3264,7 +3563,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         selector: sel.to_string(),
                         args: arg.into_iter().collect(),
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
                 let coll_ident = || mk_ident(fi, coll_line, coll_col);
                 // { id __jeti_fi = <collection>;    (borrowed alias — no ARC;
                 //   `id` already renders as `NPObject *` — do NOT set
@@ -3290,8 +3592,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             is_const: false, is_block_qual: false, is_weak: false,
                         },
                         attributes: Vec::new(),
-                    }),
-                };
+                    
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
+}),
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+};
                 // __jeti_fi_i < [__jeti_fi count]
                 let cond = CstExpr {
                     kind: CstExprKind::Binary, expr_type: None, line: coll_line, col: coll_col,
@@ -3300,7 +3608,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         left: Box::new(mk_ident("__jeti_fi_i", coll_line, coll_col)),
                         right: Box::new(mk_msg(coll_ident(), "count", None, coll_line, coll_col)),
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
                 // __jeti_fi_i++
                 let incr = CstExpr {
                     kind: CstExprKind::Unary, expr_type: None, line: coll_line, col: coll_col,
@@ -3309,7 +3620,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         operand: Box::new(mk_ident("__jeti_fi_i", coll_line, coll_col)),
                         is_postfix: true,
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+};
                 // T var = [__jeti_fi objectAtIndex:__jeti_fi_i]
                 let elem_decl = CstStmt {
                     kind: CstStmtKind::Decl, line: coll_line, column: coll_col,
@@ -3329,8 +3643,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             is_const: false, is_block_qual: false, is_weak: false,
                         },
                         attributes: Vec::new(),
-                    }),
-                };
+                    
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
+}),
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+};
                 // elem_decl + body → loop body (elem decl first, then user body)
                 let loop_body_stmts = match body.data {
                     CstStmtData::Compound(stmts) => {
@@ -3344,7 +3664,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 let loop_body = Box::new(CstStmt {
                     kind: CstStmtKind::Compound, line: coll_line, column: coll_col,
                     data: CstStmtData::Compound(loop_body_stmts),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
                 // size_t __jeti_fi_i = 0  (for-init counter declaration)
                 let counter_init = CstStmt {
                     kind: CstStmtKind::Decl, line: coll_line, column: coll_col,
@@ -3363,13 +3686,22 @@ else if self.match_keyword(KeywordKind::Typeof) {
                                 kind: CstExprKind::Integer, expr_type: None,
                                 line: coll_line, col: coll_col,
                                 data: CstExprData::Integer(0),
-                            })),
+                            
+                                end_line: self.previous.end_line,
+                                end_col: self.previous.end_col,
+})),
                             is_static: false, is_extern: false,
                             is_const: false, is_block_qual: false, is_weak: false,
                         },
                         attributes: Vec::new(),
-                    }),
-                };
+                    
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
+}),
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+};
                 let for_stmt = CstStmt {
                     kind: CstStmtKind::For, line: coll_line, column: coll_col,
                     data: CstStmtData::For {
@@ -3378,11 +3710,17 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         incr: Some(Box::new(incr)),
                         body: loop_body,
                     },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+};
                 return Some(CstStmt {
                     kind: CstStmtKind::Compound, line: coll_line, column: coll_col,
                     data: CstStmtData::Compound(vec![coll_decl, for_stmt]),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
             let init = if !self.check(TokenKind::Semicolon) {
                 // Check for decl: type name = expr;  (uses the same declaration-start
@@ -3394,7 +3732,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         kind: CstStmtKind::Decl,
                         line: d.line, column: d.column,
                         data: CstStmtData::Decl(d),
-                    })
+                    
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
+})
                 } else {
                     self.parse_expression_statement()
                 }
@@ -3419,18 +3760,22 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 None
             };
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::For,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::For {
                     init: init.map(Box::new),
                     cond: cond.map(Box::new),
                     incr: incr.map(Box::new),
                     body,
                 },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // For-in dead stub removed: `for (T x in coll)` is desugared directly
@@ -3440,11 +3785,13 @@ else if self.match_keyword(KeywordKind::Typeof) {
         if self.match_keyword(KeywordKind::Switch) {
             self.consume(TokenKind::LParen, "expected '(' after switch");
             let expr = self.parse_expression().map(Box::new).unwrap_or_else(||
-                Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) })
+                Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+})
             );
             self.consume(TokenKind::RParen, "expected ')' after switch expr");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             // Pattern routing: if the body contains any pattern arm
             // (condition / type binding / boxed-literal / when guard), the
@@ -3479,20 +3826,26 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 }
                 return Some(CstStmt {
                     kind: CstStmtKind::Switch,
-                    line: self.previous.line, column: self.previous.column,
+                    line: stmt_line, column: stmt_col,
                     data: CstStmtData::SwitchPat {
                         expr,
                         arms: collected.arms,
                         has_default: collected.has_default,
                         default_body: collected.default_body,
                     },
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
             return Some(CstStmt {
                 kind: CstStmtKind::Switch,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Switch { expr, body },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // Case
@@ -3531,20 +3884,27 @@ else if self.match_keyword(KeywordKind::Typeof) {
             }
             self.consume(TokenKind::Colon, "expected ':' after case pattern");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             if let CstPattern::Const(first) = pattern {
                 let mut node = CstStmt {
                     kind: CstStmtKind::Case,
-                    line: self.previous.line, column: self.previous.column,
+                    line: stmt_line, column: stmt_col,
                     data: CstStmtData::Case { value: first, body },
-                };
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+};
                 while let Some(v) = extra.pop() {
                     node = CstStmt {
                         kind: CstStmtKind::Case,
                         line: node.line, column: node.column,
                         data: CstStmtData::Case { value: v, body: Box::new(node) },
-                    };
+                    
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
+};
                 }
                 return Some(node);
             }
@@ -3557,37 +3917,46 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 pattern,
                 guard,
                 body,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
             };
             return Some(CstStmt {
                 kind: CstStmtKind::Switch,
                 line: arm.line, column: arm.column,
                 data: CstStmtData::SwitchPat {
-                    expr: Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) }),
+                    expr: Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+}),
                     arms: vec![arm],
                     has_default: false,
                     default_body: None,
                 },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // Default
         if self.match_keyword(KeywordKind::Default) {
             self.consume(TokenKind::Colon, "expected ':' after default");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::Default,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Default(body),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // @try/@catch/@finally
         if self.match_keyword(KeywordKind::AtTry) {
             let try_block = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             let mut catches = Vec::new();
             while self.match_keyword(KeywordKind::AtCatch) {
@@ -3603,51 +3972,67 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     self.consume(TokenKind::RParen, "expected ')' after @catch param");
                 }
                 let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                    Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                    Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
                 );
                 catches.push(CstStmt {
                     kind: CstStmtKind::Catch,
-                    line: self.previous.line, column: self.previous.column,
+                    line: stmt_line, column: stmt_col,
                     data: CstStmtData::Catch { param, body },
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
             let finally_block = if self.match_keyword(KeywordKind::AtFinally) {
                 self.parse_statement().map(Box::new)
             } else { None };
             return Some(CstStmt {
                 kind: CstStmtKind::Try,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Try { try_block, catches, finally_block },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // @synchronized
         if self.match_keyword(KeywordKind::AtSynchronized) {
             self.consume(TokenKind::LParen, "expected '(' after @synchronized");
             let lock = self.parse_expression().map(Box::new).unwrap_or_else(||
-                Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) })
+                Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
+})
             );
             self.consume(TokenKind::RParen, "expected ')' after @synchronized lock");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::Synchronized,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Synchronized { lock, body },
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // @autoreleasepool
         if self.match_keyword(KeywordKind::AtAutoreleasepool) {
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::Autoreleasepool,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Autoreleasepool(body),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // @defer — scope-exit execution. Opaque wrapper here; crates/defer
@@ -3655,23 +4040,31 @@ else if self.match_keyword(KeywordKind::Typeof) {
         // enclosing block before ARC runs. See AGENTS.md `@defer` section.
         if self.match_keyword(KeywordKind::AtDefer) {
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::Defer,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::Defer(body),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
         if self.match_keyword(KeywordKind::AtNoArc) {
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
-                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) })
+                Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
+})
             );
             return Some(CstStmt {
                 kind: CstStmtKind::NoArc,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
                 data: CstStmtData::NoArc(body),
-            });
+            
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
+});
         }
 
         // Label: identifier : (not ::)
@@ -3684,16 +4077,21 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 self.advance(); // consume :
                 return Some(CstStmt {
                     kind: CstStmtKind::Label,
-                    line: self.previous.line, column: self.previous.column,
+                    line: stmt_line, column: stmt_col,
                     data: CstStmtData::Label(name),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
             // Not a label, rewind
             self.current = Token {
                 kind: TokenKind::Identifier,
                 keyword: KeywordKind::None,
                 start: saved, length: name.len() as usize,
-                line: self.previous.line, column: self.previous.column,
+                line: stmt_line, column: stmt_col,
+                end_line: stmt_line,
+                end_col: stmt_col + name.len(),
                 char_val: 0, int_suffix: 0,
             };
         }
@@ -3714,7 +4112,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     kind: CstStmtKind::Decl,
                     line: d.line, column: d.column,
                     data: CstStmtData::Decl(d),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
         }
 
@@ -3947,7 +4348,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
         }
     }
 
-    fn parse_function_decl_or_definition(&mut self, return_type: CstType, name: String, prefix_attrs: Vec<String>, top_level_async: bool) -> Option<CstDecl> {
+    fn parse_function_decl_or_definition(&mut self, return_type: CstType, name: String, prefix_attrs: Vec<String>, top_level_async: bool, start: (usize, usize)) -> Option<CstDecl> {
         let mut params = Vec::new();
         let mut has_variadic = false;
 
@@ -4045,7 +4446,8 @@ else if self.match_keyword(KeywordKind::Typeof) {
 
         Some(CstDecl {
             kind: CstDeclKind::Function,
-            line: self.previous.line, column: self.previous.column,
+            line: start.0, column: start.1,
+            end_line: self.previous.end_line, end_column: self.previous.end_col,
             name: Some(name),
             next: None,
             data: CstDeclData::Function {
@@ -4084,7 +4486,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
             next: None,
             data: CstDeclData::RawLine(text),
             attributes: Vec::new(),
-        })
+        
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
+})
     }
 
     fn parse_declaration(&mut self) -> Option<CstDecl> {
@@ -4134,7 +4539,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         }
                     ),
                     attributes: Vec::new(),
-                });
+                
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
+});
             }
         }
         // Capture leading `__attribute__((...))` spellings before parsing the
@@ -4215,6 +4623,11 @@ else if self.match_keyword(KeywordKind::Typeof) {
     }
 
     fn parse_declaration_inner(&mut self) -> Option<CstDecl> {
+        // The declaration's real start: this function is entered on the
+        // declaration's first token (usually the type), but the node literals
+        // below are built after the declarator (and, for functions, the whole
+        // body), so `self.previous` there is the *last* token, not the first.
+        let (decl_line, decl_col) = (self.current.line, self.current.column);
         // Top-level function-position `async` modifier (§4.2): identifier
         // `async` followed by a type start = `async T f(...)` / `async void
         // f(...)`; followed by `^` = async block literal, left to expression
@@ -4244,6 +4657,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 next: None,
                 data: CstDeclData::Asm { is_volatile, is_goto, template, outputs, inputs, clobbers, labels },
                             attributes: Vec::new(),
+
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
 });
         }
 
@@ -4269,7 +4685,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
         if self.match_keyword(KeywordKind::Typedef) {
             // `typedef __attribute__((aligned(8))) unsigned long w;`
             let td_attrs = self.parse_attributes();
-            let mut td = self.parse_typedef()?;
+            let mut td = self.parse_typedef((decl_line, decl_col))?;
             td.attributes.splice(0..0, td_attrs);
             return Some(td);
         }
@@ -4287,22 +4703,28 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     self.consume(TokenKind::Semicolon, "expected ';' after struct");
                     return Some(CstDecl {
                         kind: CstDeclKind::Struct,
-                        line: self.previous.line, column: self.previous.column,
+                        line: decl_line, column: decl_col,
                         name: Some(name),
                         next: None,
                         data: CstDeclData::Aggregate { fields, is_union },
                                             attributes: body_attrs,
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 });
                 }
                 if self.check(TokenKind::Semicolon) {
                     self.advance();
                     return Some(CstDecl {
                         kind: CstDeclKind::Struct,
-                        line: self.previous.line, column: self.previous.column,
+                        line: decl_line, column: decl_col,
                         name: Some(name),
                         next: None,
                         data: CstDeclData::Aggregate { fields: Vec::new(), is_union },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 });
                 }
                 // struct Name var = ... — fall through to regular declaration parsing
@@ -4342,12 +4764,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 let name = self.parse_qualified_name_with_keywords()?;
                 // Function or variable?
                 if self.check(TokenKind::LParen) {
-                    return self.parse_function_decl_or_definition(struct_type, name, Vec::new(), top_level_async);
+                    return self.parse_function_decl_or_definition(struct_type, name, Vec::new(), top_level_async, (decl_line, decl_col));
                 } else {
                     // Variable declaration
                     let mut var = CstDecl {
                         kind: CstDeclKind::Variable,
-                        line: self.previous.line, column: self.previous.column,
+                        line: decl_line, column: decl_col,
                         name: Some(name.clone()),
                         next: None,
                         data: CstDeclData::Variable {
@@ -4360,6 +4782,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             is_weak: qualifiers.4,
                         },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 };
                     // Array suffix
                     if self.match_token(TokenKind::LBracket) {
@@ -4383,6 +4808,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             *initializer = init.map(Box::new);
                         }
                     }
+                    // Built before the initializer, so its construction-time end
+                    // snapshot under-reports the extent; stamp the real end now.
+                    var.end_line = self.previous.end_line;
+                    var.end_column = self.previous.end_col;
                     // Comma-separated declarations
                     if self.match_token(TokenKind::Comma) {
                         let mut head = Box::new(var);
@@ -4406,12 +4835,17 @@ else if self.match_keyword(KeywordKind::Typeof) {
                                     is_weak: qualifiers.4,
                                 },
                                                             attributes: Vec::new(),
+
+                                end_line: self.previous.end_line,
+                                end_column: self.previous.end_col,
 };
                             if self.match_token(TokenKind::Assign) {
                                 if let CstDeclData::Variable { ref mut initializer, .. } = next_var.data {
                                     *initializer = self.parse_assignment().map(Box::new);
                                 }
                             }
+                            next_var.end_line = self.previous.end_line;
+                            next_var.end_column = self.previous.end_col;
                             tail.next = Some(Box::new(next_var));
                             tail = tail.next.as_mut().unwrap();
                             if !self.match_token(TokenKind::Comma) { break; }
@@ -4429,11 +4863,14 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 self.consume(TokenKind::Semicolon, "expected ';' after struct");
                 return Some(CstDecl {
                     kind: CstDeclKind::Struct,
-                    line: self.previous.line, column: self.previous.column,
+                    line: decl_line, column: decl_col,
                     name: None,
                     next: None,
                     data: CstDeclData::Aggregate { fields, is_union },
                                     attributes: body_attrs,
+
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
 });
             }
             return None;
@@ -4478,12 +4915,12 @@ else if self.match_keyword(KeywordKind::Typeof) {
 
         // Function or variable?
         if self.check(TokenKind::LParen) {
-            self.parse_function_decl_or_definition(return_type, name, mid_attrs, top_level_async)
+            self.parse_function_decl_or_definition(return_type, name, mid_attrs, top_level_async, (decl_line, decl_col))
         } else {
             // Variable declaration
             let mut var = CstDecl {
                 kind: CstDeclKind::Variable,
-                line: self.previous.line, column: self.previous.column,
+                line: decl_line, column: decl_col,
                 name: Some(name.clone()),
                 next: None,
                 data: CstDeclData::Variable {
@@ -4496,6 +4933,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     is_weak: qualifiers.4,
                 },
                             attributes: mid_attrs.clone(),
+
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
 };
 
             // Array suffix: name[size]
@@ -4524,6 +4964,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     *initializer = init.map(Box::new);
                 }
             }
+            // Built before the initializer — stamp the real end (see above).
+            var.end_line = self.previous.end_line;
+            var.end_column = self.previous.end_col;
 
             // Comma-separated declarations
             if self.match_token(TokenKind::Comma) {
@@ -4571,6 +5014,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             is_weak: qualifiers.4,
                         },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 };
                     // Array suffix on this declarator: `T a[2], b[3];`
                     if self.match_token(TokenKind::LBracket) {
@@ -4600,6 +5046,8 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             *initializer = self.parse_assignment().map(Box::new);
                         }
                     }
+                    next_var.end_line = self.previous.end_line;
+                    next_var.end_column = self.previous.end_col;
                     tail.next = Some(Box::new(next_var));
                     tail = tail.next.as_mut().unwrap();
                     if !self.match_token(TokenKind::Comma) { break; }
@@ -4630,7 +5078,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
         (is_static, is_extern, is_const, is_block, is_weak)
     }
 
-    fn parse_typedef(&mut self) -> Option<CstDecl> {
+    fn parse_typedef(&mut self, start: (usize, usize)) -> Option<CstDecl> {
         // `typedef enum {...} Alias;` — delegate to parse_enum (which handles
         // optional tag name + brace body + members), then take trailing alias.
         // The struct/union branch below only handles Struct/Union, so without
@@ -4676,7 +5124,8 @@ if self.current.kind == TokenKind::Identifier {
                     self.add_type_name(&alias);
                         return Some(CstDecl {
                             kind: CstDeclKind::Typedef,
-                            line: self.previous.line, column: self.previous.column,
+                            line: start.0, column: start.1,
+                            end_line: self.previous.end_line, end_column: self.previous.end_col,
                             name: Some(alias),
                             next: None,
                             data: CstDeclData::Typedef {
@@ -4693,11 +5142,14 @@ if self.current.kind == TokenKind::Identifier {
                     self.consume(TokenKind::Semicolon, "expected ; after struct");
                     return Some(CstDecl {
                         kind: CstDeclKind::Struct,
-                        line: self.previous.line, column: self.previous.column,
+                        line: start.0, column: start.1,
                         name: Some(name),
                         next: None,
                         data: CstDeclData::Aggregate { fields: struct_decl, is_union },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 });
                 }
                 // `typedef struct Tag Alias;` — tag reference with an alias
@@ -4711,7 +5163,8 @@ if self.current.kind == TokenKind::Identifier {
                     self.add_type_name(&alias);
                     return Some(CstDecl {
                         kind: CstDeclKind::Typedef,
-                        line: self.previous.line, column: self.previous.column,
+                        line: start.0, column: start.1,
+                        end_line: self.previous.end_line, end_column: self.previous.end_col,
                         name: Some(alias),
                         next: None,
                         data: CstDeclData::Typedef {
@@ -4729,11 +5182,14 @@ if self.current.kind == TokenKind::Identifier {
                 self.consume(TokenKind::Semicolon, "expected ; after struct name");
                 return Some(CstDecl {
                     kind: CstDeclKind::Struct,
-                    line: self.previous.line, column: self.previous.column,
+                    line: start.0, column: start.1,
                     name: Some(name),
                     next: None,
                     data: CstDeclData::Aggregate { fields: Vec::new(), is_union },
                                     attributes: Vec::new(),
+
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
 });
             }
             // Anonymous struct/union
@@ -4746,7 +5202,7 @@ if self.current.kind == TokenKind::Identifier {
                     self.add_type_name(&alias);
                     return Some(CstDecl {
                         kind: CstDeclKind::Typedef,
-                        line: self.previous.line, column: self.previous.column,
+                        line: start.0, column: start.1,
                         name: Some(alias),
                         next: None,
                         data: CstDeclData::Typedef {
@@ -4754,16 +5210,22 @@ if self.current.kind == TokenKind::Identifier {
                             struct_fields: fields,
                         },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 });
                 }
                 self.consume(TokenKind::Semicolon, "expected ; after struct");
                 return Some(CstDecl {
                     kind: CstDeclKind::Struct,
-                    line: self.previous.line, column: self.previous.column,
+                    line: start.0, column: start.1,
                     name: None,
                     next: None,
                     data: CstDeclData::Aggregate { fields, is_union },
                                     attributes: Vec::new(),
+
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
 });
             }
             self.consume(TokenKind::Semicolon, "expected ; after struct");
@@ -4809,7 +5271,7 @@ if self.current.kind == TokenKind::Identifier {
                 self.add_type_name(&name);
                 return Some(CstDecl {
                     kind: CstDeclKind::Typedef,
-                    line: self.previous.line, column: self.previous.column,
+                    line: start.0, column: start.1,
                     name: Some(name),
                     next: None,
                     data: CstDeclData::Typedef {
@@ -4817,6 +5279,9 @@ if self.current.kind == TokenKind::Identifier {
                         struct_fields: Vec::new(),
                     },
                                     attributes: Vec::new(),
+
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
 });
             }
         }
@@ -4844,7 +5309,7 @@ if self.current.kind == TokenKind::Identifier {
             self.add_type_name(&name);
             return Some(CstDecl {
                 kind: CstDeclKind::Typedef,
-                line: self.previous.line, column: self.previous.column,
+                line: start.0, column: start.1,
                 name: Some(name),
                 next: None,
                 data: CstDeclData::Typedef {
@@ -4852,6 +5317,9 @@ if self.current.kind == TokenKind::Identifier {
                     struct_fields: Vec::new(),
                 },
                             attributes: Vec::new(),
+
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
 });
         }
         self.consume(TokenKind::Semicolon, "expected ; after typedef");
@@ -4927,6 +5395,9 @@ if self.current.kind == TokenKind::Identifier {
                             is_weak: false,
                         },
                         attributes: field_attrs,
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 });
                 }
                 // Handle comma-separated fields
@@ -4946,6 +5417,9 @@ if self.current.kind == TokenKind::Identifier {
                                 is_weak: false,
                             },
                             attributes: field_attrs,
+
+                            end_line: self.previous.end_line,
+                            end_column: self.previous.end_col,
 });
                     }
                 }
@@ -4966,6 +5440,7 @@ if self.current.kind == TokenKind::Identifier {
         Some(fields)
     }
     fn parse_enum(&mut self) -> Option<CstDecl> {
+        let (en_line, en_col) = (self.previous.line, self.previous.column);
         let mut members = Vec::new();
         let mut values = Vec::new();
         // Optional tag name: `enum Foo { ... }` vs anonymous `enum { ... }`
@@ -4986,11 +5461,14 @@ if self.current.kind == TokenKind::Identifier {
                 self.consume(TokenKind::Semicolon, "expected ';' after enum name");
                 return Some(CstDecl {
                     kind: CstDeclKind::Enum,
-                    line: self.previous.line, column: self.previous.column,
+                    line: en_line, column: en_col,
                     name,
                     next: None,
                     data: CstDeclData::Enum { members, values },
                                     attributes: Vec::new(),
+
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
 });
             }
         }
@@ -5018,7 +5496,10 @@ if self.current.kind == TokenKind::Identifier {
                         kind: CstExprKind::Integer, expr_type: None,
                         line: self.previous.line, col: self.previous.column,
                         data: CstExprData::Integer(next_val),
-                    });
+                    
+                        end_line: self.previous.end_line,
+                        end_col: self.previous.end_col,
+});
                     next_val += 1;
                     if !self.match_token(TokenKind::Comma) { break; }
                 } else {
@@ -5032,11 +5513,14 @@ if self.current.kind == TokenKind::Identifier {
             // (`parse_declaration`) consumes the `;`.
             return Some(CstDecl {
                 kind: CstDeclKind::Enum,
-                line: self.previous.line, column: self.previous.column,
+                line: en_line, column: en_col,
                 name,
                 next: None,
                 data: CstDeclData::Enum { members, values },
                             attributes: Vec::new(),
+
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
 });
         }
         None
@@ -5045,6 +5529,7 @@ if self.current.kind == TokenKind::Identifier {
     // ─── @interface / @implementation / @protocol parsing ──────────────
 
     fn parse_class_interface(&mut self) -> Option<CstDecl> {
+        let (ci_line, ci_col) = (self.current.line, self.current.column);
         self.advance(); // consume @interface
 
         if !self.match_name() { self.error("expected class name after @interface"); return None; }
@@ -5252,7 +5737,7 @@ if self.current.kind == TokenKind::Identifier {
                         }
                         ivars.push(CstDecl {
                             kind: CstDeclKind::Ivar,
-                            line: self.previous.line, column: self.previous.column,
+                            line: ci_line, column: ci_col,
                             name: Some(ivar_name),
                             next: None,
                             data: CstDeclData::Ivar {
@@ -5261,6 +5746,9 @@ if self.current.kind == TokenKind::Identifier {
                                 is_weak,
                             },
                                                     attributes: Vec::new(),
+
+                            end_line: self.previous.end_line,
+                            end_column: self.previous.end_col,
 });
                         if !self.match_token(TokenKind::Comma) { break; }
                     }
@@ -5372,7 +5860,7 @@ if self.current.kind == TokenKind::Identifier {
 
         Some(CstDecl {
             kind,
-            line: self.previous.line, column: self.previous.column,
+            line: ci_line, column: ci_col,
             name: Some(name),
             next: None,
             data: CstDeclData::Class {
@@ -5387,10 +5875,14 @@ if self.current.kind == TokenKind::Identifier {
                 impl_vars: Vec::new(),
             },
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
     fn parse_class_implementation(&mut self) -> Option<CstDecl> {
+        let (cp_line, cp_col) = (self.current.line, self.current.column);
         self.advance(); // consume @implementation
         // Class name may be namespace-qualified: `@implementation Game::Player`.
         let name = match self.parse_qualified_name_with_keywords() {
@@ -5493,7 +5985,7 @@ if self.current.kind == TokenKind::Identifier {
 
         Some(CstDecl {
             kind,
-            line: self.previous.line, column: self.previous.column,
+            line: cp_line, column: cp_col,
             name: Some(name),
             next: None,
             data: CstDeclData::Class {
@@ -5508,10 +6000,14 @@ if self.current.kind == TokenKind::Identifier {
                 impl_vars,
             },
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
     fn parse_property(&mut self) -> Option<CstDecl> {
+        let (pp_line, pp_col) = (self.previous.line, self.previous.column);
         // Attributes: (readonly, weak, nonatomic, getter=xxx, setter=xxx:)
         let mut is_readonly = false;
         let mut is_weak = false;
@@ -5603,7 +6099,7 @@ if self.current.kind == TokenKind::Identifier {
                 // Parse additional names with the same type
                 let mut head = CstDecl {
                     kind: CstDeclKind::Property,
-                    line: self.previous.line, column: self.previous.column,
+                    line: pp_line, column: pp_col,
                     name: Some(name),
                     next: None,
                     data: CstDeclData::Property {
@@ -5619,13 +6115,16 @@ if self.current.kind == TokenKind::Identifier {
                         is_dynamic: false,
                     },
                                     attributes: Vec::new(),
+
+                    end_line: self.previous.end_line,
+                    end_column: self.previous.end_col,
 };
                 let mut tail = &mut head;
                 while self.match_name() {
                     let nname = self.previous_text().to_string();
                     tail.next = Some(Box::new(CstDecl {
                         kind: CstDeclKind::Property,
-                        line: self.previous.line, column: self.previous.column,
+                        line: pp_line, column: pp_col,
                         name: Some(nname),
                         next: None,
                         data: CstDeclData::Property {
@@ -5641,6 +6140,9 @@ if self.current.kind == TokenKind::Identifier {
                             is_dynamic: false,
                         },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 }));
                     tail = tail.next.as_mut().unwrap();
                     if !self.match_token(TokenKind::Comma) { break; }
@@ -5651,7 +6153,7 @@ if self.current.kind == TokenKind::Identifier {
             self.consume(TokenKind::Semicolon, "expected ';' after @property");
             return Some(CstDecl {
                 kind: CstDeclKind::Property,
-                line: self.previous.line, column: self.previous.column,
+                line: pp_line, column: pp_col,
                 name: Some(name),
                 next: None,
                 data: CstDeclData::Property {
@@ -5667,6 +6169,9 @@ if self.current.kind == TokenKind::Identifier {
                     is_dynamic: false,
                 },
                             attributes: Vec::new(),
+
+                end_line: self.previous.end_line,
+                end_column: self.previous.end_col,
 });
         }
         self.consume(TokenKind::Semicolon, "expected ';' after @property");
@@ -5674,6 +6179,7 @@ if self.current.kind == TokenKind::Identifier {
     }
 
     fn parse_method(&mut self) -> Option<CstDecl> {
+        let (m_line, m_col) = (self.current.line, self.current.column);
         let is_class_method = if self.match_token(TokenKind::Plus) { true }
         else if self.match_token(TokenKind::Minus) { false }
         else { return None; };
@@ -5926,7 +6432,7 @@ if self.current.kind == TokenKind::Identifier {
 
         Some(CstDecl {
             kind: CstDeclKind::Method,
-            line: self.previous.line, column: self.previous.column,
+            line: m_line, column: m_col,
             name: if method_name.is_empty() { None } else { Some(method_name) },
             next: None,
             data: CstDeclData::Method {
@@ -5939,10 +6445,14 @@ if self.current.kind == TokenKind::Identifier {
                 async_marker,
             },
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
     fn parse_protocol(&mut self) -> Option<CstDecl> {
+        let (pr_line, pr_col) = (self.current.line, self.current.column);
         self.advance(); // consume @protocol
         if !self.match_name() { self.error("expected protocol name"); return None; }
         let name = self.previous_text().to_string();
@@ -5982,15 +6492,19 @@ if self.current.kind == TokenKind::Identifier {
         self.add_type_name(&name);
         Some(CstDecl {
             kind: CstDeclKind::Protocol,
-            line: self.previous.line, column: self.previous.column,
+            line: pr_line, column: pr_col,
             name: Some(name),
             next: None,
             data: CstDeclData::ProtocolData { protocols, methods, is_optional },
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
     fn parse_forward_class(&mut self) -> Option<CstDecl> {
+        let (fc_line, fc_col) = (self.current.line, self.current.column);
         self.advance(); // consume @class
         let mut names = Vec::new();
         // Names may be namespace-qualified — `@class Net::Remote;` declares
@@ -6010,15 +6524,19 @@ if self.current.kind == TokenKind::Identifier {
         }
         Some(CstDecl {
             kind: CstDeclKind::ForwardClass,
-            line: self.previous.line, column: self.previous.column,
+            line: fc_line, column: fc_col,
             name: None,
             next: None,
             data: CstDeclData::Forward(names),
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
     fn parse_namespace(&mut self) -> Option<CstDecl> {
+        let (ns_line, ns_col) = (self.current.line, self.current.column);
         self.advance(); // consume @namespace
         // Namespace name may be qualified: `@namespace Core::Swarm … @endnamespace`
         let name = self.parse_qualified_name_with_keywords();
@@ -6037,15 +6555,19 @@ if self.current.kind == TokenKind::Identifier {
         }
         Some(CstDecl {
             kind: CstDeclKind::Namespace,
-            line: self.previous.line, column: self.previous.column,
+            line: ns_line, column: ns_col,
             name: Some(name),
             next: None,
             data: CstDeclData::Namespace(decls),
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
     fn parse_using(&mut self) -> Option<CstDecl> {
+        let (us_line, us_col) = (self.current.line, self.current.column);
         self.advance(); // consume @using
 
         // @using namespace Name;
@@ -6058,11 +6580,14 @@ if self.current.kind == TokenKind::Identifier {
                     self.consume(TokenKind::Semicolon, "expected ';' after @using namespace");
                     return Some(CstDecl {
                         kind: CstDeclKind::Using,
-                        line: self.previous.line, column: self.previous.column,
+                        line: us_line, column: us_col,
                         name: None,
                         next: None,
                         data: CstDeclData::Using { fqn, alias: None },
                                             attributes: Vec::new(),
+
+                        end_line: self.previous.end_line,
+                        end_column: self.previous.end_col,
 });
                 }
             }
@@ -6116,11 +6641,14 @@ if self.current.kind == TokenKind::Identifier {
         self.consume(TokenKind::Semicolon, "expected ';' after @using");
         Some(CstDecl {
             kind: CstDeclKind::Using,
-            line: self.previous.line, column: self.previous.column,
+            line: us_line, column: us_col,
             name: None,
             next: None,
             data: CstDeclData::Using { fqn, alias },
                     attributes: Vec::new(),
+
+            end_line: self.previous.end_line,
+            end_column: self.previous.end_col,
 })
     }
 
@@ -6358,7 +6886,7 @@ fn collect_arm_node(node: &CstStmt, rest: &[CstStmt], st: &mut PatternArms) {
         let mut group = Vec::with_capacity(rest.len() + 1);
         group.push(own.clone());
         group.extend(rest.iter().cloned());
-        Box::new(CstStmt { kind: CstStmtKind::Compound, line, column, data: CstStmtData::Compound(group) })
+        Box::new(CstStmt { kind: CstStmtKind::Compound, line, column, data: CstStmtData::Compound(group), end_line: node.end_line, end_column: node.end_column })
     };
 
     // `case a, b:` stacks Case nodes — walk to the innermost body, then

@@ -483,6 +483,65 @@ impl SourceMap {
     /// Map one inline-buffer `(line, col)` to `(file, source line, source col,
     /// origin)`, applying the macro column correction. `None` when the inline
     /// line is not covered by any region.
+    /// Resolve a CST/AST node position pair to a [`SourceSpan`].
+    ///
+    /// Node positions follow the parser's convention: `line` is a line in the
+    /// flattened post-preprocessing buffer, while `col` was already remapped to
+    /// a **source** column by the parser as it read each token. So this resolves
+    /// the lines (to a file + source line) and the byte offsets, and must NOT
+    /// re-apply the macro column correction that [`Self::span_from_inline`]
+    /// performs for raw lexer positions.
+    ///
+    /// `end` positions that would precede the start (a synthesized node whose
+    /// end was never stamped) collapse to a zero-width span at the start.
+    pub fn span_from_node(&self, start: (u32, u32), end: (u32, u32)) -> SourceSpan {
+        let (file, sl, so) = match self.map_line(start.0) {
+            Some(m) => m,
+            None => {
+                return SourceSpan::point(0, start.0, start.1, None, SpanOrigin::Synthetic);
+            }
+        };
+        let (efile, el, eo) = self.map_line(end.0).unwrap_or((file, end.0, SpanOrigin::Synthetic));
+        // Guard against an unstamped end (0/stale) pointing before the start.
+        let (el, ec) = if (el, end.1) < (sl, start.1) {
+            (sl, start.1)
+        } else {
+            (el, end.1)
+        };
+        let reg = self.registry.get(file);
+        let start_byte = reg.and_then(|f| f.line_col_to_offset(sl, start.1));
+        let end_byte = if efile == file {
+            reg.and_then(|f| f.line_col_to_offset(el, ec))
+        } else {
+            None
+        };
+        let origin = if so == SpanOrigin::Synthetic || eo == SpanOrigin::Synthetic {
+            SpanOrigin::Synthetic
+        } else {
+            SpanOrigin::Source
+        };
+        SourceSpan {
+            file,
+            start_line: sl,
+            start_col: start.1,
+            end_line: el,
+            end_col: ec,
+            start_byte,
+            end_byte,
+            origin,
+        }
+    }
+
+    /// Map one flattened-buffer line to `(file, source line, origin)`.
+    fn map_line(&self, line: u32) -> Option<(SourceId, u32, SpanOrigin)> {
+        for r in &self.regions {
+            if line >= r.out_start && line <= r.out_end {
+                return Some((r.file, r.src_start + (line - r.out_start), r.origin));
+            }
+        }
+        None
+    }
+
     fn map_inline_pos(&self, line: u32, col: u32) -> Option<(SourceId, u32, u32, SpanOrigin)> {
         for r in &self.regions {
             if line >= r.out_start && line <= r.out_end {
@@ -721,6 +780,36 @@ mod tests {
         let r2 = sp2.to_lsp_range(text);
         assert_eq!(r2.start, LspPosition { line: 0, character: 6 });
         assert_eq!(r2.end, LspPosition { line: 0, character: 8 });
+    }
+
+    #[test]
+    fn span_from_node_maps_lines_and_columns_without_re_adjusting() {
+        let mut reg = SourceRegistry::new();
+        // line_starts = [0,3,6,9,12,17]; line 5 is "aaaa" (bytes 12..17).
+        let a = reg.add("a.jeti", "l1\nl2\nl3\nl4\naaaa\nbbbb\n");
+        let regions = vec![LineRegion {
+            out_start: 1, out_end: 2, file: a, src_start: 5, origin: SpanOrigin::Source,
+        }];
+        let sm = SourceMap::from_regions(regions, reg);
+        // Inline line 1 -> source line 5; columns are taken as already-source.
+        let s = sm.span_from_node((1, 2), (1, 5));
+        assert_eq!((s.file, s.start_line, s.start_col), (a, 5, 2));
+        assert_eq!((s.end_line, s.end_col), (5, 5));
+        assert_eq!(s.start_byte, Some(13));
+        assert_eq!(s.end_byte, Some(16));
+        assert_eq!(s.origin, SpanOrigin::Source);
+
+        // An unstamped/backwards end collapses to a zero-width span.
+        let bad = sm.span_from_node((1, 5), (1, 2));
+        assert_eq!((bad.start_col, bad.end_col), (5, 5));
+        assert_eq!(bad.start_byte, bad.end_byte);
+        let zero = sm.span_from_node((1, 1), (0, 0));
+        assert_eq!((zero.start_line, zero.end_line), (5, 5));
+
+        // An unmapped line degrades to a synthetic point with no file.
+        let off = sm.span_from_node((9, 1), (9, 2));
+        assert_eq!(off.file, 0);
+        assert!(off.is_synthetic());
     }
 
     #[test]

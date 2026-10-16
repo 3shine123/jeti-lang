@@ -223,6 +223,13 @@ pub struct Token {
     pub length: usize,
     pub line: usize,
     pub column: usize,
+    /// Position **one past the last byte** of this token (exclusive end), in
+    /// the same expanded-buffer line / byte-column convention as `line` /
+    /// `column`. Single-line tokens have `end_line == line`; strings and the
+    /// like report the last line they touched. This is what lets an editor
+    /// draw a real range instead of a caret (LSP hopover/definition).
+    pub end_line: usize,
+    pub end_col: usize,
     pub char_val: u8,
     /// Integer-literal suffix flags, recorded by the lexer and stripped from
     /// the token text (text stays `7` for `7L`, so every text-based consumer

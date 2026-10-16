@@ -249,6 +249,8 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column.saturating_sub(length),
             char_val: 0,
+            end_line: self.line,
+            end_col: self.column,
             int_suffix: 0,
         }
     }
@@ -262,6 +264,8 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column,
             char_val: 0,
+            end_line: self.line,
+            end_col: self.column,
             int_suffix: 0,
         }
     }
@@ -286,6 +290,8 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column.saturating_sub(end - start + 1),
             char_val: 0,
+            end_line: self.line,
+            end_col: self.column,
             int_suffix: 0,
         }
     }
@@ -310,6 +316,8 @@ impl<'a> Lexer<'a> {
             line: self.line,
             column: self.column.saturating_sub(end - start + 1),
             char_val: 0,
+            end_line: self.line,
+            end_col: self.column,
             int_suffix: 0,
         }
     }
@@ -364,6 +372,8 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        end_line: self.line,
+                        end_col: self.column,
                         int_suffix: 0,
                     };
                 }
@@ -377,6 +387,8 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        end_line: self.line,
+                        end_col: self.column,
                         int_suffix: 0,
                     };
                 }
@@ -390,6 +402,8 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        end_line: self.line,
+                        end_col: self.column,
                         int_suffix: 0,
                     };
                 }
@@ -439,6 +453,8 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: val,
+                        end_line: self.line,
+                        end_col: self.column,
                         int_suffix: 0,
                     };
                 }
@@ -471,6 +487,8 @@ impl<'a> Lexer<'a> {
                                 line,
                                 column: col,
                                 char_val: v,
+                                end_line: self.line,
+                                end_col: self.column,
                                 int_suffix: 0,
                             };
                         }
@@ -536,6 +554,8 @@ impl<'a> Lexer<'a> {
                         line,
                         column: col,
                         char_val: 0,
+                        end_line: self.line,
+                        end_col: self.column,
                         int_suffix: suf_bits,
                     };
                 }
@@ -618,6 +638,8 @@ impl<'a> Lexer<'a> {
                 line,
                 column: col,
                 char_val: val,
+                end_line: self.line,
+                end_col: self.column,
                 int_suffix: 0,
             };
         }

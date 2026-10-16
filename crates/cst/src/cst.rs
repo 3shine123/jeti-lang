@@ -179,6 +179,13 @@ pub struct CstExpr {
     pub expr_type: Option<Box<CstType>>,
     pub line: usize,
     pub col: usize,
+    /// Exclusive end of the node's extent, same conventions as `line` / `col`
+    /// (line is an expanded-buffer line, column is already remapped to the
+    /// source by the parser). `0` means "not stamped" — a synthesized node
+    /// that never had tokens of its own. Together with `line`/`col` this is
+    /// what `SourceMap::span_from_node` turns into a real file/byte span.
+    pub end_line: usize,
+    pub end_col: usize,
     pub data: CstExprData,
 }
 
@@ -291,6 +298,10 @@ pub struct CstStmt {
     pub kind: CstStmtKind,
     pub line: usize,
     pub column: usize,
+    /// Exclusive end of the node's extent (see `CstExpr::end_line`); `0` = not
+    /// stamped.
+    pub end_line: usize,
+    pub end_column: usize,
     pub data: CstStmtData,
 }
 
@@ -421,6 +432,10 @@ pub struct CstDecl {
     pub kind: CstDeclKind,
     pub line: usize,
     pub column: usize,
+    /// Exclusive end of the node's extent (see `CstExpr::end_line`); `0` = not
+    /// stamped.
+    pub end_line: usize,
+    pub end_column: usize,
     pub name: Option<String>,
     pub next: Option<Box<CstDecl>>,
     pub data: CstDeclData,
