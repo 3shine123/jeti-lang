@@ -1,0 +1,32 @@
+// Negative: a missing expression after an operator must be reported.
+//
+// clang reports `Expected expression` (clang(expected_expression)) for
+// `int a =;` in the generated C — but before this fix jetic itself reported
+// nothing: the empty parse propagated through the parser's `?` in silence,
+// the initializer stayed None, and the file "compiled" until clang refused
+// the emitted C. Now jetic reports the real cause at the source location:
+//   t.jeti:2:12: error: expected expression
+//
+// Covered sites (each reports exactly one `expected expression`, caret on the
+// unexpected token; empty is still legal BEFORE an operator — `for(;;)`,
+// `return;`-style omissions — and stays clean):
+//   * initializer:            int a =;
+//   * assignment RHS:         a =;    k +=;
+//   * binary RHS (10 levels): 1 +;  1 *;  1 <<;  1 <;  1 ==;  1 &;  1 ^;  1 |;  1 &&;  1 ||;
+//   * ternary branches:       1 ? : 2;    1 ? 2 : ;
+//   * cast operand:           (int);
+//   * comma operator:         (1, );   — a trailing comma in an initializer
+//                             list is a different path and stays legal
+//   * subscript index:        a[] = 1;
+//   * case label:             case :    case 1,:
+//   * call argument:          f(1,);    — `f()` (no comma) stays legal
+//
+// These used to be worse than silent: the parse filled a synthesized `0`, so
+// `(int);` meant `(int)0` and `a[] = 1;` meant `a[0] = 1;`.
+//
+// Regression unit tests: crates/parser/tests/error_recovery.rs
+// (`a_missing_initializer_expression_is_reported` and friends).
+int main(void) {
+    int a =;
+    return 0;
+}

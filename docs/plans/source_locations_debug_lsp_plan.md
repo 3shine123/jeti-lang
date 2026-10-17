@@ -120,7 +120,40 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   报成一条 error（`missing terminating '"' character`，clang 的措辞，位置就是那个字面量）。以前这种漏写会让 lexer
   一路吞到文件尾，只有 clang 在生成的 C 上报错（位置还隔着 `#line`），编辑器则一声不吭。恢复出的文本照常继续解析，
   所以后面的声明不会被这条错误连带吃掉；CLI 依旧拒绝生成代码。
-- 未做（后续阶段）：workspace folders、ARC 专属诊断、
+- 运算符之后缺表达式（`int a =;` / `a =;` / `1 +;` / `1 ? : 2`）：clang 报 `Expected expression`，jetic 以前却
+  **静默放过**——初始值、赋值右侧、十级二元运算、三元的两个分支共 17 处，都是"运算符已消费、表达式成为必需"
+  的位置，右侧的 `?` 把空结果无声地传上去，调用方把初始值留成 None，一路零诊断，直到 clang 拒绝生成的 C。
+  同族的还有六处更糟：cast 的操作数、逗号运算符的第二操作数、下标的索引、case 标签的常量（含多值逗号表）与
+  实参列表里逗号之后的实参——它们把空位填成一个**合成的 `0`**，`(int);` 就此意味着 `(int)0`、`a[] = 1;` 意味着
+  `a[0] = 1;`，静默改变语义。现在每一处报**一条** error（`expected expression`，clang 的措辞，caret 落在缺失处
+  的意外 token 上），逐行报、不级联（`int a = 1 +;` 只报这一行；`f(1 +)` 由 panic 锁存保证只报一次）。空表达式
+  **在运算符之前**仍是合法省略——`for(;;)`、`return;`、初始值列表与枚举成员的尾逗号、零实参调用 `f()` 有
+  前瞻守卫或独立解析路径，照旧干净。单测在 `crates/parser/tests/error_recovery.rs`（缺失表达式族 + 合法空位
+  不误报），负例文档在 `tests/negative/missing_expression.jeti`。
+- **语法错误的措辞与定位对齐 clang**（逐样例对照实测）：jetic 原先的 caret 停在**缺失处的前一个 token**
+  （`int a = 1⏎` 指在 `1` 上，clang 指在 `1` 之后的行尾），`expected` 消息带自创后缀（`after args`、
+  `after subscript`、`in ternary`）且引号风格混用（`expected ; after typedef` 无引号）。对齐后的规则：
+  - **caret 落在洞里**——同一行有意外 token 就指它（`f(1;` → `;`），洞在行尾就指 previous 末尾+1（与 clang
+    的 `expected ';' at end of declaration` 完全同位）；一律**单 caret**（clang 的 expected 家族不给 token 画
+    下划线，渲染器对 `end == col+1` 不再走"词首自动加宽"的启发式——那是给 checker 单 caret 诊断用的）。
+  - **`;` 沿用 clang 的上下文变体**：`at end of declaration`（局部声明）、`after top level declarator`
+    （顶层与 typedef）、`after struct`、`after enum`、`at end of declaration list`（成员列表/@property）、
+    `after expression`（表达式语句）、`after return statement`、`after do/while statement`、`after @class`。
+  - **`)` `]` `}` `:` `(` `>` `=` `<` 用 clang 的裸形式**（`expected ')'`），上下文交给 caret 与将来的
+    `to match this` note；`if`/`while`/`for`/`switch`/`typeof`/`@selector`/`@protocol`/`@encode`/
+    `@synchronized` 之后的 `(` 用 clang 的带引号关键字形式（`after 'if'`）。jetic 自创的 `(got integer)`
+    后缀删除——clang 靠 caret 表达这个信息。
+  - **同位同消息去重**：clang 对文件末尾两个未闭合大括号只报一条 `expected '}'`（加 note），jetic 的嵌套
+    复合语句各自 consume 失败会报两条——按（文件、重映射行、列、消息）与上一条相同则丢弃。对比键用**重映射
+    后**的位置：拿原始 token 行号对诊断的重映射行号，设了 SourceMap 就永远对不上，守卫形同虚设。
+  - jeti 特有语法（`@using`、`throws(...)`、`async` 的 `^`）clang 无对应措辞，保留 jetic 自己的（引号风格
+    统一）。clang 对若干空位本就是合法省略或只给 warning（`int ;`、`return;`、成员列表尾逗号），jetic
+    照旧放行。
+  - 验收：12 个破坏样例 clang/jetic 并排比对，语法层 12/12 同位同消息（唯一"差异"是 clang 在
+    `a[1 = 2;` 上先报一条**语义**错 `expression is not assignable`，属 checker 范畴；jetic 的
+    `expected ']'` 与 clang 的第二条完全一致）。clang 的 `to match this '('/'{'` note 未做——需要 parser
+    维护括号栈，属后续。单测断言随新位置更新（`error_recovery.rs`、`crates/lsp` 的两个钉旧 caret 的用例）。
+- 未做（后续阶段）：`to match this '('` 配对 note（需要括号栈）、workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`）。
 - **不做（实测数据定案）**：头文件解析结果缓存——原设想"头文件是大文件的主成本、
   值得缓存"被测量证伪：全量头文件的总成本 ~11ms，占大文件分析 ~5%，绝对成本低于

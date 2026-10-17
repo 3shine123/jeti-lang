@@ -194,7 +194,10 @@ int main(void) {
         .collect();
     assert_eq!(
         positions,
-        vec![(1, 4), (2, 12)],
+        // The missing `;` on line 2 points at the hole — just past the `1`
+        // (character 13), where clang's caret sits for `expected ';' at end
+        // of declaration`, not at the `1` itself.
+        vec![(1, 4), (2, 13)],
         "diagnostics must read in source order: {published}"
     );
 
@@ -359,7 +362,9 @@ fn server_answers_editors_requests_end_to_end() {
     let diagnostics = published["params"]["diagnostics"].as_array().expect("diagnostics").clone();
     assert!(!diagnostics.is_empty(), "expected a syntax diagnostic: {published}");
     assert_eq!(diagnostics[0]["severity"], 1);
-    assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
+    // The missing `;` points at the hole — at the `}` that now follows `0`
+    // directly (character 26), clang's placement for `expected ';'`.
+    assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 26}));
 
     // didChange → the real program. The edit publishes nothing of its own;
     // the next message runs the deferred analysis, so the clearing

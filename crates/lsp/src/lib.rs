@@ -1185,14 +1185,17 @@ mod tests {
 
     #[test]
     fn a_parse_error_becomes_a_diagnostic_with_a_position() {
-        // Same program the CLI test uses: the missing `;` is at column 25.
+        // Same program the CLI test uses: the missing `;` belongs between `0`
+        // and `}`, and the caret sits in that hole — at the `}` (column 27,
+        // LSP character 26), the way clang points `expected ';'` at the
+        // unexpected token rather than the token before it.
         let path = "/tmp/jeti_lsp_unit/parse_err.jeti";
         let text = "int main(void) { return 0 }\n";
         let diags = diagnostics_for(path, text, &[], &no_open_files());
         assert!(!diags.is_empty(), "expected a parse diagnostic, got none");
         let first = &diags[0];
         assert_eq!(first["severity"], 1);
-        assert_eq!(first["range"]["start"], json!({"line": 0, "character": 24}));
+        assert_eq!(first["range"]["start"], json!({"line": 0, "character": 26}));
         assert!(
             first["message"].as_str().unwrap().contains("expected ';'"),
             "unexpected message: {}",
@@ -1373,7 +1376,8 @@ mod tests {
 
         // Put it back: the same range, an insertion this time. This message
         // runs the deferred analysis of the previous edit — the parse error
-        // appeared at the deleted `;`.
+        // appeared in the hole where the `;` had been: at the `}` that now
+        // follows `0` directly (LSP character 26).
         let out = server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didChange",
             "params": {
@@ -1387,7 +1391,7 @@ mod tests {
         }));
         let diagnostics = out[0]["params"]["diagnostics"].as_array().expect("diagnostics");
         assert_eq!(diagnostics.len(), 1, "{out:?}");
-        assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
+        assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 26}));
 
         // And the next message settles the restored buffer: clean again.
         let out = server.handle(&json!({

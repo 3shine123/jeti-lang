@@ -326,8 +326,8 @@ impl<'a> Parser<'a> {
             self.advance();
         } else {
             // Single-character closers/separators get a clang-style insertion
-            // fix-it at the offending token's end; multi-char or keyword-ish
-            // tokens are spelled in the message and have no single insert.
+            // fix-it; multi-char or keyword-ish tokens are spelled in the
+            // message and have no single insert.
             let insert = match kind {
                 TokenKind::Semicolon => ";",
                 TokenKind::Comma => ",",
@@ -337,11 +337,7 @@ impl<'a> Parser<'a> {
                 TokenKind::Colon => ":",
                 _ => "",
             };
-            if !insert.is_empty() {
-                self.error_with_insert(msg, insert);
-            } else {
-                self.error(&format!("{} (got {})", msg, self.current.kind));
-            }
+            self.error_at_missing(msg, insert);
             // Do NOT advance past the offending token. The old behaviour ate it,
             // which for a missing ';' swallowed the *next* declaration's leading
             // token (`int b = 2` lost its `int`, the remnant parsed as a harmless
@@ -355,7 +351,68 @@ impl<'a> Parser<'a> {
         if self.check_keyword(kw) {
             self.advance();
         } else {
-            self.error(msg);
+            self.error_at_missing(msg, "");
+        }
+    }
+
+    /// Report at the place the missing token belongs — clang points the caret
+    /// of an `expected` diagnostic at the *hole*, not at the token before it:
+    /// at the unexpected token when it sits on the same line (`f(1;` → the
+    /// `;`), and just past the previous token when the hole is at end of line
+    /// (`int a = 1` newline → the position after `1`, where clang's caret and
+    /// fix-it both sit). A single caret: clang's `expected` family does not
+    /// underline the offending token. `insert` keeps the clang-style fix-it
+    /// that shows the missing character under the caret.
+    fn error_at_missing(&mut self, msg: &str, insert: &str) {
+        let at_line_end = self.current.kind == TokenKind::Eof
+            || self.current.line != self.previous.line;
+        let (line, col) = if at_line_end {
+            (self.previous.line, self.previous.column + self.previous.length.max(1))
+        } else {
+            (self.current.line, self.current.column)
+        };
+        if self.panic_mode { return; }
+        let (file, real_line) = self.file_of_line_mapped(line);
+        // Same dedupe key as [`Self::error_at`]: the *recorded* (remapped)
+        // position — the raw token line never matches a diagnostic's remapped
+        // line once a map is set, and the guard would suppress nothing.
+        if self.repeats_last(&file, real_line, col, msg) { return; }
+        self.panic_mode = true;
+        self.has_error = true;
+        self.error_count += 1;
+        let entry = format!("{}:{}: {}", line, col, msg);
+        if self.err_msg.is_empty() {
+            self.err_msg = entry;
+        } else {
+            self.err_msg = format!("{}\n{}", self.err_msg, entry);
+        }
+        let mut diagnostic = Diagnostic::error(file, real_line, col, msg).with_end_col(col + 1);
+        if !insert.is_empty() {
+            // The insertion point is where the missing token belongs: right
+            // after the previous token (clang anchors its `;` fix-it there too).
+            let insert_col = self.previous.column + self.previous.length.max(1);
+            diagnostic.hint = Some((insert_col, insert.to_string()));
+        }
+        self.diagnostics.push(diagnostic);
+    }
+
+    /// The dedupe guard behind both error paths: the same diagnostic (file,
+    /// line, col, message) as the last *recorded* one is noise — a file ending
+    /// with two unclosed braces gets ONE `expected '}'` (plus its note), not
+    /// one per compound statement. The parser's nested compounds each
+    /// consume-fail at that same EOF back-to-back, so comparing against the
+    /// last recorded diagnostic drops the repeat. The file is part of the key:
+    /// the same line/col/message in two different files (an inlined header's
+    /// error and the including file's) are two diagnostics, not a repeat.
+    ///
+    /// Pure read on the just-pushed list, so both error paths can call it
+    /// before they latch panic mode or append to the plain-text lines.
+    fn repeats_last(&self, file: &str, line: usize, col: usize, msg: &str) -> bool {
+        match self.diagnostics.last() {
+            Some(last) => {
+                last.file == file && last.line == line && last.col == col && last.message == msg
+            }
+            None => false,
         }
     }
 
@@ -372,15 +429,24 @@ impl<'a> Parser<'a> {
     /// itself (as clang's `missing terminating '"' character` does).
     fn error_at(&mut self, token: &Token, msg: &str) {
         if self.panic_mode { return; }
-        self.panic_mode = true;
-        self.has_error = true;
-        self.error_count += 1;
         let line = token.line;
         let col = token.column;
         // Span width from the offending token itself: end_col is exclusive,
         // so `nil` at column 14 (length 3) annotates as ^~~.
         let end_col = col + token.length.max(1);
         let (file, real_line) = self.file_of_line_mapped(line);
+        // clang never emits the same diagnostic twice at one spot: a file
+        // ending with two unclosed braces gets ONE `expected '}'` (plus its
+        // note), not one per compound statement. The parser's nested compounds
+        // would each consume-fail at that same EOF, so a repeat with the same
+        // position and message is noise — drop it. The key is the *recorded*
+        // (remapped) position: comparing the raw token line against the
+        // diagnostic's remapped line never matches once a map is set, and the
+        // guard would suppress nothing.
+        if self.repeats_last(&file, real_line, col, msg) { return; }
+        self.panic_mode = true;
+        self.has_error = true;
+        self.error_count += 1;
         let entry = format!("{}:{}: {}", line, col, msg);
         if self.err_msg.is_empty() {
             self.err_msg = entry;
@@ -390,21 +456,6 @@ impl<'a> Parser<'a> {
         self.diagnostics.push(
             Diagnostic::error(file, real_line, col, msg).with_end_col(end_col)
         );
-    }
-
-    /// Like [`Self::error`], but also attaches a clang-style insertion fix-it:
-    /// `text` is to be inserted right after the offending token (its end
-    /// column), rendered in green under the caret.
-    fn error_with_insert(&mut self, msg: &str, text: &str) {
-        if self.panic_mode { return; }
-        let insert_col = self.previous.column + self.previous.length.max(1);
-        let before = self.diagnostics.len();
-        self.error(msg);
-        if self.diagnostics.len() > before {
-            if let Some(last) = self.diagnostics.last_mut() {
-                last.hint = Some((insert_col, text.to_string()));
-            }
-        }
     }
 
     /// Resolves a line to (file, source line) via the SourceMap; falls back
@@ -670,8 +721,11 @@ impl<'a> Parser<'a> {
             }
             _ => {}
         }
-        // Plain constant (default path).
-        match self.parse_assignment() {
+        // Plain constant (default path). `case` was consumed, so a constant is
+        // required: `case :` is a hole, and the synthesized 0 must never stand
+        // in silently (the old fill made `case :` mean `case 0:`). The
+        // synthesized node stays as the recovery fill.
+        match self.required_expression(|p| p.parse_assignment()) {
             Some(e) => CstPattern::Const(Box::new(e)),
             None => CstPattern::Const(Box::new(CstExpr {
                 kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0,
@@ -1006,7 +1060,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 // `typeof ( expr )` / `typeof ( type )` — capture raw text so it
                 // passes through to C verbatim (e.g. `__typeof__(x) z = 2;`).
                 let start = self.previous.start;
-                self.consume(TokenKind::LParen, "expected '(' after typeof");
+                self.consume(TokenKind::LParen, "expected '(' after 'typeof'");
                 let mut depth = 1;
                 while depth > 0 {
                     if self.current.kind == TokenKind::Eof { break; }
@@ -1018,7 +1072,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     self.advance();
                 }
                 let end = self.current.start + self.current.length;
-                self.consume(TokenKind::RParen, "expected ')' after typeof");
+                self.consume(TokenKind::RParen, "expected ')'");
                 let raw = &self.source[start..end];
                 t.prim = TypePrim::Named;
                 t.name = Some(raw.to_string());
@@ -1123,7 +1177,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     if self.current.kind == TokenKind::Greater {
                         self.advance();
                     } else {
-                        self.error("expected '>' after type arguments");
+                        self.error("expected '>'");
                         while self.current.kind != TokenKind::Eof &&
                               self.current.kind != TokenKind::Greater {
                             self.advance();
@@ -1206,7 +1260,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     bt.block_name = Some(self.current_text().to_string());
                     self.advance();
                 }
-                self.consume(TokenKind::RParen, "expected ')' after ^");
+                self.consume(TokenKind::RParen, "expected ')'");
                 if self.match_token(TokenKind::LParen) {
                     let mut params: Vec<CstType> = Vec::new();
                     while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
@@ -1231,7 +1285,7 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         tail = &mut tail.insert(boxed).next;
                     }
                     bt.block_params = head;
-                    self.consume(TokenKind::RParen, "expected ')' after block param list");
+                    self.consume(TokenKind::RParen, "expected ')'");
                 }
                 t = bt;
             } else if self.match_token(TokenKind::Star) {
@@ -1257,10 +1311,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             ft.array_size_name = Some(self.current_text().to_string());
                             self.advance();
                         }
-                        self.consume(TokenKind::RBracket, "expected ] after array size");
+                        self.consume(TokenKind::RBracket, "expected ']'");
                     }
                 }
-                self.consume(TokenKind::RParen, "expected ')' after function pointer");
+                self.consume(TokenKind::RParen, "expected ')'");
                 if self.match_token(TokenKind::LParen) {
                     let mut params: Vec<CstType> = Vec::new();
                     while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
@@ -1288,11 +1342,11 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         tail = &mut tail.insert(boxed).next;
                     }
                     ft.block_params = head;
-                    self.consume(TokenKind::RParen, "expected ')' after function pointer params");
+                    self.consume(TokenKind::RParen, "expected ')'");
                 }
                 t = ft;
             } else {
-                self.consume(TokenKind::RParen, "expected ')' after function type");
+                self.consume(TokenKind::RParen, "expected ')'");
             }
         }
 
@@ -1753,7 +1807,7 @@ line: pri_line,
             let line = self.previous.line;
             let col = self.previous.column;
             let inner = self.parse_expression();
-            self.consume(TokenKind::RParen, "expected ')' after boxed expression");
+            self.consume(TokenKind::RParen, "expected ')'");
             return inner.map(|e| CstExpr {
                 kind: CstExprKind::Boxed, expr_type: None, line, col,
                 data: CstExprData::Boxed(Box::new(e)),
@@ -1775,7 +1829,7 @@ line: pri_line,
 
         // @selector(...)
         if self.match_keyword(KeywordKind::AtSelector) {
-            self.consume(TokenKind::LParen, "expected '(' after @selector");
+            self.consume(TokenKind::LParen, "expected '(' after '@selector'");
             let mut sel = String::new();
             while self.current.kind == TokenKind::Identifier ||
                   (self.current.kind == TokenKind::Keyword && !matches!(self.current.keyword,
@@ -1813,7 +1867,7 @@ line: pri_line,
                     break;
                 }
             }
-            self.consume(TokenKind::RParen, "expected ')' after @selector");
+            self.consume(TokenKind::RParen, "expected ')'");
             return Some(CstExpr {
                 kind: CstExprKind::Selector, expr_type: None,
                 line: pri_line, col: pri_col,
@@ -1826,13 +1880,13 @@ line: pri_line,
 
         // @protocol(...)
         if self.match_keyword(KeywordKind::AtProtocol) {
-            self.consume(TokenKind::LParen, "expected ( after @protocol");
+            self.consume(TokenKind::LParen, "expected '(' after '@protocol'");
             let mut proto = String::new();
             if self.current.kind == TokenKind::Identifier {
                 self.advance();
                 proto = self.previous_text().to_string();
             }
-            self.consume(TokenKind::RParen, "expected ) after @protocol");
+            self.consume(TokenKind::RParen, "expected ')'");
             return Some(CstExpr {
                 kind: CstExprKind::Protocol, expr_type: None,
                 line: pri_line, col: pri_col,
@@ -1845,9 +1899,9 @@ line: pri_line,
 
         // @encode(...)
         if self.match_keyword(KeywordKind::AtEncode) {
-            self.consume(TokenKind::LParen, "expected ( after @encode");
+            self.consume(TokenKind::LParen, "expected '(' after '@encode'");
             let ty = self.parse_type_full().unwrap_or_else(|| CstType::new(TypePrim::Void));
-            self.consume(TokenKind::RParen, "expected ) after @encode");
+            self.consume(TokenKind::RParen, "expected ')'");
             return Some(CstExpr {
                 kind: CstExprKind::Encode, expr_type: None,
                 line: pri_line, col: pri_col,
@@ -1883,7 +1937,7 @@ line: pri_line,
             // clang agrees: for `(Foo *)p` with `Foo` an ordinary variable it
             // reports "expected expression" at that `)`, never a multiplication.
             // So an unknown name here is unknown to C too, and the cascade
-            // ("expected ')' after expression") can be replaced by the real
+            // ("expected ')'") can be replaced by the real
             // reason — but only when the type table is the C preprocessor's own
             // view, because otherwise a name may simply be a typedef we were
             // never told about (a `#include`d header jetic passes through).
@@ -1906,7 +1960,11 @@ line: pri_line,
             if is_cast {
                 if let Some(ct) = self.parse_type_full() {
                     if self.match_token(TokenKind::RParen) {
-                        let expr = self.parse_unary();
+                        // A cast consumed its `)`, so an operand is required:
+                        // `(int);` is a hole, not a legal omission. Report it —
+                        // the old fill made `(int);` mean `(int)0` in silence —
+                        // and keep the synthesized operand as the recovery fill.
+                        let expr = self.required_expression(|p| p.parse_unary());
                         return Some(CstExpr {
                             kind: CstExprKind::Cast, expr_type: None,
                             line: pri_line, col: pri_col,
@@ -1922,7 +1980,7 @@ line: pri_line,
                 }
             }
             let expr = self.parse_expression();
-            self.consume(TokenKind::RParen, "expected ')' after expression");
+            self.consume(TokenKind::RParen, "expected ')'");
             return expr.map(|e| CstExpr {
                 kind: CstExprKind::Paren, expr_type: None,
                 line: pri_line, col: pri_col,
@@ -1948,7 +2006,7 @@ line: pri_line,
                 }
                 if !self.match_token(TokenKind::Comma) { break; }
             }
-            self.consume(TokenKind::RBracket, "expected ']' after array literal");
+            self.consume(TokenKind::RBracket, "expected ']'");
             return Some(CstExpr {
                 kind: CstExprKind::ArrayLit, expr_type: None,
                 line: pri_line, col: pri_col,
@@ -2098,7 +2156,7 @@ line: pri_line,
                 }
             }
             // If no args were parsed, it's a zero-arg message
-            self.consume(TokenKind::RBracket, "expected ']' after message send");
+            self.consume(TokenKind::RBracket, "expected ']'");
 
             // Variadic Foundation collection constructor:
             //   [NPArray arrayWithObjects:a, b, c, nil]  →  @[a, b, c]
@@ -2170,7 +2228,7 @@ line: pri_line,
                 }
                 if !self.match_token(TokenKind::Comma) { break; }
             }
-            self.consume(TokenKind::RBracket, "expected ']' after array literal");
+            self.consume(TokenKind::RBracket, "expected ']'");
             return Some(CstExpr {
                 kind: CstExprKind::ArrayLit, expr_type: None,
                 line: pri_line, col: pri_col,
@@ -2213,7 +2271,7 @@ line: pri_line,
                 }
                 if !self.match_token(TokenKind::Comma) { break; }
             }
-            self.consume(TokenKind::RBrace, "expected '}' after literal");
+            self.consume(TokenKind::RBrace, "expected '}'");
             // `@{}` is an empty *dictionary* (ObjC: `@{}` and `@[]` are
             // different literals); only a colon-less non-empty body keeps the
             // tolerant array fallback.
@@ -2292,7 +2350,7 @@ line: pri_line,
                 designators.push(CstDesignator::Member(name));
             } else if self.match_token(TokenKind::LBracket) {
                 let idx = self.parse_expression()?;
-                self.consume(TokenKind::RBracket, "expected ']' after designator index");
+                self.consume(TokenKind::RBracket, "expected ']'");
                 designators.push(CstDesignator::Index(Box::new(idx)));
             } else {
                 break;
@@ -2302,7 +2360,7 @@ line: pri_line,
             self.error("expected designator ('.field' or '[index]') in designated initializer");
             return None;
         }
-        self.consume(TokenKind::Assign, "expected '=' after designator");
+        self.consume(TokenKind::Assign, "expected '='");
         let expr = self.parse_assignment()?;
         Some(CstExpr {
             kind: CstExprKind::DesignatedInit, expr_type: None,
@@ -2479,7 +2537,7 @@ line: pri_line,
                 }
                 if !self.match_token(TokenKind::Comma) { break; }
             }
-            self.consume(TokenKind::RParen, "expected ')' after block params");
+            self.consume(TokenKind::RParen, "expected ')'");
             params = head;
         }
 
@@ -2576,8 +2634,12 @@ line: pri_line,
             // (see `bracket_opens_a_message_send`).
             else if self.check(TokenKind::LBracket) && !self.bracket_opens_a_message_send() {
                 self.advance();
-                let key = self.parse_expression();
-                self.consume(TokenKind::RBracket, "expected ']' after subscript");
+                // `[` consumed, so an index is required: `a[]` is a hole, and
+                // the synthesized 0 must never stand in silently (the old fill
+                // made `a[] = 1;` mean `a[0] = 1;`). The synthesized node stays
+                // as the recovery fill.
+                let key = self.required_expression(|p| p.parse_expression());
+                self.consume(TokenKind::RBracket, "expected ']'");
                 expr = CstExpr {
                     kind: CstExprKind::Subscript, expr_type: None,
                     line: expr.line, col: expr.col,
@@ -2617,6 +2679,10 @@ line: pri_line,
             // Function call: expr(args)
             else if self.match_token(TokenKind::LParen) {
                 let mut args = Vec::new();
+                // A consumed comma means one more argument is required — the C
+                // argument list has no trailing form, so `f(1,)` leaves the
+                // list one argument short and must report, not exit quietly.
+                let mut after_comma = false;
                 while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
                     // Type arguments for builtins like `__builtin_offsetof(struct Pt, y)`,
                     // `__builtin_types_compatible_p(int, long)`, `va_arg(ap, int)`.
@@ -2630,16 +2696,25 @@ line: pri_line,
                                 end_line: self.previous.end_line,
                                 end_col: self.previous.end_col,
 });
-                            if !self.match_token(TokenKind::Comma) { break; }
+                            after_comma = self.match_token(TokenKind::Comma);
+                            if !after_comma { break; }
                             continue;
                         }
                     }
                     if let Some(a) = self.parse_assignment() {
                         args.push(a);
+                    } else {
+                        // `(` was consumed, so an empty slot is a missing
+                        // argument, not a legal omission.
+                        self.report_missing_expression();
                     }
-                    if !self.match_token(TokenKind::Comma) { break; }
+                    after_comma = self.match_token(TokenKind::Comma);
+                    if !after_comma { break; }
                 }
-                self.consume(TokenKind::RParen, "expected ')' after args");
+                if after_comma {
+                    self.report_missing_expression();
+                }
+                self.consume(TokenKind::RParen, "expected ')'");
                 expr = CstExpr {
                     kind: CstExprKind::Call, expr_type: None,
                     line: expr.line, col: expr.col,
@@ -2832,7 +2907,7 @@ line: pri_line,
                 // advancing here would skip it.
                 self.current = saved;
                 let expr = self.parse_expression();
-                self.consume(TokenKind::RParen, "expected ')' after sizeof");
+                self.consume(TokenKind::RParen, "expected ')'");
                 return expr.map(|e| CstExpr {
                     kind: CstExprKind::Sizeof, expr_type: None,
                     line: un_line, col: un_col,
@@ -2858,7 +2933,7 @@ line: pri_line,
         if self.match_keyword(KeywordKind::Alignof) {
             if self.match_token(TokenKind::LParen) {
                 if let Some(ty) = self.parse_type_full() {
-                    self.consume(TokenKind::RParen, "expected ')' after alignof");
+                    self.consume(TokenKind::RParen, "expected ')'");
                     return Some(CstExpr {
                         kind: CstExprKind::Alignof, expr_type: None,
                         line: un_line, col: un_col,
@@ -2877,7 +2952,7 @@ line: pri_line,
         let mut expr = self.parse_unary()?;
         let ops = [TokenKind::Star, TokenKind::Slash, TokenKind::Percent];
         while let Some(op) = ops.iter().find(|o| self.match_token(**o)) {
-            let right = self.parse_unary()?;
+            let right = self.required_expression(|p| p.parse_unary())?;
             let op_val = match op {
                 TokenKind::Star => 1,
                 TokenKind::Slash => 2,
@@ -2900,7 +2975,7 @@ line: pri_line,
         let mut expr = self.parse_multiplicative()?;
         let ops = [TokenKind::Plus, TokenKind::Minus];
         while let Some(op) = ops.iter().find(|o| self.match_token(**o)) {
-            let right = self.parse_multiplicative()?;
+            let right = self.required_expression(|p| p.parse_multiplicative())?;
             let op_val = match op {
                 TokenKind::Plus => 4,
                 TokenKind::Minus => 5,
@@ -2922,7 +2997,7 @@ line: pri_line,
         let mut expr = self.parse_additive()?;
         let ops = [TokenKind::LShift, TokenKind::RShift];
         while let Some(op) = ops.iter().find(|o| self.match_token(**o)) {
-            let right = self.parse_additive()?;
+            let right = self.required_expression(|p| p.parse_additive())?;
             let op_val = match op {
                 TokenKind::LShift => 6,
                 TokenKind::RShift => 7,
@@ -2944,7 +3019,7 @@ line: pri_line,
         let mut expr = self.parse_shift()?;
         let ops = [TokenKind::Less, TokenKind::Greater, TokenKind::Leq, TokenKind::Geq];
         while let Some(op) = ops.iter().find(|o| self.match_token(**o)) {
-            let right = self.parse_shift()?;
+            let right = self.required_expression(|p| p.parse_shift())?;
             let op_val = match op {
                 TokenKind::Less => 8,
                 TokenKind::Greater => 9,
@@ -2968,7 +3043,7 @@ line: pri_line,
         let mut expr = self.parse_relational()?;
         let ops = [TokenKind::Eq, TokenKind::Neq];
         while let Some(op) = ops.iter().find(|o| self.match_token(**o)) {
-            let right = self.parse_relational()?;
+            let right = self.required_expression(|p| p.parse_relational())?;
             let op_val = match op {
                 TokenKind::Eq => 12,
                 TokenKind::Neq => 13,
@@ -2989,7 +3064,7 @@ line: pri_line,
     fn parse_bitwise_and(&mut self) -> Option<CstExpr> {
         let mut expr = self.parse_equality()?;
         while self.match_token(TokenKind::Ampersand) {
-            let right = self.parse_equality()?;
+            let right = self.required_expression(|p| p.parse_equality())?;
             expr = CstExpr {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
@@ -3005,7 +3080,7 @@ line: pri_line,
     fn parse_bitwise_xor(&mut self) -> Option<CstExpr> {
         let mut expr = self.parse_bitwise_and()?;
         while self.match_token(TokenKind::Caret) {
-            let right = self.parse_bitwise_and()?;
+            let right = self.required_expression(|p| p.parse_bitwise_and())?;
             expr = CstExpr {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
@@ -3021,7 +3096,7 @@ line: pri_line,
     fn parse_bitwise_or(&mut self) -> Option<CstExpr> {
         let mut expr = self.parse_bitwise_xor()?;
         while self.match_token(TokenKind::Pipe) {
-            let right = self.parse_bitwise_xor()?;
+            let right = self.required_expression(|p| p.parse_bitwise_xor())?;
             expr = CstExpr {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
@@ -3037,7 +3112,7 @@ line: pri_line,
     fn parse_logical_and(&mut self) -> Option<CstExpr> {
         let mut expr = self.parse_bitwise_or()?;
         while self.match_token(TokenKind::LogicalAnd) {
-            let right = self.parse_bitwise_or()?;
+            let right = self.required_expression(|p| p.parse_bitwise_or())?;
             expr = CstExpr {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
@@ -3053,7 +3128,7 @@ line: pri_line,
     fn parse_logical_or(&mut self) -> Option<CstExpr> {
         let mut expr = self.parse_logical_and()?;
         while self.match_token(TokenKind::LogicalOr) {
-            let right = self.parse_logical_and()?;
+            let right = self.required_expression(|p| p.parse_logical_and())?;
             expr = CstExpr {
                 kind: CstExprKind::Binary, expr_type: None,
                 line: expr.line, col: expr.col,
@@ -3069,9 +3144,9 @@ line: pri_line,
     fn parse_conditional(&mut self) -> Option<CstExpr> {
         let mut expr = self.parse_logical_or()?;
         if self.match_token(TokenKind::Question) {
-            let true_expr = self.parse_expression()?;
-            self.consume(TokenKind::Colon, "expected ':' in ternary");
-            let false_expr = self.parse_conditional()?;
+            let true_expr = self.required_expression(|p| p.parse_expression())?;
+            self.consume(TokenKind::Colon, "expected ':'");
+            let false_expr = self.required_expression(|p| p.parse_conditional())?;
             expr = CstExpr {
                 kind: CstExprKind::Ternary, expr_type: None,
                 line: expr.line, col: expr.col,
@@ -3088,6 +3163,34 @@ line: pri_line,
         Some(expr)
     }
 
+    /// An operator or keyword before this parse has already been consumed, so
+    /// an empty result is a *missing expression*, not a legal omission (empty
+    /// is only legal before an operator, where callers guard with lookahead).
+    /// Reports clang's `expected_expression` on the unexpected token. The parse
+    /// runs through the closure — not `self.parse_x()` in the argument — so the
+    /// receiver borrow and the parse borrow never overlap.
+    fn required_expression<F>(&mut self, parse: F) -> Option<CstExpr>
+    where
+        F: FnOnce(&mut Self) -> Option<CstExpr>,
+    {
+        match parse(self) {
+            Some(expr) => Some(expr),
+            None => {
+                self.report_missing_expression();
+                None
+            }
+        }
+    }
+
+    /// The report half of [`Self::required_expression`], for the sites that
+    /// obtain the expression some other way and need only the diagnostic.
+    /// No-op while panic mode holds, so a nested failure is never reported
+    /// twice.
+    fn report_missing_expression(&mut self) {
+        let token = self.current.clone();
+        self.error_at(&token, "expected expression");
+    }
+
     fn parse_assignment(&mut self) -> Option<CstExpr> {
         let expr = self.parse_conditional()?;
         let assign_ops = [
@@ -3098,7 +3201,7 @@ line: pri_line,
         ];
         for &op in &assign_ops {
             if self.match_token(op) {
-                let value = self.parse_assignment()?;
+                let value = self.required_expression(|p| p.parse_assignment())?;
                 if op == TokenKind::Assign {
                     return Some(CstExpr {
                         kind: CstExprKind::Assign, expr_type: None,
@@ -3136,8 +3239,12 @@ line: pri_line,
             let line = expr.line;
             let col = expr.col;
             let mut exprs = vec![expr];
-            while let Some(e) = self.parse_assignment() {
-                exprs.push(e);
+            loop {
+                // A comma was consumed, so an operand is required: the comma
+                // *operator* has no trailing form (`(1, );` is a hole), while
+                // the lists that do allow a trailing comma — initializer
+                // lists, enum members, case values — are parsed elsewhere.
+                exprs.push(self.required_expression(|p| p.parse_assignment())?);
                 if !self.match_token(TokenKind::Comma) { break; }
             }
             return Some(CstExpr {
@@ -3228,7 +3335,7 @@ line: pri_line,
     fn parse_asm_body(&mut self) -> Option<(bool, bool, String, Vec<CstAsmOperand>, Vec<CstAsmOperand>, Vec<String>, Vec<String>)> {
         let is_volatile = self.match_keyword(KeywordKind::Volatile);
         let has_goto = self.match_keyword(KeywordKind::Goto);
-        self.consume(TokenKind::LParen, "expected '(' after asm");
+        self.consume(TokenKind::LParen, "expected '('");
         let template = self.parse_asm_template()?;
         let mut outputs: Vec<CstAsmOperand> = Vec::new();
         let mut inputs: Vec<CstAsmOperand> = Vec::new();
@@ -3250,7 +3357,7 @@ line: pri_line,
                 break;
             }
         }
-        self.consume(TokenKind::RParen, "expected ')' after asm");
+        self.consume(TokenKind::RParen, "expected ')'");
         self.consume(TokenKind::Semicolon, "expected ';' after asm");
         Some((is_volatile, has_goto, template, outputs, inputs, clobbers, labels))
     }
@@ -3286,7 +3393,7 @@ line: pri_line,
             } else {
                 String::new()
             };
-            self.consume(TokenKind::RBracket, "expected ']' after asm operand name");
+            self.consume(TokenKind::RBracket, "expected ']'");
             if n.is_empty() { None } else { Some(n) }
         } else {
             None
@@ -3297,7 +3404,7 @@ line: pri_line,
         }
         self.advance();
         let constraint = self.previous_text().to_string();
-        self.consume(TokenKind::LParen, "expected '(' after asm constraint");
+        self.consume(TokenKind::LParen, "expected '('");
         let expr = match self.parse_expression() {
             Some(e) => e,
             None => {
@@ -3305,7 +3412,7 @@ line: pri_line,
                 return None;
             }
         };
-        self.consume(TokenKind::RParen, "expected ')' after asm operand expression");
+        self.consume(TokenKind::RParen, "expected ')'");
         Some(CstAsmOperand { name, constraint, expr: Box::new(expr) })
     }
 
@@ -3400,7 +3507,7 @@ line: pri_line,
                 let line = self.current.line;
                 let column = self.current.column;
                 self.advance();
-                self.consume(TokenKind::Colon, "expected ':' after label");
+                self.consume(TokenKind::Colon, "expected ':'");
                 return Some(CstStmt {
                     kind: CstStmtKind::Label,
                     line, column,
@@ -3420,7 +3527,7 @@ line: pri_line,
             let expr = if !self.check(TokenKind::Semicolon) && !self.check(TokenKind::RBrace) {
                 self.parse_expression()
             } else { None };
-            self.consume(TokenKind::Semicolon, "expected ';' after return");
+            self.consume(TokenKind::Semicolon, "expected ';' after return statement");
             return Some(CstStmt {
                 kind: CstStmtKind::Return,
                 line: kw_line, column: kw_col,
@@ -3509,12 +3616,12 @@ line: pri_line,
 
         // If
         if self.match_keyword(KeywordKind::If) {
-            self.consume(TokenKind::LParen, "expected '(' after if");
+            self.consume(TokenKind::LParen, "expected '(' after 'if'");
             let cond = self.parse_expression().unwrap_or_else(||
                 CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
 }
             );
-            self.consume(TokenKind::RParen, "expected ')' after if condition");
+            self.consume(TokenKind::RParen, "expected ')'");
             let then_branch = self.parse_statement().map(Box::new).unwrap_or_else(||
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -3534,12 +3641,12 @@ line: pri_line,
 
         // While
         if self.match_keyword(KeywordKind::While) {
-            self.consume(TokenKind::LParen, "expected '(' after while");
+            self.consume(TokenKind::LParen, "expected '(' after 'while'");
             let cond = self.parse_expression().unwrap_or_else(||
                 CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
 }
             );
-            self.consume(TokenKind::RParen, "expected ')' after while condition");
+            self.consume(TokenKind::RParen, "expected ')'");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -3560,14 +3667,14 @@ line: pri_line,
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
             );
-            self.consume_keyword(KeywordKind::While, "expected 'while' after do body");
-            self.consume(TokenKind::LParen, "expected '(' after while");
+            self.consume_keyword(KeywordKind::While, "expected 'while'");
+            self.consume(TokenKind::LParen, "expected '(' after 'while'");
             let cond = self.parse_expression().unwrap_or_else(||
                 CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
 }
             );
-            self.consume(TokenKind::RParen, "expected ')' after while condition");
-            self.consume(TokenKind::Semicolon, "expected ';' after do-while");
+            self.consume(TokenKind::RParen, "expected ')'");
+            self.consume(TokenKind::Semicolon, "expected ';' after do/while statement");
             return Some(CstStmt {
                 kind: CstStmtKind::Do,
                 line: stmt_line, column: stmt_col,
@@ -3580,7 +3687,7 @@ line: pri_line,
 
         // For / For-in
         if self.match_keyword(KeywordKind::For) {
-            self.consume(TokenKind::LParen, "expected '(' after for");
+            self.consume(TokenKind::LParen, "expected '(' after 'for'");
             // For-in: `for (Type var in collection)` — desugared here (like
             // `@42` → `[NPNumber numberWithInt:]`) into a plain C for loop so
             // downstream (checker/ARC/codegen) only ever sees For+Decl+MsgSend.
@@ -3613,7 +3720,7 @@ line: pri_line,
                     CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
 }
                 });
-                self.consume(TokenKind::RParen, "expected ')' after for-in collection");
+                self.consume(TokenKind::RParen, "expected ')'");
                 let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                     Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -3830,7 +3937,7 @@ line: pri_line,
             };
             let incr = if !self.check(TokenKind::RParen) {
                 let e = self.parse_expression();
-                self.consume(TokenKind::RParen, "expected ')' after for incr");
+                self.consume(TokenKind::RParen, "expected ')'");
                 e
             } else {
                 self.advance();
@@ -3860,12 +3967,12 @@ line: pri_line,
 
         // Switch
         if self.match_keyword(KeywordKind::Switch) {
-            self.consume(TokenKind::LParen, "expected '(' after switch");
+            self.consume(TokenKind::LParen, "expected '(' after 'switch'");
             let expr = self.parse_expression().map(Box::new).unwrap_or_else(||
                 Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
 })
             );
-            self.consume(TokenKind::RParen, "expected ')' after switch expr");
+            self.consume(TokenKind::RParen, "expected ')'");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -3948,18 +4055,22 @@ line: pri_line,
             let mut extra: Vec<Box<CstExpr>> = Vec::new();
             if matches!(pattern, CstPattern::Const(_)) && guard.is_none() {
                 while self.match_token(TokenKind::Comma) {
-                    match self.parse_assignment() {
+                    match self.required_expression(|p| p.parse_assignment()) {
                         Some(v) => {
                             if !is_object_literal(&v) && expr_is_non_constant(&v) {
                                 self.error(CASE_NON_CONSTANT_MSG);
                             }
                             extra.push(Box::new(v));
                         }
+                        // Reported by `required_expression`: a comma consumed,
+                        // so a value was required — a trailing comma before
+                        // `:` is a hole here too. Breaking keeps the label
+                        // going, so recovery still binds the body.
                         None => break,
                     }
                 }
             }
-            self.consume(TokenKind::Colon, "expected ':' after case pattern");
+            self.consume(TokenKind::Colon, "expected ':'");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -4016,7 +4127,7 @@ line: pri_line,
 
         // Default
         if self.match_keyword(KeywordKind::Default) {
-            self.consume(TokenKind::Colon, "expected ':' after default");
+            self.consume(TokenKind::Colon, "expected ':'");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -4048,7 +4159,7 @@ line: pri_line,
                         param.name = Some(self.current_text().to_string());
                         self.advance();
                     }
-                    self.consume(TokenKind::RParen, "expected ')' after @catch param");
+                    self.consume(TokenKind::RParen, "expected ')'");
                 }
                 let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                     Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
@@ -4078,12 +4189,12 @@ line: pri_line,
 
         // @synchronized
         if self.match_keyword(KeywordKind::AtSynchronized) {
-            self.consume(TokenKind::LParen, "expected '(' after @synchronized");
+            self.consume(TokenKind::LParen, "expected '(' after '@synchronized'");
             let lock = self.parse_expression().map(Box::new).unwrap_or_else(||
                 Box::new(CstExpr { kind: CstExprKind::Integer, expr_type: None, line: 0, col: 0, data: CstExprData::Integer(0) , end_line: self.previous.end_line, end_col: self.previous.end_col 
 })
             );
-            self.consume(TokenKind::RParen, "expected ')' after @synchronized lock");
+            self.consume(TokenKind::RParen, "expected ')'");
             let body = self.parse_statement().map(Box::new).unwrap_or_else(||
                 Box::new(CstStmt { kind: CstStmtKind::Compound, line: 0, column: 0, data: CstStmtData::Compound(Vec::new()) , end_line: self.previous.end_line, end_column: self.previous.end_col 
 })
@@ -4431,7 +4542,7 @@ line: pri_line,
         let mut params = Vec::new();
         let mut has_variadic = false;
 
-        self.consume(TokenKind::LParen, "expected '(' after function name");
+        self.consume(TokenKind::LParen, "expected '('");
         while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
             if self.match_token(TokenKind::Ellipsis) {
                 has_variadic = true;
@@ -4454,7 +4565,7 @@ line: pri_line,
                             arr_type.array_size_name = Some(self.current_text().to_string());
                             self.advance();
                         }
-                        self.consume(TokenKind::RBracket, "expected ']' after array size");
+                        self.consume(TokenKind::RBracket, "expected ']'");
                         pt = arr_type;
                     }
                     n
@@ -4473,7 +4584,7 @@ line: pri_line,
             }
             if !self.match_token(TokenKind::Comma) { break; }
         }
-        self.consume(TokenKind::RParen, "expected ')' after params");
+        self.consume(TokenKind::RParen, "expected ')'");
 
         // Trailing attributes: `int f(int) __attribute__((pure));`
         let mut trailing_attrs = self.parse_attributes();
@@ -4878,11 +4989,11 @@ line: pri_line,
                             }
                             *var_type = Some(Box::new(array_type));
                         }
-                        self.consume(TokenKind::RBracket, "expected ']' after array size");
+                        self.consume(TokenKind::RBracket, "expected ']'");
                     }
                     // Initializer
                     if self.match_token(TokenKind::Assign) {
-                        let init = self.parse_assignment();
+                        let init = self.required_expression(|p| p.parse_assignment());
                         if let CstDeclData::Variable { ref mut initializer, .. } = var.data {
                             *initializer = init.map(Box::new);
                         }
@@ -4920,7 +5031,7 @@ line: pri_line,
 };
                             if self.match_token(TokenKind::Assign) {
                                 if let CstDeclData::Variable { ref mut initializer, .. } = next_var.data {
-                                    *initializer = self.parse_assignment().map(Box::new);
+                                    *initializer = self.required_expression(|p| p.parse_assignment()).map(Box::new);
                                 }
                             }
                             next_var.end_line = self.previous.end_line;
@@ -4929,10 +5040,10 @@ line: pri_line,
                             tail = tail.next.as_mut().unwrap();
                             if !self.match_token(TokenKind::Comma) { break; }
                         }
-                        self.consume(TokenKind::Semicolon, "expected ';' after declaration");
+                        self.consume(TokenKind::Semicolon, "expected ';' at end of declaration");
                         return Some(*head);
                     }
-                    self.consume(TokenKind::Semicolon, "expected ';' after declaration");
+                    self.consume(TokenKind::Semicolon, "expected ';' at end of declaration");
                     return Some(var);
                 }
             }
@@ -5033,12 +5144,12 @@ line: pri_line,
                     }
                     *var_type = Some(Box::new(array_type));
                 }
-                self.consume(TokenKind::RBracket, "expected ']' after array size");
+                self.consume(TokenKind::RBracket, "expected ']'");
             }
 
             // Initializer
             if self.match_token(TokenKind::Assign) {
-                let init = self.parse_assignment();
+                let init = self.required_expression(|p| p.parse_assignment());
                 if let CstDeclData::Variable { ref mut initializer, .. } = var.data {
                     *initializer = init.map(Box::new);
                 }
@@ -5118,11 +5229,11 @@ line: pri_line,
                         if let CstDeclData::Variable { ref mut var_type, .. } = next_var.data {
                             *var_type = Some(Box::new(array_type));
                         }
-                        self.consume(TokenKind::RBracket, "expected ']' after array size");
+                        self.consume(TokenKind::RBracket, "expected ']'");
                     }
                     if self.match_token(TokenKind::Assign) {
                         if let CstDeclData::Variable { ref mut initializer, .. } = next_var.data {
-                            *initializer = self.parse_assignment().map(Box::new);
+                            *initializer = self.required_expression(|p| p.parse_assignment()).map(Box::new);
                         }
                     }
                     next_var.end_line = self.previous.end_line;
@@ -5131,11 +5242,11 @@ line: pri_line,
                     tail = tail.next.as_mut().unwrap();
                     if !self.match_token(TokenKind::Comma) { break; }
                 }
-                self.consume(TokenKind::Semicolon, "expected ';' after declaration");
+                self.consume(TokenKind::Semicolon, "expected ';' at end of declaration");
                 return Some(*head);
             }
 
-            self.consume(TokenKind::Semicolon, "expected ';' after declaration");
+            self.consume(TokenKind::Semicolon, "expected ';' at end of declaration");
             Some(var)
         }
     }
@@ -5171,14 +5282,14 @@ line: pri_line,
             if self.current.kind == TokenKind::Identifier {
                 let alias = self.current_text().to_string();
                 self.advance();
-                self.consume(TokenKind::Semicolon, "expected ; after typedef");
+                self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
                 self.add_type_name(&alias);
                 if let CstDeclData::Enum { .. } = enum_decl.data {
                     enum_decl.name = Some(alias);
                 }
                 return Some(enum_decl);
             }
-            self.consume(TokenKind::Semicolon, "expected ; after typedef");
+            self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
             return Some(enum_decl);
         }
         if self.current.kind == TokenKind::Keyword &&
@@ -5198,7 +5309,7 @@ line: pri_line,
 if self.current.kind == TokenKind::Identifier {
                     let alias = self.current_text().to_string();
                     self.advance();
-                    self.consume(TokenKind::Semicolon, "expected ; after typedef");
+                    self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
                     self.add_type_name(&name);
                     self.add_type_name(&alias);
                         return Some(CstDecl {
@@ -5218,7 +5329,7 @@ if self.current.kind == TokenKind::Identifier {
                                                     attributes: Vec::new(),
 });
                     }
-                    self.consume(TokenKind::Semicolon, "expected ; after struct");
+                    self.consume(TokenKind::Semicolon, "expected ';' after struct");
                     return Some(CstDecl {
                         kind: CstDeclKind::Struct,
                         line: start.0, column: start.1,
@@ -5238,7 +5349,7 @@ if self.current.kind == TokenKind::Identifier {
                 if self.current.kind == TokenKind::Identifier {
                     let alias = self.current_text().to_string();
                     self.advance();
-                    self.consume(TokenKind::Semicolon, "expected ; after typedef");
+                    self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
                     self.add_type_name(&alias);
                     return Some(CstDecl {
                         kind: CstDeclKind::Typedef,
@@ -5258,7 +5369,7 @@ if self.current.kind == TokenKind::Identifier {
                     });
                 }
                 // Forward declaration
-                self.consume(TokenKind::Semicolon, "expected ; after struct name");
+                self.consume(TokenKind::Semicolon, "expected ';' after struct");
                 return Some(CstDecl {
                     kind: CstDeclKind::Struct,
                     line: start.0, column: start.1,
@@ -5277,7 +5388,7 @@ if self.current.kind == TokenKind::Identifier {
                 if self.current.kind == TokenKind::Identifier {
                     let alias = self.current_text().to_string();
                     self.advance();
-                    self.consume(TokenKind::Semicolon, "expected ; after typedef");
+                    self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
                     self.add_type_name(&alias);
                     return Some(CstDecl {
                         kind: CstDeclKind::Typedef,
@@ -5294,7 +5405,7 @@ if self.current.kind == TokenKind::Identifier {
                         end_column: self.previous.end_col,
 });
                 }
-                self.consume(TokenKind::Semicolon, "expected ; after struct");
+                self.consume(TokenKind::Semicolon, "expected ';' after struct");
                 return Some(CstDecl {
                     kind: CstDeclKind::Struct,
                     line: start.0, column: start.1,
@@ -5307,7 +5418,7 @@ if self.current.kind == TokenKind::Identifier {
                     end_column: self.previous.end_col,
 });
             }
-            self.consume(TokenKind::Semicolon, "expected ; after struct");
+            self.consume(TokenKind::Semicolon, "expected ';' after struct");
             return None;
         }
 
@@ -5323,7 +5434,7 @@ if self.current.kind == TokenKind::Identifier {
             if self.current.kind == TokenKind::Identifier {
                 let alias = self.current_text().to_string();
                 self.advance();
-                self.consume(TokenKind::Semicolon, "expected ; after typedef");
+                self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
                 self.add_type_name(&alias);
                 // Override the enum decl's name to the trailing alias so codegen
                 // emits `typedef enum Alias Alias;` matching the source form.
@@ -5332,7 +5443,7 @@ if self.current.kind == TokenKind::Identifier {
                 }
                 return Some(enum_decl);
             }
-            self.consume(TokenKind::Semicolon, "expected ; after typedef");
+            self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
             return Some(enum_decl);
         }
 
@@ -5346,7 +5457,7 @@ if self.current.kind == TokenKind::Identifier {
         if let Some(ref at) = alias_type {
             if let Some(ref block_name) = at.block_name {
                 let name = block_name.clone();
-                self.consume(TokenKind::Semicolon, "expected ; after typedef");
+                self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
                 self.add_type_name(&name);
                 return Some(CstDecl {
                     kind: CstDeclKind::Typedef,
@@ -5382,9 +5493,9 @@ if self.current.kind == TokenKind::Identifier {
                     self.advance();
                 }
                 at = Some(arr);
-                self.consume(TokenKind::RBracket, "expected ] after array size");
+                self.consume(TokenKind::RBracket, "expected ']'");
             }
-            self.consume(TokenKind::Semicolon, "expected ; after typedef");
+            self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
             self.add_type_name(&name);
             return Some(CstDecl {
                 kind: CstDeclKind::Typedef,
@@ -5401,7 +5512,7 @@ if self.current.kind == TokenKind::Identifier {
                 end_column: self.previous.end_col,
 });
         }
-        self.consume(TokenKind::Semicolon, "expected ; after typedef");
+        self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
         None
     }
 
@@ -5515,7 +5626,7 @@ if self.current.kind == TokenKind::Identifier {
                 // skip
             }
         }
-                self.consume(TokenKind::RBrace, "expected '}' after struct");
+                self.consume(TokenKind::RBrace, "expected '}'");
         Some(fields)
     }
     fn parse_enum(&mut self) -> Option<CstDecl> {
@@ -5537,7 +5648,7 @@ if self.current.kind == TokenKind::Identifier {
             // enum decl so the name resolves.
             if !self.check(TokenKind::LBrace) {
                 if let Some(ref n) = name { self.add_type_name(n); }
-                self.consume(TokenKind::Semicolon, "expected ';' after enum name");
+                self.consume(TokenKind::Semicolon, "expected ';' after enum");
                 return Some(CstDecl {
                     kind: CstDeclKind::Enum,
                     line: en_line, column: en_col,
@@ -5585,7 +5696,7 @@ if self.current.kind == TokenKind::Identifier {
                     break;
                 }
             }
-            self.consume(TokenKind::RBrace, "expected '}' after enum");
+            self.consume(TokenKind::RBrace, "expected '}'");
             // Do NOT consume `;` here — `typedef enum {...} Alias;` flow needs
             // to read the trailing alias identifier first (handled by caller
             // `parse_typedef`). For a bare `enum Foo {...};` decl, the caller
@@ -5646,7 +5757,7 @@ if self.current.kind == TokenKind::Identifier {
                 }
                 self.advance();
             }
-            self.consume(TokenKind::RParen, "expected ')' after category name");
+            self.consume(TokenKind::RParen, "expected ')'");
             category_name = if cat.is_empty() { None } else { Some(cat) };
         }
 
@@ -5684,14 +5795,14 @@ if self.current.kind == TokenKind::Identifier {
                         // `id<P>` and bare `P` are equivalent); each protocol
                         // in the conjunction becomes its own bound entry.
                         self.advance();
-                        self.consume(TokenKind::Less, "expected '<' after 'id' in type-param bound");
+                        self.consume(TokenKind::Less, "expected '<'");
                         while self.current.kind == TokenKind::Identifier {
                             let bound = self.current_text().to_string();
                             self.advance();
                             bounds.push((tp.clone(), bound));
                             if !(self.match_token(TokenKind::Comma) || self.match_token(TokenKind::Ampersand)) { break; }
                         }
-                        self.consume(TokenKind::Greater, "expected '>' after bound protocol");
+                        self.consume(TokenKind::Greater, "expected '>'");
                     } else if self.current.kind == TokenKind::Identifier {
                         // Bare protocol name, or class-pointer spelling
                         // `NSObject *` — the `*` is stripped; storage is
@@ -5706,7 +5817,7 @@ if self.current.kind == TokenKind::Identifier {
                 // into one conjunction list (same semantics as `,`).
                 if !(self.match_token(TokenKind::Comma) || self.match_token(TokenKind::Ampersand)) { break; }
             }
-            self.consume(TokenKind::Greater, "expected '>' after type params");
+            self.consume(TokenKind::Greater, "expected '>'");
             // Protocol names come from `@protocol` (add_type_name); type-param
             // names ALSO end up in type_names once their class finishes parsing
             // (below), so `@interface B<T>` after `@interface A<T>` would see
@@ -5782,7 +5893,7 @@ if self.current.kind == TokenKind::Identifier {
                         }
                         self.advance();
                     }
-                    self.consume(TokenKind::RParen, "expected ')' after ivar qualifier");
+                    self.consume(TokenKind::RParen, "expected ')'");
                 }
                 // IBOutlet qualifier
                 let iboutlet = false;
@@ -5811,7 +5922,7 @@ if self.current.kind == TokenKind::Identifier {
                                 arr_type.array_size_name = Some(self.current_text().to_string());
                                 self.advance();
                             }
-                            self.consume(TokenKind::RBracket, "expected ']' after array size");
+                            self.consume(TokenKind::RBracket, "expected ']'");
                             final_type = arr_type;
                         }
                         ivars.push(CstDecl {
@@ -5845,7 +5956,7 @@ if self.current.kind == TokenKind::Identifier {
                     self.advance();
                 }
             }
-            self.consume(TokenKind::RBrace, "expected '}' after ivar list");
+            self.consume(TokenKind::RBrace, "expected '}'");
         }
 
         // Properties and methods
@@ -5988,7 +6099,7 @@ if self.current.kind == TokenKind::Identifier {
                 }
                 self.advance();
             }
-            self.consume(TokenKind::RParen, "expected ')' after category name");
+            self.consume(TokenKind::RParen, "expected ')'");
             category_name = if cat.is_empty() { None } else { Some(cat) };
         }
 
@@ -6120,14 +6231,14 @@ if self.current.kind == TokenKind::Identifier {
                     self.advance();
                 }
                 else if self.match_keyword(KeywordKind::AtGetter) {
-                    self.consume(TokenKind::Assign, "expected '=' after getter");
+                    self.consume(TokenKind::Assign, "expected '='");
                     if self.current.kind == TokenKind::Identifier {
                         getter = Some(self.current_text().to_string());
                         self.advance();
                     }
                 }
                 else if self.match_keyword(KeywordKind::AtSetter) {
-                    self.consume(TokenKind::Assign, "expected '=' after setter");
+                    self.consume(TokenKind::Assign, "expected '='");
                     if self.current.kind == TokenKind::Identifier {
                         let s = self.current_text().to_string();
                         self.advance();
@@ -6142,7 +6253,7 @@ if self.current.kind == TokenKind::Identifier {
                 }
                 if !self.match_token(TokenKind::Comma) { break; }
             }
-            self.consume(TokenKind::RParen, "expected ')' after property attributes");
+            self.consume(TokenKind::RParen, "expected ')'");
         }
 
         let mut prop_type = self.parse_type_full();
@@ -6170,7 +6281,7 @@ if self.current.kind == TokenKind::Identifier {
                     arr_type.array_size = self.current_text().parse().unwrap_or(0);
                     self.advance();
                 }
-                self.consume(TokenKind::RBracket, "expected ']' after array size");
+                self.consume(TokenKind::RBracket, "expected ']'");
                 prop_type = Some(arr_type);
             }
             // Check for comma-separated names
@@ -6226,10 +6337,10 @@ if self.current.kind == TokenKind::Identifier {
                     tail = tail.next.as_mut().unwrap();
                     if !self.match_token(TokenKind::Comma) { break; }
                 }
-                self.consume(TokenKind::Semicolon, "expected ';' after @property");
+                self.consume(TokenKind::Semicolon, "expected ';' at end of declaration list");
                 return Some(head);
             }
-            self.consume(TokenKind::Semicolon, "expected ';' after @property");
+            self.consume(TokenKind::Semicolon, "expected ';' at end of declaration list");
             return Some(CstDecl {
                 kind: CstDeclKind::Property,
                 line: pp_line, column: pp_col,
@@ -6253,7 +6364,7 @@ if self.current.kind == TokenKind::Identifier {
                 end_column: self.previous.end_col,
 });
         }
-        self.consume(TokenKind::Semicolon, "expected ';' after @property");
+        self.consume(TokenKind::Semicolon, "expected ';' at end of declaration list");
         None
     }
 
@@ -6273,7 +6384,7 @@ if self.current.kind == TokenKind::Identifier {
                 self.advance();
             }
             let rt = self.parse_type_annotated();
-            self.consume(TokenKind::RParen, "expected ')' after method return type");
+            self.consume(TokenKind::RParen, "expected ')'");
             if async_modifier {
                 match rt {
                     Some(t) => Some(t),
@@ -6332,7 +6443,7 @@ if self.current.kind == TokenKind::Identifier {
                 // Type name (optional)
                 if self.match_token(TokenKind::LParen) {
                     p.par_type = self.parse_type_annotated().map(Box::new);
-                    self.consume(TokenKind::RParen, "expected ')' after param type");
+                    self.consume(TokenKind::RParen, "expected ')'");
                 } else {
                     p.par_type = self.parse_type_annotated().map(Box::new);
                 }
@@ -6403,7 +6514,7 @@ if self.current.kind == TokenKind::Identifier {
                             };
                             if self.match_token(TokenKind::LParen) {
                                 next_p.par_type = self.parse_type_annotated().map(Box::new);
-                                self.consume(TokenKind::RParen, "expected ')' after param type");
+                                self.consume(TokenKind::RParen, "expected ')'");
                             } else {
                                 next_p.par_type = self.parse_type_annotated().map(Box::new);
                             }
@@ -6450,7 +6561,7 @@ if self.current.kind == TokenKind::Identifier {
                 }
                 if !self.match_token(TokenKind::Comma) { break; }
             }
-            self.consume(TokenKind::RParen, "expected ')' after params");
+            self.consume(TokenKind::RParen, "expected ')'");
         }
 
         // Trailing declaration annotation: bare `throws` / `throws(T *)` before

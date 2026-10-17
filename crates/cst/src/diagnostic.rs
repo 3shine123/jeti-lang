@@ -251,6 +251,14 @@ fn render_one(d: &Diagnostic, lookup: &SourceLookup, color: bool) -> String {
             let width = (end - col).min(line_text.len().saturating_sub(col - 1)).max(1);
             out.push_str(&format!("{}^{}{}", c_on, "~".repeat(width - 1), c_off));
         }
+        // An explicit single-caret span (`end == col + 1`): the `expected`
+        // family records exactly this, and clang renders its `expected`
+        // diagnostics as a plain caret even when the caret lands on a word —
+        // `if 1)` points at `1`, never `^~`. Widening here would turn every
+        // expected-on-a-keyword into an underline.
+        Some(end) if end == col + 1 => {
+            out.push_str(&format!("{}^{}", c_on, c_off));
+        }
         _ => {
             // No recorded width: underline the token under the caret when the
             // caret sits at its start (previous char is not identifier-ish) —
