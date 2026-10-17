@@ -13,6 +13,12 @@
 //! unanalyzed after its last edit (default 150); zero re-analyzes on every
 //! message, which is how the tests stay free of real-time dependence.
 //!
+//! The quiet period is fired by the clock, not by the next message: stdin is
+//! polled against the nearest re-analysis deadline, so the last edit of a
+//! burst is analyzed even when the client goes silent after it — blocking
+//! indefinitely there would leave the editor showing the previous edit's
+//! diagnostics forever (old error never cleared, new error never reported).
+//!
 //! Protocol state and diagnostics live in the library so they are testable
 //! without a subprocess; this file is only argument handling and the stdio loop.
 
@@ -20,6 +26,97 @@ use std::io::{self, BufReader, BufWriter};
 use std::time::Duration;
 
 use jeti_lsp::{apply_flags, read_message, write_message, AnalysisOptions, Server};
+
+/// Is stdin readable now, or within `timeout`? `None` waits forever.
+/// `false` is a bare timeout — the moment the loop uses to run the
+/// due re-analyses itself.
+#[cfg(unix)]
+mod wait {
+    use std::time::Duration;
+
+    #[repr(C)]
+    struct PollFd {
+        fd: std::os::unix::io::RawFd,
+        events: i16,
+        revents: i16,
+    }
+
+    const POLLIN: i16 = 0x0001;
+    const EINTR: i32 = 4; // BSD and Linux agree on this one
+
+    extern "C" {
+        fn poll(fds: *mut PollFd, nfds: u64, timeout: i32) -> i32;
+    }
+
+    pub fn ready(timeout: Option<Duration>) -> bool {
+        let mut fd = PollFd { fd: 0, events: POLLIN, revents: 0 };
+        let millis = match timeout {
+            None => -1,
+            Some(d) => i32::try_from(d.as_millis()).unwrap_or(i32::MAX),
+        };
+        loop {
+            let n = unsafe { poll(&mut fd, 1, millis) };
+            if n > 0 {
+                // EOF also reports readable (the read that follows returns
+                // zero); an invalid fd must not be waited on again either.
+                return true;
+            }
+            if n == 0 {
+                return false;
+            }
+            if std::io::Error::last_os_error().raw_os_error() == Some(EINTR) {
+                continue; // interrupted, not a result
+            }
+            return true; // abnormal: let the read surface it
+        }
+    }
+}
+
+/// The Windows twin of the unix poll: `WSAPoll` on the stdin handle.
+#[cfg(windows)]
+mod wait {
+    use std::time::Duration;
+
+    const STD_INPUT_HANDLE: i32 = -10;
+    const FD_READ: i16 = 0x0001;
+    const WSAEINTR: i32 = 10036;
+
+    #[repr(C)]
+    struct WsaFd {
+        socket: u32,
+        events: i16,
+        revents: i16,
+    }
+
+    #[link(name = "ws2_32")]
+    extern "system" {
+        fn GetStdHandle(nStdHandle: i32) -> *mut std::ffi::c_void;
+        fn WSAPoll(fds: *mut WsaFd, nfds: u32, timeout: i32) -> i32;
+        fn WSAGetLastError() -> i32;
+    }
+
+    pub fn ready(timeout: Option<Duration>) -> bool {
+        let socket = unsafe { GetStdHandle(STD_INPUT_HANDLE) as u32 };
+        let mut fd = WsaFd { socket, events: FD_READ, revents: 0 };
+        let millis = match timeout {
+            None => -1,
+            Some(d) => i32::try_from(d.as_millis()).unwrap_or(i32::MAX),
+        };
+        loop {
+            let n = unsafe { WSAPoll(&mut fd, 1, millis) };
+            if n > 0 {
+                return true;
+            }
+            if n == 0 {
+                return false;
+            }
+            if unsafe { WSAGetLastError() } == WSAEINTR {
+                continue; // interrupted, not a result
+            }
+            return true; // abnormal: let the read surface it
+        }
+    }
+}
 
 fn main() {
     // The very same parser a project's `compile_commands.json` goes through, so
@@ -43,6 +140,17 @@ fn main() {
     let mut writer = BufWriter::new(stdout.lock());
 
     loop {
+        // `None`: nothing is dirty — block indefinitely. Otherwise wake the
+        // moment the nearest quiet period expires, even when the client has
+        // sent no message since the last edit.
+        if !wait::ready(server.next_flush_in()) {
+            for outgoing in server.flush_due() {
+                if write_message(&mut writer, &outgoing).is_err() {
+                    return;
+                }
+            }
+            continue;
+        }
         let body = match read_message(&mut reader) {
             Ok(Some(body)) => body,
             // EOF or a truncated frame: the client went away.

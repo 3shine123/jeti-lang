@@ -160,7 +160,15 @@ const vscode = {
       get: (key) => overrides[key] ?? defaults[key],
     }),
     onDidOpenTextDocument: (listener) => subscribe('open', listener),
-    onDidChangeTextDocument: (listener) => subscribe('change', listener),
+    onDidChangeTextDocument: (listener) =>
+      subscribe('change', (event) => {
+        // VS Code updates the buffer before change listeners run; model that
+        // so `getText()` inside a listener sees the new content.
+        if (event.document && event.document.applyEdits) {
+          event.document.applyEdits(event.contentChanges || []);
+        }
+        listener(event);
+      }),
     onDidCloseTextDocument: (listener) => subscribe('close', listener),
     onDidChangeConfiguration: (listener) => subscribe('config', listener),
   },
@@ -215,11 +223,35 @@ async function waitUntil(predicate, what, timeoutMs = 20000) {
 }
 
 function documentFor(file, text) {
+  const state = { text };
   return {
     uri: { fsPath: file, toString: () => pathToFileURL(file).toString() },
     languageId: 'jeti',
-    getText: () => text,
+    getText: () => state.text,
+    // Apply the editor's content changes to the buffer (in reverse, so the
+    // earlier positions stay valid), as VS Code does before notifying.
+    applyEdits(changes) {
+      const edits = changes
+        .map((change) => ({
+          start: change.range ? positionToIndex(state.text, change.range.start) : 0,
+          end: change.range ? positionToIndex(state.text, change.range.end) : state.text.length,
+          text: change.text,
+        }))
+        .sort((a, b) => b.start - a.start);
+      for (const edit of edits) {
+        state.text = state.text.slice(0, edit.start) + edit.text + state.text.slice(edit.end);
+      }
+    },
   };
+}
+
+/** (0-based line, UTF-16 character) → index into the string (UTF-16 units). */
+function positionToIndex(text, position) {
+  const lines = text.split('\n');
+  if (position.line >= lines.length) return text.length;
+  let index = 0;
+  for (let i = 0; i < position.line; i += 1) index += lines[i].length + 1;
+  return index + Math.min(position.character, lines[position.line].length);
 }
 
 /** The (0-based line, UTF-16 character) an editor reports for `needle`, shifted
@@ -434,8 +466,9 @@ async function main() {
     assert.strictEqual(noHelp, undefined, 'outside a call there is no signature');
     console.log('ok  signatureHelp provider → label, parameters, active parameter');
 
-    // Incremental sync: the change travels as a range, and the diagnostics
-    // follow it. Delete the `;` of `return 0;`, then put it back.
+    // Full sync: the change event still carries the editor's ranges (the mock
+    // applies them to the buffer first, as VS Code does), but the extension
+    // forwards the whole buffer. Delete the `;` of `return 0;`, then put it back.
     const semicolon = positionOf(program, 'return 0;', 8);
     fire('change', {
       document: programDocument,
@@ -453,7 +486,7 @@ async function main() {
       contentChanges: [{ range: { start: semicolon, end: semicolon }, text: ';' }],
     });
     await waitUntil(() => (collection().get(uri) || []).length === 0, 'the range edit to be undone');
-    console.log('ok  didChange with a range → diagnostics track the edit');
+    console.log('ok  didChange (full sync) → diagnostics track the edit');
 
     // Build switches reach the server: `jeti.arc: false` must spawn with
     // `-fno-jeti-arc`, which is what makes an MRC project stop showing ARC

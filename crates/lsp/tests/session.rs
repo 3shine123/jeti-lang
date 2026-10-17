@@ -336,7 +336,7 @@ fn server_answers_editors_requests_end_to_end() {
     stdin.flush().expect("flush");
     let response = read_frame(&mut stdout);
     assert_eq!(response["id"], 1);
-    assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 2);
+    assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 1);
     assert_eq!(response["result"]["capabilities"]["documentSymbolProvider"], true);
     assert_eq!(response["result"]["capabilities"]["definitionProvider"], true);
     assert_eq!(response["result"]["serverInfo"]["name"], "jeti-lsp");

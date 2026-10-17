@@ -569,9 +569,15 @@ impl Server {
                 id,
                 json!({
                     "capabilities": {
-                        // 2 = Incremental: the client sends the changed range,
-                        // not the whole buffer. See `apply_change`.
-                        "textDocumentSync": 2,
+                        // 1 = Full: every change carries the whole buffer. The
+                        // server re-analyzes from scratch on each flush anyway,
+                        // so incremental ranges buy nothing here — but they can
+                        // desync: a range whose position has drifted out of the
+                        // server's text is dropped, and the diagnostics freeze
+                        // on stale content until a whole-buffer edit re-syncs.
+                        // A full replacement can never desync. `apply_change`
+                        // still understands ranges, for other clients.
+                        "textDocumentSync": 1,
                         "documentSymbolProvider": true,
                         "definitionProvider": true,
                         "referencesProvider": true,
@@ -836,10 +842,29 @@ impl Server {
         out
     }
 
+    /// How long until the nearest dirty document's re-analysis is due —
+    /// `None` while no buffer is waiting. The stdio loop polls stdin against
+    /// this deadline, so the quiet period fires on the clock alone: the last
+    /// edit of a burst sends no following message, and blocking indefinitely
+    /// would leave its result unpublished forever (the editor keeps showing
+    /// the old error, or never shows the new one).
+    pub fn next_flush_in(&self) -> Option<Duration> {
+        let now = self.now();
+        self.docs
+            .values()
+            .filter_map(|doc| doc.dirty_since)
+            .map(|since| since + self.quiet_period)
+            .min()
+            .map(|deadline| deadline.saturating_sub(now))
+    }
+
     /// Re-analyze the documents whose last edit is older than the quiet
     /// period — the settled result of every edit since the last analysis.
     /// Intermediate states are never published; only what the buffer rests on.
-    fn flush_due(&mut self) -> Vec<Value> {
+    ///
+    /// Public for the same reason as [`Self::next_flush_in`]: the stdio loop
+    /// must call it when the clock alone says the buffer has settled.
+    pub fn flush_due(&mut self) -> Vec<Value> {
         let now = self.now();
         let due: Vec<String> = self
             .docs
@@ -1194,7 +1219,7 @@ mod tests {
         let out = server.handle(&init);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["id"], 1);
-        assert_eq!(out[0]["result"]["capabilities"]["textDocumentSync"], 2);
+        assert_eq!(out[0]["result"]["capabilities"]["textDocumentSync"], 1);
 
         let uri = path_to_uri("/tmp/jeti_lsp_unit/session.jeti");
         let open = json!({
@@ -1437,6 +1462,51 @@ mod tests {
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
         assert_eq!(out[1]["id"], 1);
+    }
+
+    #[test]
+    fn the_clock_alone_flushes_the_settled_edit() {
+        // The stdio loop polls stdin against `next_flush_in`, so the quiet
+        // period fires on the clock alone: the last edit of a burst is
+        // analyzed even when the client goes silent after it. Without this
+        // the editor keeps showing the previous edit's diagnostics forever —
+        // an error never clears once the fix is the final edit.
+        let t = std::rc::Rc::new(std::cell::Cell::new(Duration::ZERO));
+        let clock = t.clone();
+        let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::from_millis(100);
+        server.clock = Box::new(move || clock.get());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/timer.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1,
+                "text": "int main(void) { return 0; }" } }
+        }));
+        // The only edit ever made: drop the semicolon at column 25. No
+        // message follows — exactly what the editor does after the last
+        // keystroke of a fix.
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": { "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [ {
+                    "range": { "start": {"line": 0, "character": 25},
+                               "end": {"line": 0, "character": 26} },
+                    "text": "" } ] }
+        }));
+        // Inside the window: the loop would wait this long for input.
+        t.set(Duration::from_millis(40));
+        assert_eq!(server.next_flush_in(), Some(Duration::from_millis(60)));
+        assert!(server.flush_due().is_empty(), "not due yet");
+        // The clock alone crosses the deadline: now due, one flush settles it.
+        t.set(Duration::from_millis(100));
+        assert_eq!(server.next_flush_in(), Some(Duration::ZERO));
+        let out = server.flush_due();
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
+        assert!(!out[0]["params"]["diagnostics"].as_array().unwrap().is_empty());
+        // Settled: nothing left to flush; the loop blocks indefinitely again.
+        assert!(server.next_flush_in().is_none());
     }
 
     #[test]

@@ -284,16 +284,16 @@ function restart() {
         client.openDocument(document.uri.toString(), document.getText());
       }
     }),
-    // Incremental sync (the server advertises `textDocumentSync: 2`): forward
-    // the editor's own change events, ranges and all. An event without changes
-    // (or without a document snapshot) falls back to the whole buffer, which the
-    // server also accepts.
+    // Full sync (the server advertises `textDocumentSync: 1`): always send the
+    // whole buffer. The server re-analyzes from scratch on each flush, so
+    // incremental ranges would buy nothing — and a range applied to a
+    // desynchronized server-side copy is dropped, freezing the diagnostics on
+    // stale content. A full replacement can never desync.
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (!client || !isJetiDocument(event.document)) return;
-      const changes = event.contentChanges && event.contentChanges.length
-        ? event.contentChanges
-        : [{ text: event.document.getText() }];
-      client.changeDocument(event.document.uri.toString(), changes);
+      client.changeDocument(event.document.uri.toString(), [
+        { text: event.document.getText() },
+      ]);
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       if (client && isJetiDocument(document)) {
