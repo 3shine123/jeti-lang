@@ -9,8 +9,14 @@ use std::process::{ChildStdout, Command, Stdio};
 
 use serde_json::{json, Value};
 
-/// Spawn the server under test with `args`.
+/// Spawn the server under test with `args`. The quiet period is zeroed: the
+/// tests drive the server with back-to-back messages, so "the buffer has been
+/// quiet for 150 ms" must never depend on real elapsed time.
 fn spawn(args: &[&str]) -> (std::process::Child, std::process::ChildStdin, BufReader<ChildStdout>) {
+    let args: Vec<&str> = std::iter::once("--debounce-ms")
+        .chain(std::iter::once("0"))
+        .chain(args.iter().copied())
+        .collect();
     let mut child = Command::new(env!("CARGO_BIN_EXE_jeti-lsp"))
         .args(args)
         .stdin(Stdio::piped())
@@ -355,7 +361,9 @@ fn server_answers_editors_requests_end_to_end() {
     assert_eq!(diagnostics[0]["severity"], 1);
     assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
 
-    // didChange → the real program: diagnostics clear, and the index is built.
+    // didChange → the real program. The edit publishes nothing of its own;
+    // the next message runs the deferred analysis, so the clearing
+    // diagnostics travel with the outline request below.
     stdin
         .write_all(frame(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didChange",
@@ -366,8 +374,6 @@ fn server_answers_editors_requests_end_to_end() {
         })).as_bytes())
         .expect("write didChange");
     stdin.flush().expect("flush");
-    let cleared = read_frame(&mut stdout);
-    assert_eq!(cleared["params"]["diagnostics"], json!([]));
 
     // documentSymbol → the outline of *this* file (imported Foundation decls are
     // not the editor's outline).
@@ -378,6 +384,8 @@ fn server_answers_editors_requests_end_to_end() {
         })).as_bytes())
         .expect("write documentSymbol");
     stdin.flush().expect("flush");
+    let cleared = read_frame(&mut stdout);
+    assert_eq!(cleared["params"]["diagnostics"], json!([]));
     let symbols = read_frame(&mut stdout);
     let names: Vec<&str> = symbols["result"]
         .as_array()
@@ -501,8 +509,11 @@ fn server_answers_editors_requests_end_to_end() {
     assert_eq!(signature["label"], "- (void)greet:(NPString *)name from:(NPString *)where");
     assert_eq!(signature["parameters"][1]["label"], "(NPString *)where");
 
-    // An incremental change: delete the `;` of `return 0;` (line 16), expect the
-    // parse error there, then put it back with a zero-width insertion.
+    // An incremental change: delete the `;` of `return 0;` (line 16), then
+    // put it back with a zero-width insertion. Each edit publishes nothing of
+    // its own; the next message runs the deferred analysis of the previous
+    // state — so the parse error for the deleted `;` travels with the
+    // re-insertion.
     let mut semicolon = position_of(PROGRAM, "return 0;");
     semicolon["character"] = json!(semicolon["character"].as_u64().unwrap() + 8);
     let mut after = semicolon.clone();
@@ -517,17 +528,29 @@ fn server_answers_editors_requests_end_to_end() {
         })).as_bytes())
         .expect("write didChange");
     stdin.flush().expect("flush");
-    let published = read_frame(&mut stdout);
-    let diagnostics = published["params"]["diagnostics"].as_array().expect("diagnostics");
-    assert_eq!(diagnostics.len(), 1, "{published}");
-    assert_eq!(diagnostics[0]["range"]["start"]["line"], semicolon["line"]);
-
     stdin
         .write_all(frame(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didChange",
             "params": {
                 "textDocument": { "uri": uri, "version": 4 },
                 "contentChanges": [{ "range": { "start": semicolon, "end": semicolon }, "text": ";" }],
+            },
+        })).as_bytes())
+        .expect("write didChange");
+    stdin.flush().expect("flush");
+    let published = read_frame(&mut stdout);
+    let diagnostics = published["params"]["diagnostics"].as_array().expect("diagnostics");
+    assert_eq!(diagnostics.len(), 1, "{published}");
+    assert_eq!(diagnostics[0]["range"]["start"]["line"], semicolon["line"]);
+
+    // An edit with no changes is the next message: it runs the deferred
+    // analysis of the restored buffer, which is clean.
+    stdin
+        .write_all(frame(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 5 },
+                "contentChanges": [],
             },
         })).as_bytes())
         .expect("write didChange");

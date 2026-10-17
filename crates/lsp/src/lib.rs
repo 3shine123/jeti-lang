@@ -4,8 +4,13 @@
 //! Scope of this skeleton, deliberately small and honest:
 //!
 //! - `initialize` / `initialized` / `shutdown` / `exit` lifecycle, plus
-//!   `textDocument/didOpen|didChange|didClose` with **full** document sync,
-//!   each answered by `textDocument/publishDiagnostics`.
+//!   `textDocument/didOpen|didChange|didClose` with **incremental** document
+//!   sync. `didOpen` is answered by `textDocument/publishDiagnostics` right
+//!   away; `didChange` only marks the buffer dirty — the re-analysis runs when
+//!   the buffer has been quiet for the quiet period (150 ms by default) and the
+//!   next message gives the server the opportunity to run it. High-frequency
+//!   edits are therefore coalesced into one front-end run; the publish always
+//!   carries the state the buffer settled on, never an intermediate one.
 //! - Diagnostics come from the compiler's own front end
 //!   ([`jetic::pipeline::Pipeline::analyze`]), so they are the same
 //!   parser/binder/elaborator/checker/async findings the CLI reports — never a
@@ -22,6 +27,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jeti_cst::diagnostic::{Diagnostic, Severity};
 use jeti_cst::source_map::{LspPosition, LspRange, SourceFile};
@@ -463,6 +469,9 @@ fn severity_code(severity: Severity) -> u8 {
 struct Document {
     path: String,
     text: String,
+    /// When (epoch) the last applied edit landed. `None` while the text is
+    /// what the last analysis ran on.
+    dirty_since: Option<Duration>,
 }
 
 /// LSP state machine: open documents plus the search path diagnostics use.
@@ -482,7 +491,18 @@ pub struct Server {
     /// Workspace root from `initialize`: the upward search for configuration
     /// files stops here instead of walking to the filesystem root.
     root: Option<String>,
+    /// How long an edited buffer stays unanalyzed after its last edit, so a
+    /// burst of keystrokes runs the front end once, not once per keystroke.
+    quiet_period: Duration,
+    /// The clock the quiet period is measured against (epoch). Injectable so
+    /// tests can drive the window without sleeping.
+    clock: Box<dyn Fn() -> Duration>,
     shutdown_received: bool,
+}
+
+/// The wall clock, as [`Server::clock`] reads it.
+fn system_now() -> Duration {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO)
 }
 
 impl Server {
@@ -496,8 +516,23 @@ impl Server {
             options,
             config: config::ConfigCache::default(),
             root: None,
+            quiet_period: Duration::from_millis(150),
+            clock: Box::new(system_now),
             shutdown_received: false,
         }
+    }
+
+    /// A different coalescing window. Zero means "every message re-analyzes
+    /// whatever is dirty" — the session tests run with that so they never
+    /// depend on real elapsed time.
+    pub fn with_quiet_period(mut self, quiet: Duration) -> Self {
+        self.quiet_period = quiet;
+        self
+    }
+
+    /// Now, the way the quiet period sees it.
+    fn now(&self) -> Duration {
+        (self.clock)()
     }
 
     /// True once `shutdown` arrived (the client then expects `exit`).
@@ -510,7 +545,17 @@ impl Server {
     pub fn handle(&mut self, message: &Value) -> Vec<Value> {
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
         let id = message.get("id").cloned();
-        match method {
+        // The re-analysis an edit deferred becomes runnable the moment the
+        // buffer has been quiet for the quiet period; this message is the
+        // server's next opportunity to run it, so the settled diagnostics go
+        // out ahead of this message's own answer. `shutdown`/`exit` skip it —
+        // the client is leaving and the publish would reach no one.
+        let mut out = if method == "shutdown" || method == "exit" {
+            Vec::new()
+        } else {
+            self.flush_due()
+        };
+        out.extend(match method {
             "initialize" => {
                 // Where the project starts: the upward search for configuration
                 // files stops here. `workspaceFolders` is the modern spelling,
@@ -559,7 +604,10 @@ impl Server {
                 let text = doc.and_then(|d| d.get("text")).and_then(Value::as_str).unwrap_or("");
                 match uri_to_path(uri) {
                     Some(path) => {
-                        self.docs.insert(uri.to_string(), Document { path, text: text.to_string() });
+                        self.docs.insert(
+                            uri.to_string(),
+                            Document { path, text: text.to_string(), dirty_since: None },
+                        );
                         vec![self.publish_and_index(uri)]
                     }
                     None => Vec::new(),
@@ -574,17 +622,23 @@ impl Server {
                     .pointer("/params/contentChanges")
                     .and_then(Value::as_array);
                 // LSP applies the changes of one notification in order, each to
-                // the text the previous one produced.
+                // the text the previous one produced. The edit only marks the
+                // buffer dirty: the front end runs once the buffer has been
+                // quiet for the quiet period and the next message arrives
+                // (`flush_due`), so a burst of keystrokes is one analysis.
+                let now = self.now();
                 if let (Some(changes), Some(doc)) = (changes, self.docs.get_mut(uri)) {
+                    let mut changed = false;
                     for change in changes {
-                        apply_change(&mut doc.text, change);
+                        if apply_change(&mut doc.text, change) {
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        doc.dirty_since = Some(now);
                     }
                 }
-                if self.docs.contains_key(uri) {
-                    vec![self.publish_and_index(uri)]
-                } else {
-                    Vec::new()
-                }
+                Vec::new()
             }
             "textDocument/didClose" => {
                 let uri = message
@@ -778,7 +832,32 @@ impl Server {
                 Some(id) => vec![error_response(id, -32601, &format!("unhandled method: {other}"))],
                 None => Vec::new(),
             },
-        }
+        });
+        out
+    }
+
+    /// Re-analyze the documents whose last edit is older than the quiet
+    /// period — the settled result of every edit since the last analysis.
+    /// Intermediate states are never published; only what the buffer rests on.
+    fn flush_due(&mut self) -> Vec<Value> {
+        let now = self.now();
+        let due: Vec<String> = self
+            .docs
+            .iter()
+            .filter(|(_, doc)| {
+                doc.dirty_since.is_some_and(|since| since + self.quiet_period <= now)
+            })
+            .map(|(uri, _)| uri.clone())
+            .collect();
+        due.into_iter().map(|uri| {
+            let message = self.publish_and_index(&uri);
+            // That analysis is the one the edit waited for: clear the mark,
+            // or every following message would re-run and re-publish it.
+            if let Some(doc) = self.docs.get_mut(&uri) {
+                doc.dirty_since = None;
+            }
+            message
+        }).collect()
     }
 
     /// Analyze `uri` and keep the index, so publishing is the only place the
@@ -1110,6 +1189,7 @@ mod tests {
     #[test]
     fn initialize_then_didopen_publishes_diagnostics() {
         let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::ZERO;
         let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}});
         let out = server.handle(&init);
         assert_eq!(out.len(), 1);
@@ -1133,17 +1213,25 @@ mod tests {
         assert_eq!(out[0]["params"]["uri"], uri);
         assert!(!out[0]["params"]["diagnostics"].as_array().unwrap().is_empty());
 
-        // A clean edit clears them (full sync: whole buffer replaces the old).
-        let change = json!({
+        // A clean edit clears them — the edit itself publishes nothing, the
+        // next message runs the deferred analysis (full sync: whole buffer
+        // replaces the old).
+        let out = server.handle(&json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didChange",
             "params": {
                 "textDocument": { "uri": uri, "version": 2 },
                 "contentChanges": [{ "text": "int main(void) { return 0; }\n" }],
             },
-        });
-        let out = server.handle(&change);
+        }));
+        assert!(out.is_empty(), "an edit alone publishes nothing: {out:?}");
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 3, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
+        assert_eq!(out[1]["id"], 3);
 
         let shutdown = json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown"});
         let out = server.handle(&shutdown);
@@ -1232,6 +1320,7 @@ mod tests {
     #[test]
     fn a_range_change_moves_the_diagnostics() {
         let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::ZERO;
         let uri = path_to_uri("/tmp/jeti_lsp_unit/incremental.jeti");
         server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
@@ -1241,7 +1330,9 @@ mod tests {
             }},
         }));
 
-        // Delete the `;` (line 0, character 25) — the parse error appears there.
+        // Delete the `;` (line 0, character 25). The edit alone publishes
+        // nothing: the analysis of it runs when the buffer has been quiet and
+        // the next message arrives.
         let out = server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didChange",
             "params": {
@@ -1253,11 +1344,11 @@ mod tests {
                 }],
             },
         }));
-        let diagnostics = out[0]["params"]["diagnostics"].as_array().expect("diagnostics");
-        assert_eq!(diagnostics.len(), 1, "{out:?}");
-        assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
+        assert!(out.is_empty(), "an edit alone publishes nothing: {out:?}");
 
-        // Put it back: the same range, an insertion this time.
+        // Put it back: the same range, an insertion this time. This message
+        // runs the deferred analysis of the previous edit — the parse error
+        // appeared at the deleted `;`.
         let out = server.handle(&json!({
             "jsonrpc": "2.0", "method": "textDocument/didChange",
             "params": {
@@ -1269,7 +1360,142 @@ mod tests {
                 }],
             },
         }));
+        let diagnostics = out[0]["params"]["diagnostics"].as_array().expect("diagnostics");
+        assert_eq!(diagnostics.len(), 1, "{out:?}");
+        assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 24}));
+
+        // And the next message settles the restored buffer: clean again.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        }));
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
+        assert_eq!(out[1]["id"], 1);
+    }
+
+    #[test]
+    fn rapid_edits_coalesce_into_one_analysis() {
+        // A burst of keystrokes inside the quiet period runs the front end
+        // once, on the settled state — intermediate states are never analyzed.
+        let t = std::rc::Rc::new(std::cell::Cell::new(Duration::ZERO));
+        let clock = t.clone();
+        let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::from_millis(100);
+        server.clock = Box::new(move || clock.get());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/coalesce.jeti");
+
+        // didOpen still publishes right away — coalescing is for edits.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1,
+                "text": "int main(void) { return 0; }\n",
+            }},
+        }));
+        assert_eq!(out.len(), 1, "didOpen still publishes right away: {out:?}");
+        assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
+
+        // Edit A (t = 0): delete the `;`. Nothing runs yet.
+        t.set(Duration::ZERO);
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{
+                    "range": { "start": {"line": 0, "character": 25},
+                               "end": {"line": 0, "character": 26} },
+                    "text": "",
+                }],
+            },
+        }));
+        assert!(out.is_empty(), "an edit inside the quiet period publishes nothing: {out:?}");
+
+        // Edit B (t = 10 ms): put it back. Still inside A's quiet period, so
+        // A's analysis never runs at all — only the settled state will.
+        t.set(Duration::from_millis(10));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 3 },
+                "contentChanges": [{
+                    "range": { "start": {"line": 0, "character": 25},
+                               "end": {"line": 0, "character": 25} },
+                    "text": ";",
+                }],
+            },
+        }));
+        assert!(out.is_empty(), "still inside the quiet period: {out:?}");
+
+        // The next message after the quiet period (t = 150 ms) runs the one
+        // coalesced analysis; the settled state is clean.
+        t.set(Duration::from_millis(150));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
+        assert_eq!(out[0]["params"]["diagnostics"], json!([]));
+        assert_eq!(out[1]["id"], 1);
+    }
+
+    #[test]
+    fn an_edit_inside_the_quiet_period_keeps_the_stale_index() {
+        // Until the quiet period passes, requests are answered from the last
+        // analysis — stale on purpose: running a front end per request would
+        // be exactly the waste the quiet period exists to remove.
+        let t = std::rc::Rc::new(std::cell::Cell::new(Duration::ZERO));
+        let clock = t.clone();
+        let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::from_millis(100);
+        server.clock = Box::new(move || clock.get());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/stale.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1,
+                "text": "int main(void) { return 0 }\n",
+            }},
+        }));
+
+        // A class appears in the buffer at t = 0.
+        t.set(Duration::ZERO);
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{
+                    "text": "@interface Late : jeti_root\n@end\nint main(void) { return 0; }\n",
+                }],
+            },
+        }));
+
+        // 10 ms later the quiet period has not passed: the outline still
+        // comes from the open-time analysis, and no publish rides along.
+        t.set(Duration::from_millis(10));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        assert_eq!(out.len(), 1, "no publish before the quiet period: {out:?}");
+        assert_eq!(out[0]["id"], 1);
+        let names: Vec<&str> = out[0]["result"].as_array().unwrap().iter()
+            .map(|symbol| symbol["name"].as_str().unwrap())
+            .collect();
+        assert!(names.iter().all(|name| *name != "Late"), "stale outline: {names:?}");
+
+        // After the quiet period the same request triggers the analysis.
+        t.set(Duration::from_millis(150));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
+        let names: Vec<&str> = out[1]["result"].as_array().unwrap().iter()
+            .map(|symbol| symbol["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"Late"), "{names:?}");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Jeti 源码位置、调试信息与 LSP 基础设施规划
 
-> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停、补全（全局名字 + 接收者成员）、signature help 与增量同步**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的 rename/调试器适配等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
+> 状态：**阶段 1–4 已实施**（`#line` 发射、`-g` 调试构建、`-np-map` sidecar 均已落地；阶段 1 的 CST/AST 节点位置已统一为半开区间 `[start, end)`，表示方式见阶段 1）；**阶段 6 已交付诊断、大纲、跳转定义、悬停、补全（全局名字 + 接收者成员）、signature help、增量同步、rename/引用查找、编辑合并**（`crates/lsp` 的 `jeti-lsp`：诊断走 `Pipeline::analyze_document`，其余请求都从同一次分析产出的符号索引回答，位置统一经共享 SourceSpan 投影到 UTF-16；VS Code 客户端已接线）；阶段 5 与阶段 6 的调试器适配等仍为规划。本文把编译诊断、生成 C 的源位置、调试信息和未来 LSP 所需的位置信息统一规划；当前实现事实以 `docs/plans/architecture.md` 为准。
 
 ## 目标
 
@@ -120,8 +120,8 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   报成一条 error（`missing terminating '"' character`，clang 的措辞，位置就是那个字面量）。以前这种漏写会让 lexer
   一路吞到文件尾，只有 clang 在生成的 C 上报错（位置还隔着 `#line`），编辑器则一声不吭。恢复出的文本照常继续解析，
   所以后面的声明不会被这条错误连带吃掉；CLI 依旧拒绝生成代码。
-- 未做（后续阶段）：rename（需要项目级引用索引）、分析结果的缓存/编辑合并、workspace folders、ARC 专属诊断、
-  `-Werror` 之外的设置协商（`workspace/configuration`），以及成员补全里的协议/泛型细化。
+- 未做（后续阶段）：workspace folders、ARC 专属诊断、
+  `-Werror` 之外的设置协商（`workspace/configuration`）、头文件解析结果缓存（debounce 已落地，见下）。
 
 **进展（大纲 + 定义跳转 —— 已落地）**
 
@@ -332,6 +332,8 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   与 LSP 同坐标，无需转换）；事件里没有 contentChanges 时退化为整篇替换，服务器同样接受。
 - **诚实说明**：增量同步省的是传输与 JSON 体积，**不减少分析开销**——每次改动仍跑一遍完整前端
   （典型文件 ~25 ms，9 KB ~30 ms）。真正的大文件杠杆是缓存（头文件文本/解析结果复用）与合并高频编辑（debounce）。
+  **debounce 已落地**（见下文"编辑合并"小节）：高频编辑合并为一次分析；头文件缓存未做（要动 preprocessor
+  的文件读取接口，跨编译器 crate，另立专项）。
 - 回归：单测覆盖插入/删除/替换/整篇替换/UTF-16 前后编辑/非法区间拒绝，以及服务器级"区间编辑后诊断跟着移动"；
   会话测试用真实二进制做"删掉 `;` 报错、再插回清零"；`test/extension.test.js` 覆盖经 VS Code 事件对象
   （带 range）的整条路径。
@@ -349,7 +351,12 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   类型渲染是 LSP 自己的小渲染器（checker 的 printer 是私有且只吃 AST 类型，而方法参数是 CST 类型）——
   **仅用于显示**，不影响任何诊断文本。
 - 触发字符 `:`（关键字 selector 的下一段参数正好从这里开始）。
-- 未做：重载/多候选的排序（现在报文里给出全部候选，`activeSignature` 固定 0）、泛型参数替换后的类型显示。
+- 未做：重载/多候选的排序（现在报文里给出全部候选，`activeSignature` 固定 0）。
+- **泛型参数替换（已补上）**：具体接收者上，类声明的类型参数被其实参替换后显示——
+  `NPBox<Thing>` 的 `[box value]` 渲染 `-(Thing *)value` 而非 `-(T *)value`。整词替换（参数名永远不会
+  改到更长的标识符），只发生在 LSP 渲染好的 signature 字符串上：AST、类型判定、符号表、生成的 C 一概不碰，
+  编译器侧的泛型机制（单态化、实例化点 conformance）零改动。嵌套泛型实参只渲染外层名字
+  （`NPBox<NPArray<Foo>>` 显示 `NPArray`）；v1 只覆盖消息发送的接收者，泛型自由函数未覆盖。
 - 回归：`cargo test -p jeti-lsp` 现为 26 个单测 + 会话测试（会话里断言两段 selector 的 `activeParameter=1`、
   label 与参数标签逐字正确）；`test/extension.test.js` 覆盖 `SignatureHelp`/`SignatureInformation`/
   `ParameterInformation` 的换算。
@@ -357,6 +364,42 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 回归：`cargo test -p jeti-lsp` 现为 23 个单测 + 会话测试（会话里断言 `[s UTF8S` 只给出 `UTF8String`；
   单测钉住"receiver/实参位不给成员"、"类接收者只给类方法"、"继承成员可见"、"标量接收者无成员"）；
   `test/extension.test.js` 覆盖同一路径经 VS Code provider 的换算。
+
+**进展（rename / 引用查找 / 泛型签名 —— 已落地）**
+
+- `textDocument/references`：文档级最大名字 token 扫描（仅代码区——注释、字符串、预处理行被
+  `code_mask` 排除），token 在**自身位置**语义解析出与光标相同的符号才算引用，跨命名空间的同名类
+  因此自动排除；声明范围吸收其内部的扫描命中，不重复报。v1 只回答被编辑文档，只覆盖声明名符号与
+  选择子引用（`token:` 形式）。
+- `textDocument/prepareRename` / `textDocument/rename`：复用同一扫描。rename 只替换名字**段**——
+  限定名 `A::Player` 的 qualifier 保留不动；选择子连同尾冒号一起搬（`greet:` 整体改名）。
+  命名空间暂拒（返回 null）：没有一致的引用集，宁缺毋滥。
+- `id<P>` 协议成员补全：协议声明与继承链进入索引，`id<P>` 接收者补全并入自身 + 全部父协议的选择子。
+- 回归：`cargo test -p jeti-lsp` 现含 find-references 3 个单测（命名空间同名排除 / 选择子与类引用 /
+  注释字符串排除）、rename 2 个（qualifier 保留 / 选择子带冒号）、泛型签名 1 个（`NPBox<Thing>` 渲染
+  `-(Thing *)value`）。
+
+**进展（编辑合并 —— 已落地）**
+
+- 起因：增量同步只省传输，每次敲键仍跑一遍完整前端（典型 ~25 ms，大文件更贵）。高频输入时
+  一次前端只活几十毫秒就被下一次编辑作废——纯粹的浪费。
+- 做法：`didChange` 不再同步分析，只把缓冲区标脏（`dirty_since`）。**静默期**（默认 150 ms，
+  `--debounce-ms N` 可调，`0` 关闭）过后，下一条到达的消息在 `handle()` 入口触发补分析
+  （`flush_due`）：分析完成、诊断推送、索引更新，全部排在该消息自身应答**之前**。
+  一次连击因此只产生一次前端运行，推送的永远是缓冲区**定下来的状态**，中间态从不推送。
+- 为什么不是定时器：bin 是阻塞 stdio 循环，跨平台地"到点主动推"需要平台相关的唤醒
+  （poll/self-pipe），不划算。事件驱动是诚实的取舍——用户敲完停顿且不再发任何消息时，诊断停在
+  旧状态，直到下一条消息（编辑器平时总有：光标移动、悬停、更多输入）。这是无定时器服务器的共性，
+  不是本实现的缺陷。
+- `didOpen` 仍同步推送：首开即见波浪线，不合并。
+- 两处容易踩的坑（都被测试钉住）：flush 成功后必须**清脏标记**——否则每条后续消息都判定"仍脏且
+  到期"，重复分析并重复推送（会话测试里曾以一条多出来的空 publish 把帧序顶错位）；区间不合法的
+  didChange 不标脏（文本没变，分析无意义）。
+- 时钟可注入（`Server.clock`，`Box<dyn Fn() -> Duration>`）：单测用受控时钟确定性验证合并，
+  不依赖真实等待；会话测试以 `--debounce-ms 0` 启动，消息背靠背也总是"已到期"。
+- 回归：两个旧单测按新契约适配（编辑本身不推送，下一条消息携带前一状态诊断）；会话测试两处
+  didChange 流程重排（删 `;` 的诊断随"插回 `;`"那条消息到达，清洁状态随空编辑到达）。
+  `cargo test -p jeti-lsp` 全绿（56 单测 + 4 会话）。
 
 **进展（编辑器客户端 —— 已接线）**
 
