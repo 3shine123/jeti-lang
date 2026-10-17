@@ -190,7 +190,18 @@ impl<'a> Parser<'a> {
     fn advance(&mut self) {
         let mut next = self.lexer.next_token();
         Self::remap_token_col(&self.source_map, &mut next);
+        // A `"…"` the lexer had to stop at a raw newline is missing its closing
+        // quote. Say so at the literal itself, in C's wording: the lexer stops
+        // there instead of scanning on for a quote *anywhere* in the buffer, so
+        // this diagnostic is all the file loses — the literal still parses as
+        // one, and every declaration after it keeps its own diagnostics.
+        let unclosed_literal = matches!(next.kind, TokenKind::String | TokenKind::AtString)
+            && !Self::literal_is_closed(self.source, &next);
         self.previous = std::mem::replace(&mut self.current, next);
+        if unclosed_literal {
+            let token = self.current.clone();
+            self.error_at(&token, "missing terminating '\"' character");
+        }
         // Bracket-depth bookkeeping for the in-message bare-`await` ban (see
         // msg_await_stack). Counted inside advance() so every consume path
         // stays balanced; the parser's speculative lookaheads never cross a
@@ -236,6 +247,17 @@ impl<'a> Parser<'a> {
             // this line shifts it for the token's end too.
             token.end_col = sm.adjust_col(token.end_line, token.end_col as u32).0 as usize;
         }
+    }
+
+    /// Whether the lexer found a closing quote for a `String`/`AtString` token.
+    ///
+    /// The token holds only the literal's *body* — the quotes are not part of it
+    /// — so the character right after it is the quote that closed it.
+    /// `Lexer::read_string` ends the body at a raw newline instead of scanning on
+    /// for the next quote anywhere in the buffer, so a body not followed by `"`
+    /// is an unclosed literal (it stopped at a newline or at EOF).
+    fn literal_is_closed(source: &str, token: &Token) -> bool {
+        source.as_bytes().get(token.start + token.length) == Some(&b'"')
     }
 
     fn match_token(&mut self, kind: TokenKind) -> bool {
@@ -338,15 +360,26 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&mut self, msg: &str) {
+        let token = self.previous.clone();
+        self.error_at(&token, msg);
+    }
+
+    /// Like [`Self::error`], but reports at a token other than `self.previous`.
+    ///
+    /// [`Self::advance`] uses it for a literal the lexer had to stop early: by
+    /// the time the parser would otherwise complain, `previous` is whatever
+    /// token follows the literal, and the caret has to stay on the literal
+    /// itself (as clang's `missing terminating '"' character` does).
+    fn error_at(&mut self, token: &Token, msg: &str) {
         if self.panic_mode { return; }
         self.panic_mode = true;
         self.has_error = true;
         self.error_count += 1;
-        let line = self.previous.line;
-        let col = self.previous.column;
+        let line = token.line;
+        let col = token.column;
         // Span width from the offending token itself: end_col is exclusive,
         // so `nil` at column 14 (length 3) annotates as ^~~.
-        let end_col = col + self.previous.length.max(1);
+        let end_col = col + token.length.max(1);
         let (file, real_line) = self.file_of_line_mapped(line);
         let entry = format!("{}:{}: {}", line, col, msg);
         if self.err_msg.is_empty() {

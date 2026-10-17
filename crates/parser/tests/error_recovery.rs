@@ -109,3 +109,42 @@ fn clean_file_parses_with_no_errors() {
     assert_eq!(p.error_count(), 0, "{}", p.last_error());
     assert_eq!(unit.decls.len(), 3, "expected 3 decls, got {}", unit.decls.len());
 }
+
+/// A literal with no closing quote is reported *at the quote*, and the code
+/// after it still parses.
+///
+/// The lexer used to scan on for the next `"` anywhere in the buffer, so a
+/// forgotten quote in a file that inlines `#import`s — thousands of lines of
+/// Foundation — produced a single error pointing at the end of the file and
+/// swallowed every diagnostic under it. A raw newline now ends the literal
+/// exactly as it does in C, so clang's message lands on the quote itself, and
+/// what follows keeps its own errors.
+#[test]
+fn a_missing_closing_quote_is_reported_at_the_quote() {
+    let src = "int main(void) {\n    printf(\"widget tag: %s\\n, [w objectTag]);\n    return 0;\n}\n";
+    let mut p = Parser::new(src);
+    let _ = p.parse_translation_unit().unwrap();
+    let err = p.last_error();
+    assert_eq!(p.error_count(), 1, "one mistake must produce one error:\n{err}");
+    assert!(err.contains("missing terminating '\"' character"), "{err}");
+    assert!(err.contains("2:12"), "the error must point at the quote on line 2:\n{err}");
+    assert!(!err.contains("3:"), "a recovery fragment on line 3 reported its own error:\n{err}");
+}
+
+/// A literal that runs on past the end of its line is not a literal: C ends it
+/// at the newline, and so must we.
+///
+/// Accepting it here was worse than a wrong message: the `.jeti` parsed, we
+/// emitted C containing a raw newline inside a string, and only the C compiler
+/// refused — a file the editor showed as clean until it was built.
+#[test]
+fn a_literal_spanning_a_newline_is_rejected() {
+    let src = "int main(void) {\n    printf(\"a\nb\");\n    return 0;\n}\n";
+    let mut p = Parser::new(src);
+    let _ = p.parse_translation_unit().unwrap();
+    let err = p.last_error();
+    assert!(
+        err.contains("missing terminating '\"' character"),
+        "a literal across a newline must be rejected:\n{err}"
+    );
+}

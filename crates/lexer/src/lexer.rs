@@ -270,16 +270,30 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_string(&mut self, _start: usize) -> Token {
-        let start = self.pos;
-        while self.pos < self.source.len() && self.source.as_bytes()[self.pos] != b'"' {
-            if self.source.as_bytes()[self.pos] == b'\\' {
-                self.advance();
+    /// The body of a `"…"` literal (the quotes are not part of the token).
+    ///
+    /// A raw newline ends it, the way it does in C. Without that, an unclosed
+    /// quote swallowed everything up to the next `"` *anywhere in the buffer* —
+    /// through the thousands of lines an inlined `#import` contributes — so the
+    /// one diagnostic it produced pointed at the end of the file and every error
+    /// after the literal was lost with it. The token still stops at the newline,
+    /// so what follows parses normally; the missing quote is reported by the
+    /// parser, which is where diagnostics live.
+    fn read_string(&mut self, start: usize, line: usize, col: usize) -> Token {
+        while self.pos < self.source.len() {
+            let c = self.source.as_bytes()[self.pos];
+            if c == b'"' {
+                break;
+            }
+            if c == b'\\' {
+                self.advance(); // the escaped character, newline included
+            } else if c == b'\n' {
+                break; // unclosed: the literal ends here
             }
             self.advance();
         }
         let end = self.pos;
-        if self.pos < self.source.len() {
+        if self.pos < self.source.len() && self.source.as_bytes()[self.pos] == b'"' {
             self.advance();
         }
         Token {
@@ -287,8 +301,8 @@ impl<'a> Lexer<'a> {
             keyword: KeywordKind::None,
             start,
             length: end - start,
-            line: self.line,
-            column: self.column.saturating_sub(end - start + 1),
+            line,
+            column: col,
             char_val: 0,
             end_line: self.line,
             end_col: self.column,
@@ -296,30 +310,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_at_string(&mut self, _start: usize) -> Token {
-        let start = self.pos;
-        while self.pos < self.source.len() && self.source.as_bytes()[self.pos] != b'"' {
-            if self.source.as_bytes()[self.pos] == b'\\' {
-                self.advance();
-            }
-            self.advance();
-        }
-        let end = self.pos;
-        if self.pos < self.source.len() {
-            self.advance();
-        }
-        Token {
-            kind: TokenKind::AtString,
-            keyword: KeywordKind::None,
-            start,
-            length: end - start,
-            line: self.line,
-            column: self.column.saturating_sub(end - start + 1),
-            char_val: 0,
-            end_line: self.line,
-            end_col: self.column,
-            int_suffix: 0,
-        }
+    fn read_at_string(&mut self, start: usize, line: usize, col: usize) -> Token {
+        let token = self.read_string(start, line, col);
+        Token { kind: TokenKind::AtString, ..token }
     }
 
     pub fn next_token(&mut self) -> Token {
@@ -360,7 +353,9 @@ impl<'a> Lexer<'a> {
             match self.peek() {
                 Some(b'"') => {
                     self.advance();
-                    return self.read_at_string(start + 1);
+                    // `start` is the `@`; the body starts one byte past the
+                    // quote, and the column stays the quote's (historical).
+                    return self.read_at_string(start + 2, line, col + 1);
                 }
                 Some(b'[') => {
                     self.advance(); // consume [
@@ -589,7 +584,7 @@ impl<'a> Lexer<'a> {
         // String literal
         if c == b'"' {
             self.advance();
-            return self.read_string(start + 1);
+            return self.read_string(start + 1, line, col);
         }
 
         // Char literal
@@ -941,6 +936,31 @@ mod tests {
         let t = l.next_token();
         assert_eq!(t.kind, TokenKind::AtString);
         assert_eq!(t.text(r#"@"test""#), "test");
+        assert_eq!(t.line, 1);
+        assert_eq!(t.column, 2);
+    }
+
+    /// A `"…"` left open at the end of a line stops there: scanning on for a
+    /// quote would swallow every line that follows into one token (the whole
+    /// inlined `#import` set, in a real file), so the rest of the file -- and
+    /// every diagnostic in it -- was lost. The body is what the author wrote up
+    /// to the newline, and the token keeps the literal's own position.
+    #[test]
+    fn test_unclosed_string_stops_at_the_newline() {
+        let src = "    printf(\"a %s\\n, [x tag]);\n    return 0;\n}\n";
+        let mut l = Lexer::new(src);
+        let t = loop {
+            let t = l.next_token();
+            assert_ne!(t.kind, TokenKind::Eof, "no string literal in {src:?}");
+            if t.kind == TokenKind::String {
+                break t;
+            }
+        };
+        assert_eq!(t.text(src), r"a %s\n, [x tag]);");
+        assert_eq!(t.line, 1);
+        assert_eq!(t.column, 12); // the opening quote
+        // The rest of the file is still lexed as its own tokens.
+        assert_eq!(l.next_token().kind, TokenKind::Keyword); // return
     }
 
     #[test]
