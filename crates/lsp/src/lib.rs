@@ -28,6 +28,8 @@ use jeti_cst::source_map::{LspPosition, LspRange, SourceFile};
 use jetic::pipeline::Pipeline;
 use serde_json::{json, Value};
 
+use crate::index::{typed_name_at, Resolved};
+
 pub mod config;
 pub mod index;
 pub use index::{access_receiver_at, symbol_at, Location, Symbol, SymbolIndex};
@@ -627,18 +629,31 @@ impl Server {
                 let uri = request_uri(message);
                 let mut hover = Value::Null;
                 if let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
-                    if let Some(name) = symbol_at(&doc.text, position) {
-                        let locations = index.definitions(&name);
-                        if let Some(first) = locations.first() {
-                            let text_of = self.text_of();
-                            let resolve = |path: &str| text_or_disk(&text_of, path);
+                    match index.resolve_at(&doc.text, position) {
+                        // A namespace is known by what it holds: there is no
+                        // declaration of it to quote (see `namespace_markdown`).
+                        Some(Resolved::Namespace(name)) => {
                             hover = json!({
                                 "contents": {
                                     "kind": "markdown",
-                                    "value": hover_markdown(first, locations.len(), &resolve),
+                                    "value": namespace_markdown(&name),
                                 },
                             });
                         }
+                        Some(Resolved::Symbol(name)) => {
+                            let locations = index.definitions(&name);
+                            if let Some(first) = locations.first() {
+                                let text_of = self.text_of();
+                                let resolve = |path: &str| text_or_disk(&text_of, path);
+                                hover = json!({
+                                    "contents": {
+                                        "kind": "markdown",
+                                        "value": hover_markdown(first, locations.len(), &resolve),
+                                    },
+                                });
+                            }
+                        }
+                        None => {}
                     }
                 }
                 vec![response(id, hover)]
@@ -649,12 +664,11 @@ impl Server {
                 let uri = request_uri(message);
                 let mut entries: Vec<(String, u8, String)> = Vec::new();
                 if let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
-                    // The name under the cursor is the prefix; a trailing colon
-                    // is dropped so `setOb` and `setObject:` both offer
-                    // `setObject:atIndex:`.
-                    let prefix = symbol_at(&doc.text, position)
-                        .map(|name| name.trim_end_matches(':').to_string())
-                        .unwrap_or_default();
+                    // What has been typed is the prefix — including a namespace
+                    // qualifier, so `Game::En` completes to `Game::Enemies` and
+                    // a bare `Game::` lists what the namespace holds instead of
+                    // every name in the index.
+                    let prefix = typed_name_at(&doc.text, position).unwrap_or_default();
                     // Members of the receiver come first: inside a send they are
                     // what the user is looking for, and the global names follow
                     // as a fallback (the same list, deduplicated by label).
@@ -791,11 +805,8 @@ impl Server {
         let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) else {
             return Vec::new();
         };
-        let Some(name) = symbol_at(&doc.text, position) else {
-            return Vec::new();
-        };
         index
-            .definitions(&name)
+            .definitions_at(&doc.text, position)
             .iter()
             .map(|location| {
                 json!({
@@ -837,6 +848,19 @@ fn request_position(message: &Value) -> LspPosition {
             .unwrap_or(0) as u32
     };
     LspPosition { line: coordinate("line"), character: coordinate("character") }
+}
+
+/// Hover for a name that is a namespace, not a declaration.
+///
+/// The elaborator lifts every `@namespace` member to the top level under its
+/// qualified name, so the index learns a namespace from what it holds and has no
+/// `@namespace` line to quote. Saying that plainly is better than showing a
+/// member and pretending it is the namespace.
+fn namespace_markdown(name: &str) -> String {
+    format!(
+        "**namespace** `{name}`\n\n_Contents are indexed; the `@namespace` block itself is flattened \
+         by the compiler, so there is no declaration to show._"
+    )
 }
 
 /// Markdown hover: what the declaration is, its own source text, and where it
@@ -1305,6 +1329,183 @@ int helper(int value) { return value; }
         let _ = path;
     }
 
+    /// The same class name in three namespaces: before the cursor's qualified
+    /// name was taken apart, all three collapsed into the short name `Player`
+    /// and every reference resolved to all of them.
+    const NAMESPACES: &str = "\
+@namespace A
+@interface Player : jeti_root
+- (void)fromA;
+@end
+@endnamespace
+
+@namespace B
+@interface Player : jeti_root
+- (void)fromB;
+@end
+@endnamespace
+
+@namespace A::Inner
+@interface Player : jeti_root
+- (void)deep;
+@end
+@endnamespace
+
+int main() {
+    A::Player *p;
+    B::Player *q;
+    A::Inner::Player *r;
+    return 0;
+}
+";
+
+    #[test]
+    fn a_qualified_name_resolves_one_segment_at_a_time() {
+        let analyzed = analyze(NAMESPACES);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        // On `Player` in `A::Player`: that class, and only it.
+        let on_player = position(NAMESPACES, "A::Player", 3);
+        assert_eq!(
+            analyzed.index.resolve_at(NAMESPACES, on_player),
+            Some(index::Resolved::Symbol("A::Player".to_string()))
+        );
+        let definitions = analyzed.index.definitions_at(NAMESPACES, on_player);
+        assert_eq!(definitions.len(), 1, "{definitions:?}");
+        assert_eq!(definitions[0].range.start.line, 1);
+
+        // The namespaces are told apart too: `B::Player` is B's, and
+        // `A::Inner::Player` is the deep one.
+        let definitions = analyzed
+            .index
+            .definitions_at(NAMESPACES, position(NAMESPACES, "B::Player", 3));
+        assert_eq!(definitions.len(), 1, "{definitions:?}");
+        assert_eq!(definitions[0].range.start.line, 7);
+        let definitions = analyzed
+            .index
+            .definitions_at(NAMESPACES, position(NAMESPACES, "A::Inner::Player", 10));
+        assert_eq!(definitions.len(), 1, "{definitions:?}");
+        assert_eq!(definitions[0].range.start.line, 13);
+
+        // On a namespace segment the answer is the namespace. The elaborator
+        // flattens `@namespace` blocks, so there is no declaration to jump to
+        // — an honest empty answer, not the class it happens to hold.
+        let on_namespace = position(NAMESPACES, "A::Inner::Player", 3);
+        assert_eq!(
+            analyzed.index.resolve_at(NAMESPACES, on_namespace),
+            Some(index::Resolved::Namespace("A::Inner".to_string()))
+        );
+        assert!(analyzed.index.definitions_at(NAMESPACES, on_namespace).is_empty());
+        // And the outermost segment is a namespace of its own.
+        assert_eq!(
+            analyzed.index.resolve_at(NAMESPACES, position(NAMESPACES, "A::Player", 0)),
+            Some(index::Resolved::Namespace("A".to_string()))
+        );
+
+        // A qualified name the index does not have is a miss: answering with
+        // another namespace's class that happens to share the short name would
+        // be a guess.
+        let unknown = "    C::Player *p;";
+        assert_eq!(analyzed.index.resolve_at(unknown, position(unknown, "C::Player", 3)), None);
+        assert!(analyzed.index.definitions_at(unknown, position(unknown, "C::Player", 3)).is_empty());
+        // Written without a qualifier, a name the index knows still resolves —
+        // the short form is indexed for exactly that.
+        let short = "    Player *p;";
+        assert_eq!(
+            analyzed.index.resolve_at(short, position(short, "Player", 0)),
+            Some(index::Resolved::Symbol("Player".to_string()))
+        );
+    }
+
+    #[test]
+    fn hover_and_completion_speak_qualified_names() {
+        let mut server = Server::new(AnalysisOptions::default());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/namespaces.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": NAMESPACES,
+            }},
+        }));
+
+        // Hovering a namespace segment names the namespace.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 20, "method": "textDocument/hover",
+            "params": { "textDocument": { "uri": uri },
+                        "position": position_json(position(NAMESPACES, "A::Inner::Player", 3)) },
+        }));
+        let value = out[0]["result"]["contents"]["value"].as_str().unwrap();
+        assert!(value.starts_with("**namespace** `A::Inner`"), "{value}");
+
+        // Hovering the class segment describes the class, as before.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 21, "method": "textDocument/hover",
+            "params": { "textDocument": { "uri": uri },
+                        "position": position_json(position(NAMESPACES, "A::Inner::Player", 10)) },
+        }));
+        let value = out[0]["result"]["contents"]["value"].as_str().unwrap();
+        assert!(value.starts_with("**class** `A::Inner::Player`"), "{value}");
+
+        // Definition on the class is one place, not one per same-named class.
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 22, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": uri },
+                        "position": position_json(position(NAMESPACES, "B::Player", 3)) },
+        }));
+        assert_eq!(out[0]["result"].as_array().unwrap().len(), 1, "{}", out[0]["result"]);
+
+        // Completion is filtered by the qualified name in progress: with the
+        // cursor on `Inner` in `A::Inner::Player` the candidates are the
+        // namespace and what it holds, not every name in the index.
+        let mut items = |position: LspPosition| -> Vec<String> {
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 23, "method": "textDocument/completion",
+                "params": { "textDocument": { "uri": uri }, "position": position_json(position) },
+            }));
+            out[0]["result"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["label"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            items(position(NAMESPACES, "A::Inner::Player", 3)),
+            vec!["A::Inner", "A::Inner::Player"]
+        );
+        assert_eq!(items(position(NAMESPACES, "A::Player", 3)), vec!["A::Player"]);
+    }
+
+    #[test]
+    fn completion_lists_a_namespace_while_its_name_is_still_being_typed() {
+        // What an editor sends mid-keystroke: `A::` with the right-hand side
+        // not written yet. The file does not parse, and the recovered tree still
+        // indexes the declarations above — which is what makes the namespace
+        // completable rather than just unknown.
+        let source = format!("{NAMESPACES}\nint pending() {{\n    A::\n}}\n");
+        let mut server = Server::new(AnalysisOptions::default());
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/namespaces.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": source,
+            }},
+        }));
+        // One past the separator: `A::` has nothing on its right-hand side yet.
+        let position = position(&source, "    A::\n", 7);
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 24, "method": "textDocument/completion",
+            "params": { "textDocument": { "uri": uri }, "position": position_json(position) },
+        }));
+        let labels: Vec<&str> = out[0]["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["label"].as_str().unwrap())
+            .collect();
+        assert_eq!(labels, vec!["A::Inner", "A::Inner::Player", "A::Player"], "{labels:?}");
+    }
+
     #[test]
     fn completion_offers_names_by_prefix() {
         let analyzed = analyze(PROGRAM);
@@ -1403,6 +1604,12 @@ int helper(int value) { return value; }
         let line_start = text[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let character = text[line_start..index].encode_utf16().count();
         LspPosition { line: line as u32, character: character as u32 }
+    }
+
+    /// A `LspPosition` as the wire spells it (`LspPosition` itself is a
+    /// compiler-side type, not a serializable one).
+    fn position_json(position: LspPosition) -> Value {
+        json!({ "line": position.line, "character": position.character })
     }
 
     #[test]

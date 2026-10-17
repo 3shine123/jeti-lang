@@ -281,6 +281,17 @@ works too. Argument positions are not treated as selector positions, which the
 AST — not the text — decides. Signature help shows the signature of the call the
 cursor is in and highlights the parameter being filled in (`:` triggers it).
 
+Qualified names resolve **segment by segment**, the way clangd resolves a C++ one.
+In `Extreme::Engine::RenderPipeline` the cursor on `RenderPipeline` gets that
+class, and the cursor on `Engine` names the namespace `Extreme::Engine`: hovering a
+namespace says what it is, and completion after `Engine::` offers what lives
+inside it instead of every name in the index. Same-named classes in different
+namespaces stay apart — `A::Player` and `B::Player` each resolve to their own
+class, where a bare short name used to answer with all of them. One limit: the
+elaborator lifts every `@namespace` member to the top level under its qualified
+name, so a namespace is not a declaration the index can point at. Hovering one
+names it; go-to-definition on it answers nothing rather than guessing.
+
 A syntax error does not hide the rest of the file. The parse still fails, but the
 recovered syntax tree is handed to the later stages, so the editor reports the
 syntax mistake **and** the type/ARC errors below it, and the outline, definition,

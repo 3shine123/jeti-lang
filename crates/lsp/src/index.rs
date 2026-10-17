@@ -25,7 +25,7 @@
 //! jump from your code into a header) and is filtered out of the outline by
 //! path.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use jeti_ast::ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit};
 use jeti_cst::source_map::{LspPosition, LspRange, SourceMap};
@@ -98,6 +98,18 @@ pub struct Completion {
     pub label: String,
     pub kind: u8,
     pub detail: String,
+}
+
+/// What the name under the cursor names, once a qualified name has been taken
+/// apart the way a C++ editor does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// A declaration the index has: [`SymbolIndex::definitions`] answers for it.
+    Symbol(String),
+    /// A namespace, known only by the qualified names of what it holds. There is
+    /// no declaration to jump to — the elaborator flattens `@namespace` blocks,
+    /// so the index has none — but the name itself is real and can be shown.
+    Namespace(String),
 }
 
 /// `SymbolKind` → `CompletionItemKind`, so completions carry the icon kind the
@@ -239,6 +251,15 @@ pub struct SymbolIndex {
     calls: Vec<CallSite>,
     /// Free functions by name: what signature help shows for `name(...)`.
     functions: HashMap<String, Signature>,
+    /// Namespace prefixes seen in the qualified names of the index
+    /// (`Game`, `Game::Entities`).
+    ///
+    /// Jeti's elaborator flattens `@namespace` blocks — members are lifted to
+    /// the top level under their fully-qualified name — so a namespace is not a
+    /// declaration the index can point at. What it *contains* still says it
+    /// exists, which is enough to name it on hover and to filter a completion
+    /// after `Game::`.
+    namespaces: BTreeSet<String>,
 }
 
 impl SymbolIndex {
@@ -289,6 +310,40 @@ impl SymbolIndex {
         found
     }
 
+    /// What the name at `position` names: the qualified name the cursor sits in
+    /// is resolved segment by segment, the way clangd resolves a C++ one.
+    ///
+    /// `Game::Entities::Player` is three names, not one: `Game` and
+    /// `Game::Entities` are namespaces, `Player` is the class. So the segment
+    /// under the cursor decides — the qualified name *ending at that segment*
+    /// is asked first, then the whole chain. Resolving a qualified name by its
+    /// last segment is what made two `Player`s in different namespaces
+    /// indistinguishable: every reference to either one answered with all of
+    /// them.
+    pub fn resolve_at(&self, text: &str, position: LspPosition) -> Option<Resolved> {
+        for candidate in lookup_names(text, position) {
+            // A declaration beats a namespace of the same name: it is the more
+            // specific answer, and it is the one with a place to jump to.
+            if self.by_name.contains_key(&candidate) {
+                return Some(Resolved::Symbol(candidate));
+            }
+            if self.namespaces.contains(&candidate) {
+                return Some(Resolved::Namespace(candidate));
+            }
+        }
+        None
+    }
+
+    /// Declarations of the name at `position` — the editor's
+    /// `textDocument/definition` answer, empty when the name is a namespace
+    /// (flattened away, so there is nothing to jump to) or unknown.
+    pub fn definitions_at(&self, text: &str, position: LspPosition) -> Vec<Location> {
+        match self.resolve_at(text, position) {
+            Some(Resolved::Symbol(name)) => self.definitions(&name),
+            _ => Vec::new(),
+        }
+    }
+
     /// Completion candidates whose name starts with `prefix` (case-sensitive, as
     /// the language is). An empty prefix offers everything the index knows.
     ///
@@ -315,6 +370,22 @@ impl SymbolIndex {
             if completions.len() >= COMPLETION_LIMIT {
                 break;
             }
+        }
+        // Namespaces are names too: after `Game::` the answers are the names
+        // inside it, and a namespace is one of them (`Game::Entities` before
+        // the class it holds).
+        for namespace in self.namespaces.iter().filter(|name| name.starts_with(prefix)) {
+            if completions.len() >= COMPLETION_LIMIT {
+                break;
+            }
+            if completions.iter().any(|completion| completion.label == *namespace) {
+                continue;
+            }
+            completions.push(Completion {
+                label: namespace.clone(),
+                kind: completion_kind(kind::NAMESPACE),
+                detail: "namespace".to_string(),
+            });
         }
         completions.sort_by(|a, b| a.label.cmp(&b.label));
         completions
@@ -353,19 +424,30 @@ impl SymbolIndex {
             if let Some(scope) = self.document_scope(decl, container, source_map, document, text_of) {
                 self.scopes.push(scope);
             }
-            let Some(mut symbol) = self.symbol_for(decl, container, source_map, text_of) else {
-                continue;
-            };
-            let lookup = symbol.lookup.clone();
-            symbol.children = self.visit(
+            // A declaration this index cannot name itself (a namespace the
+            // elaborator left anonymous, a forward declaration) still has
+            // children worth indexing: descend either way, and let a nameless
+            // container's contents stand in its place rather than vanish.
+            let symbol = self.symbol_for(decl, container, source_map, text_of);
+            let inner_container = symbol
+                .as_ref()
+                .map(|symbol| symbol.lookup.clone())
+                .or_else(|| container.map(str::to_string));
+            let children = self.visit(
                 nested_decls(decl),
-                Some(&lookup),
+                inner_container.as_deref(),
                 source_map,
                 document,
                 text_of,
             );
-            self.record(&symbol);
-            out.push(symbol);
+            match symbol {
+                Some(mut symbol) => {
+                    symbol.children = children;
+                    self.record(&symbol);
+                    out.push(symbol);
+                }
+                None => out.extend(children),
+            }
         }
         out
     }
@@ -682,6 +764,10 @@ impl SymbolIndex {
 
     /// Index `symbol` under its lookup name, plus its short (unqualified) form
     /// so a reference written without the namespace prefix still resolves.
+    ///
+    /// Every namespace prefix on the way is remembered as a namespace name
+    /// (`Game::Entities::Player` says `Game::Entities` and `Game` exist), since
+    /// the flattened AST has no other trace of them.
     fn record(&mut self, symbol: &Symbol) {
         let mut names = vec![symbol.lookup.clone()];
         if let Some(short) = symbol.lookup.rsplit("::").next() {
@@ -691,6 +777,11 @@ impl SymbolIndex {
         }
         for name in names {
             self.by_name.entry(name).or_default().push(symbol.clone());
+        }
+        let mut prefix = symbol.lookup.as_str();
+        while let Some((outer, _)) = prefix.rsplit_once("::") {
+            self.namespaces.insert(outer.to_string());
+            prefix = outer;
         }
     }
 
@@ -1397,6 +1488,8 @@ pub(crate) fn range_json(range: LspRange) -> Value {
 ///   send (`setObject:atIndex:` — every keyword part is one symbol),
 /// - a keyword part of a *declaration* keeps its colon (`run:` in
 ///   `- (void)run:(Point)where`), or
+/// - the **qualified name** the cursor sits in, when it is one
+///   (`Game::Entities::Player`, whichever segment the cursor is on), or
 /// - the plain identifier otherwise.
 ///
 /// A position just past the end of a word counts as being on it, which is where
@@ -1415,19 +1508,209 @@ pub(crate) fn range_json(range: LspRange) -> Value {
 pub fn symbol_at(text: &str, position: LspPosition) -> Option<String> {
     let bytes = text.as_bytes();
     let offset = jeti_cst::source_map::SourceFile::lsp_to_offset(text, position)?;
-    let (word_start, word_end) = word_bounds(bytes, offset)?;
-    let word = &text[word_start..word_end];
+    if let Some(name) = standalone_name(bytes, text, offset) {
+        return Some(name);
+    }
+    qualified_at(text, position)
+        .filter(|name| name.on_name)
+        .map(|name| name.text)
+}
 
+/// A word that is a name *by itself*, spelled the way the index keys it: a
+/// message send's selector (`greet:from:` — several words, one name) or a
+/// declared keyword part (`run:` in `- (void)run:(Point)where`).
+///
+/// `None` means the word is a piece of a bigger name — a plain identifier, or a
+/// segment of a qualified one — and the `::` scan decides what to look up.
+fn standalone_name(bytes: &[u8], text: &str, offset: usize) -> Option<String> {
+    let (word_start, word_end) = word_bounds(bytes, offset)?;
     if let Some(selector) = selector_at(bytes, offset, word_start, word_end) {
         return Some(selector);
     }
-    // A declaration spells a keyword part as `foo:` (`- (void)foo:(int)bar`),
-    // and that is how the index keys it — keep the colon the user typed.
-    if bytes.get(word_end) == Some(&b':') {
-        return Some(format!("{word}:"));
+    // A colon that opens a separator (`foo::`) is qualification, not a keyword.
+    if bytes.get(word_end) == Some(&b':') && bytes.get(word_end + 1) != Some(&b':') {
+        return Some(format!("{}:", &text[word_start..word_end]));
     }
-    Some(word.to_string())
+    None
 }
+
+/// The name as written under the cursor, `::` qualification included.
+///
+/// The AST already speaks this way: the elaborator lifts every `@namespace`
+/// member to the top level under its fully-qualified name, so the index keys
+/// `Game::Entities::Player` and its segments are what tell the qualifiers apart.
+/// `text` is that whole name; `segment_end` is where the segment the cursor is
+/// on ends inside it, so `text[..segment_end]` is the qualified name *ending at
+/// that segment* — `Game::Entities` when the cursor is on `Entities`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QualifiedName {
+    /// The whole name as written: `Game::Entities::Player`. When the cursor has
+    /// just typed a separator (`Game::|`) this is what is written so far,
+    /// `Game::`.
+    pub text: String,
+    /// Byte length of the part of `text` up to and including the segment the
+    /// cursor is on; `text.len()` on the last segment or after a separator.
+    pub segment_end: usize,
+    /// Whether the cursor is inside an identifier. False when it has only typed
+    /// a separator, which is not a name to answer for — only a prefix to
+    /// complete.
+    pub on_name: bool,
+}
+
+impl QualifiedName {
+    /// The name spelled up to and including the cursor's own segment: what the
+    /// segment literally names (`Game::Entities` on `Entities`).
+    pub fn prefix(&self) -> &str {
+        &self.text[..self.segment_end.min(self.text.len())]
+    }
+}
+
+/// Scan the `::`-qualified name the cursor touches.
+///
+/// Spaces are allowed around a separator because the parser allows them
+/// (`Game :: Player`); a newline ends the scan, since a chain is not written
+/// across lines in practice. `None` when the cursor is on punctuation or
+/// whitespace that no name reaches over.
+fn qualified_at(text: &str, position: LspPosition) -> Option<QualifiedName> {
+    let bytes = text.as_bytes();
+    let offset = jeti_cst::source_map::SourceFile::lsp_to_offset(text, position)?;
+    let (segment_start, segment_end, on_name) = match word_bounds(bytes, offset) {
+        Some((word_start, word_end)) => (word_start, word_end, true),
+        None => {
+            // `Game::|` — a separator with nothing after it yet: still the name
+            // `Game::`, so completion can offer what lives inside it.
+            let mut separator = offset;
+            while separator > 0 && is_blank(bytes[separator - 1]) {
+                separator -= 1;
+            }
+            if separator < 2 || &bytes[separator - 2..separator] != b"::" {
+                return None;
+            }
+            (separator, separator, false)
+        }
+    };
+    let start = chain_start(bytes, segment_start);
+    let end = chain_end(bytes, segment_end);
+    if end <= start {
+        return None;
+    }
+    // Blanks are only ever crossed at a separator (`Game :: Player`), and the
+    // index keys the name without them — hence the compacted spelling.
+    Some(QualifiedName {
+        text: compact(&text[start..end]),
+        segment_end: compact(&text[start..segment_end]).len(),
+        on_name,
+    })
+}
+
+/// Drop the blanks a name may be written with around its separators, so
+/// `Game :: Entities :: Player` looks up as `Game::Entities::Player`.
+fn compact(name: &str) -> String {
+    name.chars().filter(|c| !matches!(c, ' ' | '\t')).collect()
+}
+
+/// What has been typed of the name under the cursor, for filtering completion
+/// candidates: `Game::En` while the segment is being written, and `Game::`
+/// right after the separator, so a namespace completes to its contents instead
+/// of offering every name in the index.
+pub fn typed_name_at(text: &str, position: LspPosition) -> Option<String> {
+    let name = qualified_at(text, position)?;
+    Some(name.prefix().to_string())
+}
+
+/// Walk left across `name ::` pairs, so the scan starts at the outermost
+/// segment. Returns `from` when there is no qualifier to cross.
+fn chain_start(bytes: &[u8], from: usize) -> usize {
+    let mut start = from;
+    loop {
+        let mut separator = start;
+        while separator > 0 && is_blank(bytes[separator - 1]) {
+            separator -= 1;
+        }
+        if separator < 2 || &bytes[separator - 2..separator] != b"::" {
+            return start;
+        }
+        let mut name_end = separator - 2;
+        while name_end > 0 && is_blank(bytes[name_end - 1]) {
+            name_end -= 1;
+        }
+        let ident_end = name_end;
+        while name_end > 0 && is_ident_byte(bytes[name_end - 1]) {
+            name_end -= 1;
+        }
+        if name_end == ident_end {
+            return start; // `::` with nothing before it
+        }
+        start = name_end;
+    }
+}
+
+/// Walk right across `:: name` pairs. Returns `from` when the name does not
+/// continue, which is also the case for a trailing separator (`Game::`).
+fn chain_end(bytes: &[u8], from: usize) -> usize {
+    let mut end = from;
+    loop {
+        let mut separator = end;
+        while separator < bytes.len() && is_blank(bytes[separator]) {
+            separator += 1;
+        }
+        if separator + 2 > bytes.len() || &bytes[separator..separator + 2] != b"::" {
+            return end;
+        }
+        let mut name_start = separator + 2;
+        while name_start < bytes.len() && is_blank(bytes[name_start]) {
+            name_start += 1;
+        }
+        let ident_start = name_start;
+        while name_start < bytes.len() && is_ident_byte(bytes[name_start]) {
+            name_start += 1;
+        }
+        if name_start == ident_start {
+            return end; // `::` with nothing after it
+        }
+        end = name_start;
+    }
+}
+
+/// A space or a tab: whitespace a separator may be written across. A newline is
+/// deliberately not one of them.
+fn is_blank(byte: u8) -> bool {
+    byte == b' ' || byte == b'\t'
+}
+
+/// The names the cursor's word could be, most specific first:
+///
+/// 1. the qualified name ending at the segment under the cursor
+///    (`Game::Entities` on `Entities`),
+/// 2. the whole chain the segment is part of (`Game::Entities::Player`).
+///
+/// Step 1 is what makes the qualifiers resolvable — on `Entities` the answer is
+/// the namespace, not the class it holds. A name written with no qualifier is
+/// simply itself, and the index holds the short form of every qualified name it
+/// knows, so an unqualified reference still resolves.
+///
+/// A name that is whole by itself — a selector (`greet:from:`) or a declared
+/// keyword part (`run:`) — has one candidate, itself: it is never taken apart.
+fn lookup_names(text: &str, position: LspPosition) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let Some(offset) = jeti_cst::source_map::SourceFile::lsp_to_offset(text, position) else {
+        return Vec::new();
+    };
+    // A selector or a declared keyword part is one name however many words it
+    // is written with, so it is never taken apart.
+    if let Some(name) = standalone_name(bytes, text, offset) {
+        return vec![name];
+    }
+    let Some(name) = qualified_at(text, position).filter(|name| name.on_name) else {
+        return Vec::new();
+    };
+    let mut candidates = vec![name.prefix().to_string()];
+    if name.text != name.prefix() {
+        candidates.push(name.text.clone());
+    }
+    candidates
+}
+
 
 /// Bounds of the identifier the cursor is on, or `None` when there is none. A
 /// cursor one past the end of a word anchors to that word.
@@ -1691,6 +1974,82 @@ int helper(int value, int other) { return helper(1, 2); }
         assert_eq!(
             symbol_at(text, LspPosition { line: 0, character: 6 }).as_deref(),
             Some("NPString")
+        );
+    }
+
+    #[test]
+    fn a_qualified_name_is_one_symbol_from_every_segment() {
+        let text = "Game::Entities::Player *p;";
+        // A segment is not a name on its own: wherever the cursor sits in the
+        // chain, the name is the whole qualified one.
+        for inside in [0, 4, 13, 16, 22] {
+            assert_eq!(
+                symbol(text, "Game::Entities::Player", inside).as_deref(),
+                Some("Game::Entities::Player"),
+                "cursor {inside} bytes into the name"
+            );
+        }
+        // The first colon after a segment belongs to it (the cursor one past
+        // the end of a word is on that word); the second colon belongs to
+        // nobody, exactly as in clangd.
+        assert_eq!(symbol(text, "Game::", 4).as_deref(), Some("Game::Entities::Player"));
+        assert_eq!(symbol_at(text, at(text, "Game::", 5)), None);
+    }
+
+    #[test]
+    fn the_segment_under_the_cursor_is_where_the_name_stops() {
+        let text = "Game::Entities::Player *p;";
+        let name = qualified_at(text, at(text, "Game::Entities::Player", 16)).expect("a name");
+        assert_eq!(name.text, "Game::Entities::Player");
+        // The cursor is on `Player` (16 bytes in), so the name *it* spells ends
+        // after `Player` — the whole chain.
+        assert_eq!(name.prefix(), "Game::Entities::Player");
+        assert!(name.on_name);
+
+        let name = qualified_at(text, at(text, "Game::Entities::Player", 6)).expect("a name");
+        // On `Entities` the segment's own name stops after `Entities`.
+        assert_eq!(name.prefix(), "Game::Entities");
+    }
+
+    #[test]
+    fn a_trailing_separator_is_a_prefix_to_complete_not_a_name() {
+        let text = "    Game::";
+        // Nothing typed after the separator: no name to hover or jump to...
+        assert_eq!(symbol_at(text, at(text, "Game::", 6)), None);
+        // ...but the separator is what the user has typed, so completion
+        // filters by it.
+        assert_eq!(typed_name_at(text, at(text, "Game::", 6)).as_deref(), Some("Game::"));
+        // A single colon is a keyword colon, not a qualifier.
+        let call = "[recv setObject:|";
+        assert_eq!(typed_name_at(call, at(call, "setObject:", 10)), None);
+    }
+
+    #[test]
+    fn a_separator_at_the_end_of_a_line_is_still_a_prefix() {
+        // Mid-keystroke: the right-hand side of `A::` is not written yet, and
+        // the line ends there. The scan stops at the newline, so the name is the
+        // part that exists — a prefix to complete, not a name to answer for.
+        let text = "int pending() {\n    A::\n}\n";
+        let end_of_line = LspPosition { line: 1, character: 7 };
+        assert_eq!(typed_name_at(text, end_of_line).as_deref(), Some("A::"));
+        assert_eq!(symbol_at(text, end_of_line), None);
+    }
+
+    #[test]
+    fn blanks_around_a_separator_do_not_change_the_name() {
+        let text = "Game :: Entities :: Player *p;";
+        assert_eq!(
+            symbol(text, "Player", 0).as_deref(),
+            Some("Game::Entities::Player"),
+            "the name looks up the way the index keys it"
+        );
+        let name = qualified_at(text, at(text, "Player", 0)).expect("a name");
+        assert_eq!(name.prefix(), "Game::Entities::Player");
+        // A newline ends the scan: a chain is not written across lines.
+        let text = "Game::\nPlayer *p;";
+        assert_eq!(
+            symbol_at(text, LspPosition { line: 1, character: 0 }).as_deref(),
+            Some("Player")
         );
     }
 }
