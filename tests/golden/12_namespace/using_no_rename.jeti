@@ -1,0 +1,53 @@
+// test: @using never renames a declaration — two namespaces may each declare the
+// same short name, and importing one of them must not merge them into one class
+// (a class's members were named through the @using list, so `A::Player` and
+// `B::Player` both came out as `A::Player` and their methods landed on one).
+#include <stdio.h>
+#import <Foundation/Foundation.hje>
+
+@namespace A
+    @interface Player : NPObject {
+        @public
+        int level;
+    }
+    - (id)initWithLevel:(int)v;
+    @end
+
+    @implementation Player
+    - (id)initWithLevel:(int)v {
+        self = [super init];
+        if (self) level = v;
+        return self;
+    }
+    @end
+@endnamespace
+
+@namespace B
+    @interface Player : NPObject {
+        @public
+        int level;
+    }
+    - (id)initWithLevel:(int)v;
+    @end
+
+    @implementation Player
+    - (id)initWithLevel:(int)v {
+        self = [super init];
+        if (self) level = v * 100;
+        return self;
+    }
+    @end
+@endnamespace
+
+@using A::Player;
+
+int main() {
+    @autoreleasepool {
+        A::Player *a = [[A::Player alloc] initWithLevel:1];
+        B::Player *b = [[B::Player alloc] initWithLevel:2];
+        // Distinct implementations prove the two classes stayed separate.
+        printf("[using-no-rename] a=%d b=%d\n", a->level, b->level);
+        // ARC manages both instances; no explicit release (ARC forbids it).
+    }
+    return 0;
+}

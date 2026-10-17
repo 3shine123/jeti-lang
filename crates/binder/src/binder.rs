@@ -52,6 +52,26 @@ impl Binder {
         }
     }
 
+    /// The name a declaration is filed under: what was written, under the
+    /// `@namespace` block it sits in.
+    ///
+    /// Deliberately not [`Self::ns_fqn`], which resolves a *use* of a name and
+    /// therefore consults the `@using` list first. A declaration is not named by
+    /// the spellings that can refer to it, and naming one through that list
+    /// renamed it: with `@using namespace A;` written above, `@namespace B {
+    /// @interface Player }` bound its class as `A::Player` — one class's methods
+    /// spread over the other's, and a single `A__Player` emitted.
+    ///
+    /// Mirrors the elaborator's `decl_name`; the two must agree, since the
+    /// elaborator reads the name back from the symbol this registered.
+    fn decl_name(&self, name: &str) -> String {
+        if name.contains("::") || self.ns_prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}{}", self.ns_prefix, name)
+        }
+    }
+
     fn ns_fqn(&self, name: &str) -> String {
         if name.contains("::") { return name.to_string(); }
         // Check @using namespace entries — try <ns>::<name>
@@ -313,7 +333,7 @@ impl Binder {
         let kind = d.kind;
         match kind {
             CstDeclKind::ClassInterface => {
-                let cls_name = self.ns_fqn(d.name.as_deref().unwrap_or(""));
+                let cls_name = self.decl_name(d.name.as_deref().unwrap_or(""));
                 let old_class = self.current_class.clone();
 
                 let is_category = matches!(d.data, CstDeclData::Class { ref category_name, .. } if category_name.is_some());
@@ -444,7 +464,19 @@ impl Binder {
             }
 
             CstDeclKind::ClassImplementation => {
-                let cls_name = self.ns_fqn(d.name.as_deref().unwrap_or(""));
+                // An `@implementation` (like a category) names a class that must
+                // already exist, so it resolves like a use of that name — the
+                // block it sits in first, so the class the surrounding
+                // `@namespace` declared wins over an import, and only then the
+                // `@using` list (`@implementation GP` for `@using GP = …;`).
+                // Mirrors the elaborator's rule for the same declaration.
+                let written = d.name.as_deref().unwrap_or("");
+                let scoped = self.decl_name(written);
+                let cls_name = if self.symtab.find_class(&scoped).is_some() {
+                    scoped
+                } else {
+                    self.ns_fqn(written)
+                };
                 let old_class = self.current_class.clone();
                 if self.symtab.find_class(&cls_name).is_none() {
                     self.error(d.line, d.column, &format!("cannot find class '{}' for @implementation", cls_name));
@@ -526,7 +558,7 @@ impl Binder {
                 }
                 if let Some(ref name) = d.name {
                     if self.symtab.lookup(name).is_none() {
-                        self.symtab.declare(Symbol::new(SymbolKind::Type, &self.ns_fqn(name)));
+                        self.symtab.declare(Symbol::new(SymbolKind::Type, &self.decl_name(name)));
                     }
                 }
             }
@@ -641,7 +673,7 @@ impl Binder {
                     // at `@optional` / `@required` and applies to every method
                     // that follows), not a per-method flag.
                     if let Some(ref name) = d.name {
-                        let fqn = self.ns_fqn(name);
+                        let fqn = self.decl_name(name);
                         let pname = if self.symtab.find_protocol(name).is_some() {
                             name.clone()
                         } else {
@@ -677,7 +709,7 @@ impl Binder {
             CstDeclKind::ForwardClass => {
                 if let CstDeclData::Forward(ref names) = d.data {
                     for name in names.iter() {
-                        let fqn = self.ns_fqn(name);
+                        let fqn = self.decl_name(name);
                         if self.symtab.find_class(&fqn).is_none() {
                             self.symtab.declare(Symbol::new(SymbolKind::Class, &fqn));
                         }

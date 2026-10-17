@@ -133,6 +133,33 @@ fn synthesized_nodes_report_zero_ends() {
 }
 
 #[test]
+fn a_using_does_not_rename_the_declarations_around_it() {
+    // The name of a declaration comes from the `@namespace` block it sits in,
+    // never from the `@using` list — that list is for *uses* of a name. Naming a
+    // declaration through it merged two classes: `@using A::Player;` beside
+    // `@namespace B { @interface Player }` declared both as `A::Player`, so one
+    // class's methods spread over the other's and the generated C held a single
+    // `A__Player`. The using is written *before* the second block here, which is
+    // how a real file reads.
+    let src = "\
+@namespace A
+    @interface Player : jeti_root
+    @end
+@endnamespace
+
+@using A::Player;
+
+@namespace B
+    @interface Player : jeti_root
+    @end
+@endnamespace
+";
+    let unit = elaborate(src);
+    let names: Vec<&str> = unit.decls.iter().filter_map(|d| d.name.as_deref()).collect();
+    assert_eq!(names, vec!["A::Player", "B::Player"], "each block keeps its own");
+}
+
+#[test]
 fn a_namespace_block_is_recorded_with_its_extent() {
     // Flattening lifts a namespace's members to the top level under their
     // qualified name (C has no namespaces), which leaves the block itself with

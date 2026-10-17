@@ -65,6 +65,23 @@ impl Elaborator {
         None
     }
 
+    /// The name a declaration is stored under: what was written, under the
+    /// `@namespace` block it sits in.
+    ///
+    /// Deliberately not [`Self::ns_fqn`], which resolves a *use* of a name and
+    /// therefore consults the `@using` list first. A declaration is not named by
+    /// the spellings that can refer to it, and naming one through that list
+    /// renamed it: with `@using A::Player;` in the file, `@namespace B {
+    /// @interface Player }` declared its class as `A::Player` — one class's
+    /// methods spread over the other's, and a single `A__Player` emitted.
+    fn decl_name(&self, name: &str) -> String {
+        if name.contains("::") || self.ns_prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}{}", self.ns_prefix, name)
+        }
+    }
+
     fn ns_fqn(&self, name: &str) -> String {
         // Always check alias list first (applies to all @using forms)
         if let Some(ref st) = self.symtab {
@@ -893,7 +910,30 @@ impl Elaborator {
                 AstDecl { kind: AstDeclKind::Function, line, col, name: cd.name.clone(), data: AstDeclData::Function { func_sym, return_type: return_type.as_ref().and_then(|t| self.convert_type(t)).map(Box::new), params: params.clone(), body: converted_body.and_then(|b| b.map(Box::new)), has_variadic: *has_variadic, throws: throws.as_ref().and_then(|t| self.convert_type(t)).map(Box::new), async_marker: *async_marker }, attributes: cd.attributes.clone(), end_line: cd.end_line, end_col: cd.end_column }
             }
             CstDeclData::Class { superclass, ivars, properties, methods, impl_vars, protocols, type_params, type_bounds, category_name, .. } => {
-                let fqn = self.ns_fqn(cd.name.as_deref().unwrap_or(""));
+                // An `@interface` *names* a class, so only the enclosing block
+                // qualifies it. An `@implementation` or a category names one
+                // that must already exist, so it resolves like a use of that
+                // name — starting with the block it sits in, so the class the
+                // surrounding `@namespace` declared wins over an import — and
+                // only then through the `@using` list (`@implementation GP` for
+                // `@using GP = Game::Player;`).
+                let written = cd.name.as_deref().unwrap_or("");
+                let names_existing_class = matches!(
+                    cd.kind,
+                    CstDeclKind::ClassImplementation
+                        | CstDeclKind::CategoryInterface
+                        | CstDeclKind::CategoryImplementation
+                );
+                let fqn = if names_existing_class {
+                    let scoped = self.decl_name(written);
+                    let declared_here = self
+                        .symtab
+                        .as_ref()
+                        .map_or(false, |st| st.find_class(&scoped).is_some());
+                    if declared_here { scoped } else { self.ns_fqn(written) }
+                } else {
+                    self.decl_name(written)
+                };
                 let cls_sym = self.symtab.as_ref().and_then(|st| st.find_class(&fqn)).map(|s| s.name.clone());
                 let cls_sym_clone = cls_sym.clone();
                 self.current_class_sym = cls_sym.clone();
@@ -919,7 +959,7 @@ impl Elaborator {
                         cur = np.next.as_ref().map(|n| n.as_ref());
                     }
                 }
-                let mut ad = AstDecl { kind: AstDeclKind::Class, line, col, name: Some(self.ns_fqn(cd.name.as_deref().unwrap_or(""))), data: AstDeclData::Class { cls_sym: cls_sym_clone, super_name: sup_name, protocols: protocols.clone(), type_params: type_params.clone(), type_bounds: type_bounds.clone(), methods: methods.iter().filter_map(|m| self.convert_decl(m)).collect(), ivars: ivars.iter().filter_map(|iv| self.convert_decl(iv)).collect(), properties: all_properties.iter().filter_map(|p| self.convert_decl(p)).collect(), impl_vars: impl_vars.iter().filter_map(|v| self.convert_decl(v)).collect(), is_implementation: cd.kind == CstDeclKind::ClassImplementation || cd.kind == CstDeclKind::CategoryImplementation, is_category: category_name.is_some() }, attributes: cd.attributes.clone(), end_line: cd.end_line, end_col: cd.end_column };
+                let mut ad = AstDecl { kind: AstDeclKind::Class, line, col, name: Some(fqn.clone()), data: AstDeclData::Class { cls_sym: cls_sym_clone, super_name: sup_name, protocols: protocols.clone(), type_params: type_params.clone(), type_bounds: type_bounds.clone(), methods: methods.iter().filter_map(|m| self.convert_decl(m)).collect(), ivars: ivars.iter().filter_map(|iv| self.convert_decl(iv)).collect(), properties: all_properties.iter().filter_map(|p| self.convert_decl(p)).collect(), impl_vars: impl_vars.iter().filter_map(|v| self.convert_decl(v)).collect(), is_implementation: cd.kind == CstDeclKind::ClassImplementation || cd.kind == CstDeclKind::CategoryImplementation, is_category: category_name.is_some() }, attributes: cd.attributes.clone(), end_line: cd.end_line, end_col: cd.end_column };
                 if let AstDeclData::Class { ref mut methods, .. } = ad.data {
                     if let Some(ref st) = self.symtab {
                         if let Some(ref cls_name) = cls_sym {
@@ -993,15 +1033,7 @@ impl Elaborator {
             CstDeclData::Typedef { alias_type, struct_fields } => {
                 // Store the fully-qualified name so codegen emits the flat name,
                 // making the typedef visible from outside the namespace.
-                let ty_fqn = if let Some(ref n) = cd.name {
-                    if !n.contains("::") && !self.ns_prefix.is_empty() {
-                        format!("{}{}", self.ns_prefix, n)
-                    } else {
-                        n.clone()
-                    }
-                } else {
-                    String::new()
-                };
+                let ty_fqn = cd.name.as_deref().map(|n| self.decl_name(n)).unwrap_or_default();
                 if let Some(ref mut st) = self.symtab {
                     if !ty_fqn.is_empty() {
                         st.declare(Symbol::new(SymbolKind::Type, &ty_fqn));
