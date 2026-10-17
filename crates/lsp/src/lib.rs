@@ -1387,20 +1387,38 @@ int main() {
         assert_eq!(definitions.len(), 1, "{definitions:?}");
         assert_eq!(definitions[0].range.start.line, 13);
 
-        // On a namespace segment the answer is the namespace. The elaborator
-        // flattens `@namespace` blocks, so there is no declaration to jump to
-        // — an honest empty answer, not the class it happens to hold.
+        // On a namespace segment the answer is the namespace — and since the
+        // block is kept beside the flat declaration stream, there is a place to
+        // jump to: the `@namespace` line itself.
         let on_namespace = position(NAMESPACES, "A::Inner::Player", 3);
         assert_eq!(
             analyzed.index.resolve_at(NAMESPACES, on_namespace),
-            Some(index::Resolved::Namespace("A::Inner".to_string()))
+            Some(index::Resolved::Symbol("A::Inner".to_string()))
         );
-        assert!(analyzed.index.definitions_at(NAMESPACES, on_namespace).is_empty());
+        let definitions = analyzed.index.definitions_at(NAMESPACES, on_namespace);
+        assert_eq!(definitions.len(), 1, "{definitions:?}");
+        assert_eq!(definitions[0].range.start.line, 12);
         // And the outermost segment is a namespace of its own.
+        let outermost = position(NAMESPACES, "A::Player", 0);
         assert_eq!(
-            analyzed.index.resolve_at(NAMESPACES, position(NAMESPACES, "A::Player", 0)),
-            Some(index::Resolved::Namespace("A".to_string()))
+            analyzed.index.resolve_at(NAMESPACES, outermost),
+            Some(index::Resolved::Symbol("A".to_string()))
         );
+        assert_eq!(
+            analyzed.index.definitions_at(NAMESPACES, outermost)[0].range.start.line,
+            0
+        );
+
+        // The outline nests what was flattened: `A::Inner` holds its class, and
+        // the class's name drops the prefix its container now spells.
+        let symbols = analyzed.index.document_symbols("/tmp/jeti_lsp_unit/symbols.jeti");
+        let names: Vec<&str> = symbols.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["A", "B", "A::Inner", "main"], "{symbols:#?}");
+        let inner = &symbols[2]["children"];
+        assert_eq!(inner[0]["name"], "Player");
+        assert_eq!(inner[0]["detail"], "@interface:jeti_root");
+        // Breadcrumbs come from `containerName`.
+        assert_eq!(inner[0]["containerName"], "A::Inner");
 
         // A qualified name the index does not have is a miss: answering with
         // another namespace's class that happens to share the short name would
@@ -1474,6 +1492,148 @@ int main() {
             vec!["A::Inner", "A::Inner::Player"]
         );
         assert_eq!(items(position(NAMESPACES, "A::Player", 3)), vec!["A::Player"]);
+    }
+
+    /// Namespaces written as blocks inside one another. Flattening loses the
+    /// most here — the inner block has to be put back before the outer one can
+    /// adopt it — and the qualified-name-only shape above never exercises that.
+    const NESTED_NAMESPACES: &str = "\
+@namespace Game
+    @namespace Entities
+        @interface Player : jeti_root
+        - (void)deep;
+        @end
+    @endnamespace
+@endnamespace
+
+int main() {
+    Game::Entities::Player *p;
+    return 0;
+}
+";
+
+    #[test]
+    fn nested_namespace_blocks_nest_in_the_outline_and_resolve_to_their_line() {
+        let analyzed = analyze(NESTED_NAMESPACES);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+        let text = NESTED_NAMESPACES;
+
+        // Each segment answers with the block that declared it, clangd-style:
+        // `Game` line 1, `Entities` line 2, `Player` the class.
+        for (inside, line) in [(0, 0), (7, 1), (16, 2)] {
+            let definitions =
+                analyzed.index.definitions_at(text, position(text, "Game::Entities::Player *p", inside));
+            assert_eq!(definitions.len(), 1, "byte {inside}: {definitions:?}");
+            assert_eq!(definitions[0].range.start.line, line, "byte {inside}");
+        }
+
+        // The outline is the nesting the source had, with each container named
+        // for breadcrumbs.
+        let symbols = analyzed.index.document_symbols("/tmp/jeti_lsp_unit/symbols.jeti");
+        let names: Vec<&str> = symbols.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["Game", "main"], "{symbols:#?}");
+        let entities = &symbols[0]["children"][0];
+        assert_eq!(entities["name"], "Entities");
+        assert_eq!(entities["containerName"], "Game");
+        assert_eq!(entities["range"]["start"], json!({"line": 1, "character": 4}));
+        let player = &entities["children"][0];
+        assert_eq!(player["name"], "Player");
+        assert_eq!(player["containerName"], "Game::Entities");
+        assert_eq!(player["children"][0]["name"], "deep");
+
+        // Hover says which namespace a block sits in, the same way breadcrumbs
+        // are read.
+        let hover = analyzed
+            .index
+            .resolve_at(text, position(text, "Game::Entities::Player *p", 7));
+        assert_eq!(hover, Some(index::Resolved::Symbol("Game::Entities".to_string())));
+    }
+
+    #[test]
+    fn a_namespace_reopened_twice_keeps_its_blocks_apart() {
+        // Two blocks of one name, and one with no members at all: adoption is by
+        // extent, so each holds its own declarations and the empty one still
+        // appears in the outline.
+        const SRC: &str = "\
+@namespace Empty
+@endnamespace
+
+@namespace Reopened
+@interface One : jeti_root
+@end
+@endnamespace
+
+@namespace Reopened
+@interface Two : jeti_root
+@end
+@endnamespace
+
+int main() {
+    Reopened::One *a;
+    Reopened::Two *b;
+    return 0;
+}
+";
+        let analyzed = analyze(SRC);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+        let text = SRC;
+
+        let symbols = analyzed.index.document_symbols("/tmp/jeti_lsp_unit/symbols.jeti");
+        let names: Vec<&str> = symbols.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["Empty", "Reopened", "Reopened", "main"], "{symbols:#?}");
+        assert!(symbols[0].get("children").is_none(), "an empty block, {symbols:#?}");
+        assert_eq!(symbols[1]["children"][0]["name"], "One");
+        assert_eq!(symbols[2]["children"][0]["name"], "Two");
+
+        // The name of a reopened namespace answers with both declarations, the
+        // way a class split across a header and an implementation does.
+        let definitions =
+            analyzed.index.definitions_at(text, position(text, "Reopened::One", 11));
+        assert_eq!(definitions.len(), 1, "{definitions:?}");
+        assert_eq!(definitions[0].range.start.line, 4);
+        let reopenings = analyzed
+            .index
+            .definitions_at(text, position(text, "Reopened::One", 0));
+        assert_eq!(
+            reopenings.iter().map(|d| d.range.start.line).collect::<Vec<_>>(),
+            vec![3, 8],
+            "{reopenings:?}"
+        );
+    }
+
+    #[test]
+    fn a_namespace_declared_in_an_imported_header_still_has_a_target() {
+        // The block is in another file: the index points into it, and the
+        // outline of the file being edited leaves it out — the header shows it
+        // when the header itself is open.
+        let dir = std::env::temp_dir().join("jeti_lsp_ns_import");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let header = dir.join("shapes.hje");
+        std::fs::write(
+            &header,
+            "@namespace Shapes\n@interface Circle : jeti_root\n- (void)draw;\n@end\n@endnamespace\n",
+        )
+        .expect("write header");
+        let source = "#import \"shapes.hje\"\n\nint main() {\n    Shapes::Circle *c;\n    return 0;\n}\n";
+        let path = dir.join("main.jeti");
+        let analyzed = analyze_for_editor(
+            path.to_str().unwrap(),
+            source,
+            &AnalysisOptions::default(),
+            &no_open_files(),
+        );
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        let definitions = analyzed
+            .index
+            .definitions_at(source, position(source, "Shapes::Circle", 3));
+        assert_eq!(definitions.len(), 1, "{definitions:?}");
+        assert!(definitions[0].path.ends_with("shapes.hje"), "{definitions:?}");
+        assert_eq!(definitions[0].range.start.line, 0, "{definitions:?}");
+
+        let symbols = analyzed.index.document_symbols(path.to_str().unwrap());
+        let names: Vec<&str> = symbols.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["main"], "{symbols:#?}");
     }
 
     #[test]

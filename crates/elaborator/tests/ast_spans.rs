@@ -131,3 +131,44 @@ fn synthesized_nodes_report_zero_ends() {
         other => panic!("expected a compound body: {other:?}"),
     }
 }
+
+#[test]
+fn a_namespace_block_is_recorded_with_its_extent() {
+    // Flattening lifts a namespace's members to the top level under their
+    // qualified name (C has no namespaces), which leaves the block itself with
+    // no node to point at. It is kept in `AstUnit::namespaces` instead — with
+    // the extent of the whole block, `@namespace` through `@endnamespace` — for
+    // the editor's outline and go-to-definition on a namespace name.
+    let src = "\
+@namespace Game
+    @namespace Entities
+        @interface Player : jeti_root
+        - (void)deep;
+        @end
+    @endnamespace
+@endnamespace
+
+int g(void) { return 0; }
+";
+    let unit = elaborate(src);
+
+    let recorded: Vec<(&str, (usize, usize, usize, usize))> = unit
+        .namespaces
+        .iter()
+        .map(|ns| (ns.name.as_str(), (ns.line, ns.col, ns.end_line, ns.end_col)))
+        .collect();
+    assert_eq!(
+        recorded,
+        vec![
+            ("Game", (1, 1, 7, 14)),
+            ("Game::Entities", (2, 5, 6, 18)),
+        ],
+        "source order, outer first, each block's own extent"
+    );
+
+    // The members kept the qualified names the blocks give them, and stay flat:
+    // the recorded blocks add no wrapper the lowering passes would have to
+    // recurse into.
+    let names: Vec<Option<&str>> = unit.decls.iter().map(|d| d.name.as_deref()).collect();
+    assert_eq!(names, vec![Some("Game::Entities::Player"), Some("g")]);
+}

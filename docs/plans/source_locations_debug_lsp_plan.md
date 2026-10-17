@@ -191,9 +191,9 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   限定名"（光标在 `Engine` 上就是 `Extreme::Engine`），再问整条链，最后才退到裸段。限定名以 `::` 分段，
   分隔符两侧允许空格（解析器允许 `Game :: Player`），换行终止扫描（限定名不会跨行写）。
   selector（`setObject:atIndex:`）与声明里的关键字部分（`run:`）仍是**整体**一个名字，不拆段。
-- 命名空间**不是声明**：elaborator 把 `@namespace` 的成员带上限定名提到顶层，AST 里没有命名空间节点，所以
-  索引从限定名的前缀反推出命名空间名（`A::Inner::Player` 说明 `A::Inner` 与 `A` 都存在）。悬停命名空间报出
-  `**namespace** \`A::Inner\``，并写明没有可展示的声明；跳转定义对它返回空——没有位置的目标比猜一个更糟。
+- 命名空间曾经**不是声明**：elaborator 把 `@namespace` 的成员带上限定名提到顶层，AST 里没有命名空间节点，所以
+  索引只能从限定名的前缀反推出命名空间名（`A::Inner::Player` 说明 `A::Inner` 与 `A` 都存在）。悬停能报出
+  `**namespace** \`A::Inner\``，跳转定义返回空。这一条已由下一节解决。
 - 补全的前缀因此也带限定名：`Game::En` 筛到 `Game::Enemies`；光标停在 `Game::`（右边还没打字）时给的是这个
   命名空间里的名字，而不是索引里的全部名字。这一路判定是文本级的，不要求缓冲区能解析——正在敲的代码本来
   就解析不过，而解析错误不会阻止 AST 与索引。
@@ -202,10 +202,33 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 回归：`cargo test -p jeti-lsp`（新增限定名分段解析、分隔符补全前缀、同名类互不混淆等单测，以及
   真实子进程会话里 `greet:from:` 这类 selector 仍按整名解析）；探测脚本对 `tests/golden/12_namespace/`
   逐个位置验证过。
-- 未做（需要编译器侧配合）：让跳转定义能落到 `@namespace` 那一行，以及大纲里把命名空间嵌起来。两条都要求
-  elaborator 不再把命名空间摊平；而摊平后的顶层声明流被 8 处以上不再递归 `Namespace` 的遍历消费
-  （codegen 4306/4364/5050/5245、checker 3306+、async 613+），贸然改成嵌套会让这些 pass 悄悄漏掉
-  命名空间里的类，所以先把只读的解析做在 LSP 这一侧。
+- 未做：**不带限定名**的引用（`Player *p;`）仍走短名表，不同命名空间同名时依旧都命中；消歧要用 AST 里已经
+  解析好的类型（type 位置的 `expr_type`），是另一块活儿。
+
+**进展（`@namespace` 块的位置：跳转定义 + 大纲嵌套 —— 已落地）**
+
+- 起因：命名空间只是"从名字前缀反推出来的名字"，没有位置可指——F12 落在 `Game::Entities` 上返回空，大纲
+  也是平铺的 `Game::Entities::Player`。clangd 会跳到那一行 `@namespace`。
+- 两条候选路都被否掉，理由都和"稳健"有关：
+  - (a) 让 elaborator 在摊平后的顶层声明流里发一个命名空间包装节点。这要求**每一条**遍历都改成递归；今天
+    有 8 处以上（codegen 4306/4364/5050/5245、checker 3306+、async 613+），漏掉一处不报错，只会让那个 pass
+    悄悄看不见命名空间里的类。而且成员的名字本来就是限定名（顶层声明的名字就是 `Game::Entities::Player`），
+    再套一层嵌套等于同一件事说两遍，还可能互相不一致。
+  - (b) 让索引去消费同一次运行的 CST。那就等于让 LSP 自己再做一次名字解析，正是"`crates/lsp` 不得自带一条
+    parser/checker 链"要防的。
+- 采用：摊平照旧（`decls` 一个字节不变），但每个 `@namespace` 块**连同源码范围**记在流旁边——`AstUnit::namespaces`
+  （`AstNamespace { name, line, col, end_line, end_col }`，源码顺序，外层在前）。它是"编译器解析出来又丢掉的事实"
+  里唯一需要留下的一条，也是同类需求（`@using` 别名等）的模版：**加一张表，不动声明流**。
+- 索引侧：块还原成 `SymbolKind::Namespace` 符号（于是有位置可跳），并按**范围包含**（不是名字前缀）收编写在
+  自己里面的声明；内层的块先入树、外层的块后收编，嵌套是自然结果。被收编的符号显示名去掉容器已经写出的前缀，
+  `containerName` 填上命名空间——正好是面包屑读的东西。悬停显示块自己的原文（和类一样）。
+- 效果：`Game::Entities::Player *p;` 上光标在 `Game` → `@namespace Game` 行，在 `Entities` →
+  `@namespace Entities` 行，在 `Player` → 类；两层块的大纲是 `Game ▸ Entities ▸ Player ▸ deep`，每层
+  `containerName` 依次为 `Game`、`Game::Entities`。索引里"只由前缀得知的命名空间"（`Resolved::Namespace`）
+  仍然保留，现在只服务"名字里写了 FQN、却没有块"的情况。
+- 回归：`cargo test --workspace`、`cargo test -p jeti-lsp`（新增嵌套块的大纲/定义单测）、
+  `crates/elaborator/tests/ast_spans.rs`（新增"块范围被记录"用例）、`./test_all.sh -j4`（基线不变——`decls`
+  没变，生成的 C 自然不变，这也是选这条路最直接的收益）。
 
 **进展（项目配置文件：compile_commands.json / compile_flags.txt —— 已落地）**
 

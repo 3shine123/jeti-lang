@@ -284,13 +284,20 @@ cursor is in and highlights the parameter being filled in (`:` triggers it).
 Qualified names resolve **segment by segment**, the way clangd resolves a C++ one.
 In `Extreme::Engine::RenderPipeline` the cursor on `RenderPipeline` gets that
 class, and the cursor on `Engine` names the namespace `Extreme::Engine`: hovering a
-namespace says what it is, and completion after `Engine::` offers what lives
-inside it instead of every name in the index. Same-named classes in different
-namespaces stay apart — `A::Player` and `B::Player` each resolve to their own
-class, where a bare short name used to answer with all of them. One limit: the
-elaborator lifts every `@namespace` member to the top level under its qualified
-name, so a namespace is not a declaration the index can point at. Hovering one
-names it; go-to-definition on it answers nothing rather than guessing.
+namespace says what it is, go-to-definition on it jumps to the `@namespace` line
+that declared it, and completion after `Engine::` offers what lives inside it
+instead of every name in the index. Same-named classes in different namespaces
+stay apart — `A::Player` and `B::Player` each resolve to their own class, where a
+bare short name used to answer with all of them. The outline shows the nesting
+the source has (`Game` ▸ `Entities` ▸ `Player`), and each entry records the
+namespace it sits in, which is what the breadcrumb bar reads. What makes that
+possible: the elaborator lifts every `@namespace` member to the top level under
+its qualified name — the compiler's passes walk one flat list of declarations,
+and a wrapper node only some of them recursed into would hide a namespace's
+classes from the rest — but it keeps each `@namespace` block itself, with its
+source extent, beside that list (`AstUnit::namespaces`). The index rebuilds them
+as symbols, so a namespace has a place to point at instead of being inferred
+from the `::` in the names.
 
 A syntax error does not hide the rest of the file. The parse still fails, but the
 recovered syntax tree is handed to the later stages, so the editor reports the

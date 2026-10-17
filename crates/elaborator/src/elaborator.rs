@@ -9,6 +9,11 @@ pub struct Elaborator {
     pub has_error: bool,
     pub err_msg: String,
     pub ns_prefix: String,
+    /// The `@namespace` blocks seen while flattening, in source order (see
+    /// [`AstNamespace`]). They are the one thing flattening drops: a namespace's
+    /// members become top-level declarations, the block itself is recorded here
+    /// instead of as a wrapper node a lowering pass might not recurse into.
+    pub namespaces: Vec<AstNamespace>,
     pub verbose: bool,
     /// Scope stack of locally-declared variable types. Function/method bodies
     /// push a scope; `convert_dot_expr` uses this to resolve `obj.field` even
@@ -22,6 +27,7 @@ impl Elaborator {
         Elaborator {
             symtab, result: None, current_class_sym: None,
             has_error: false, err_msg: String::new(), ns_prefix: String::new(),
+            namespaces: Vec::new(),
             verbose: false, local_types: Vec::new(),
         }
     }
@@ -1061,14 +1067,21 @@ impl Elaborator {
     fn flatten_decls(&mut self, cd: &CstDecl, out: &mut Vec<AstDecl>) {
         match &cd.data {
             CstDeclData::Namespace(decls) => {
-                if let Some(ref name) = cd.name {
-                    let old = self.ns_prefix.clone();
-                    self.ns_prefix = format!("{}{}::", old, name);
-                    for d in decls { self.flatten_decls(d, out); }
-                    self.ns_prefix = old;
-                } else {
-                    for d in decls { self.flatten_decls(d, out); }
+                let old = self.ns_prefix.clone();
+                if let Some(name) = cd.name.clone() {
+                    self.ns_prefix = format!("{old}{name}::");
+                    // Record the block before its members, so the list stays in
+                    // source order (an inner namespace follows its parent).
+                    self.namespaces.push(AstNamespace {
+                        name: self.ns_prefix.trim_end_matches("::").to_string(),
+                        line: cd.line,
+                        col: cd.column,
+                        end_line: cd.end_line,
+                        end_col: cd.end_column,
+                    });
                 }
+                for d in decls { self.flatten_decls(d, out); }
+                self.ns_prefix = old;
                 return;
             }
             CstDeclData::Using { .. } => {
@@ -1099,7 +1112,8 @@ impl Elaborator {
         for decl in &unit.decls {
             self.flatten_decls(decl, &mut ast_decls);
         }
-        self.result = Some(AstUnit { decls: ast_decls, filename: unit.filename.clone() });
+        let namespaces = std::mem::take(&mut self.namespaces);
+        self.result = Some(AstUnit { decls: ast_decls, filename: unit.filename.clone(), namespaces });
         if self.has_error { -1 } else { 0 }
     }
 

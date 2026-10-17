@@ -106,9 +106,12 @@ pub struct Completion {
 pub enum Resolved {
     /// A declaration the index has: [`SymbolIndex::definitions`] answers for it.
     Symbol(String),
-    /// A namespace, known only by the qualified names of what it holds. There is
-    /// no declaration to jump to — the elaborator flattens `@namespace` blocks,
-    /// so the index has none — but the name itself is real and can be shown.
+    /// A namespace the index knows only from the qualified names of what it
+    /// holds — a name that was never written as a `@namespace` block itself
+    /// (a class named `A::B` by hand). There is no declaration to jump to; the
+    /// name is real, and its members agreeing on the prefix is all the index
+    /// has. A namespace that *was* declared resolves as
+    /// [`Resolved::Symbol`] and carries the block's position.
     Namespace(String),
 }
 
@@ -251,14 +254,14 @@ pub struct SymbolIndex {
     calls: Vec<CallSite>,
     /// Free functions by name: what signature help shows for `name(...)`.
     functions: HashMap<String, Signature>,
-    /// Namespace prefixes seen in the qualified names of the index
-    /// (`Game`, `Game::Entities`).
+    /// Namespace names seen in the qualified names of the index
+    /// (`Game`, `Game::Entities`), including every declared block.
     ///
     /// Jeti's elaborator flattens `@namespace` blocks — members are lifted to
-    /// the top level under their fully-qualified name — so a namespace is not a
-    /// declaration the index can point at. What it *contains* still says it
-    /// exists, which is enough to name it on hover and to filter a completion
-    /// after `Game::`.
+    /// the top level under their fully-qualified name — so a namespace's own
+    /// declaration lives beside the flat stream (`AstUnit::namespaces`) and is
+    /// rebuilt as a symbol here. This set is what answers for a namespace that
+    /// has no block to point at, and what filters a completion after `Game::`.
     namespaces: BTreeSet<String>,
 }
 
@@ -284,7 +287,57 @@ impl SymbolIndex {
         };
         let mut index = SymbolIndex::default();
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
+        index.attach_namespaces(ast, source_map, &mut lookup);
         index
+    }
+
+    /// Put each `@namespace` block back where it was written.
+    ///
+    /// The elaborated stream is flat: a namespace's members are top-level
+    /// declarations named `A::B::C`. The block itself is the one fact flattening
+    /// keeps for later (`AstUnit::namespaces`), because a wrapper node in
+    /// `decls` would change what every lowering pass walks. Here it becomes a
+    /// symbol of its own — which is what lands go-to-definition on the
+    /// `@namespace` line — and adopts the declarations written inside it, which
+    /// is what nests the outline and fills `containerName` (breadcrumbs).
+    ///
+    /// Blocks are adopted innermost first, so an inner namespace is already in
+    /// the tree when the block containing it looks for its members.
+    fn attach_namespaces(
+        &mut self,
+        ast: &AstUnit,
+        source_map: &SourceMap,
+        text_of: &mut impl FnMut(&str) -> Option<String>,
+    ) {
+        let mut blocks = Vec::new();
+        for namespace in &ast.namespaces {
+            let span = source_map.span_from_node(
+                (namespace.line as u32, namespace.col as u32),
+                (namespace.end_line as u32, namespace.end_col as u32),
+            );
+            if span.is_synthetic() {
+                continue;
+            }
+            let path = source_map.registry().path_of(span.file).to_string();
+            let Some(text) = text_of(&path) else { continue };
+            let symbol = Symbol {
+                name: namespace.name.clone(),
+                lookup: namespace.name.clone(),
+                kind: kind::NAMESPACE,
+                // Same as an `AstDeclData::Namespace` node: the kind says it.
+                detail: String::new(),
+                container: None,
+                path,
+                range: span.to_lsp_range(&text),
+                children: Vec::new(),
+            };
+            self.record(&symbol);
+            self.namespaces.insert(symbol.lookup.clone());
+            blocks.push(symbol);
+        }
+        for block in blocks.into_iter().rev() {
+            self.roots = adopt_namespace(std::mem::take(&mut self.roots), block);
+        }
     }
 
     /// The declarations of the document at `path`, ready to serialize as an LSP
@@ -323,7 +376,7 @@ impl SymbolIndex {
     pub fn resolve_at(&self, text: &str, position: LspPosition) -> Option<Resolved> {
         for candidate in lookup_names(text, position) {
             // A declaration beats a namespace of the same name: it is the more
-            // specific answer, and it is the one with a place to jump to.
+            // specific answer.
             if self.by_name.contains_key(&candidate) {
                 return Some(Resolved::Symbol(candidate));
             }
@@ -335,8 +388,9 @@ impl SymbolIndex {
     }
 
     /// Declarations of the name at `position` — the editor's
-    /// `textDocument/definition` answer, empty when the name is a namespace
-    /// (flattened away, so there is nothing to jump to) or unknown.
+    /// `textDocument/definition` answer: a declared namespace block answers
+    /// with the block, a namespace the index only knows by name with nothing,
+    /// an unknown name with nothing.
     pub fn definitions_at(&self, text: &str, position: LspPosition) -> Vec<Location> {
         match self.resolve_at(text, position) {
             Some(Resolved::Symbol(name)) => self.definitions(&name),
@@ -908,6 +962,56 @@ fn describe(decl: &AstDecl) -> Option<(u8, String)> {
         // carry no name a user could click through.
         _ => return None,
     })
+}
+
+/// Move every declaration a `@namespace` block contains under it, and put the
+/// block back where its members were (the list stays in source order).
+///
+/// A block's extent covers exactly the declarations written inside it, so
+/// containment — not the `::` in the names — is what decides who is a member.
+/// An adopted symbol's display name loses the prefix its container now spells,
+/// the way a class member's does.
+fn adopt_namespace(roots: Vec<Symbol>, mut block: Symbol) -> Vec<Symbol> {
+    let mut out: Vec<Symbol> = Vec::with_capacity(roots.len() + 1);
+    let mut at: Option<usize> = None;
+    for symbol in roots {
+        if !encloses(&block, &symbol) {
+            out.push(symbol);
+            continue;
+        }
+        at.get_or_insert(out.len());
+        let mut child = symbol;
+        child.container = Some(block.lookup.clone());
+        if let Some(short) = child.lookup.strip_prefix(&format!("{}::", block.lookup)) {
+            child.name = short.to_string();
+        }
+        block.children.push(child);
+    }
+    match at {
+        Some(index) => out.insert(index, block),
+        None => {
+            // Nothing of this file is inside it (an empty block, or members
+            // declared elsewhere): place it where its extent says it belongs,
+            // ahead of the first declaration that starts after it.
+            let index = out
+                .iter()
+                .position(|symbol| {
+                    same_file(&symbol.path, &block.path) && block.range.start <= symbol.range.start
+                })
+                .unwrap_or(out.len());
+            out.insert(index, block);
+        }
+    }
+    out
+}
+
+/// Whether `namespace`'s extent contains `symbol`: same file, and strictly
+/// wider than the symbol it holds.
+fn encloses(namespace: &Symbol, symbol: &Symbol) -> bool {
+    same_file(&namespace.path, &symbol.path)
+        && namespace.range != symbol.range
+        && namespace.range.start <= symbol.range.start
+        && symbol.range.end <= namespace.range.end
 }
 
 /// The declarations nested inside `decl` (a class body, a namespace).

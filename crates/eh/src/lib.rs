@@ -1859,7 +1859,7 @@ mod tests {
             end_line: 0,
             end_col: 0,
         };
-        let mut unit = AstUnit { decls: vec![func], filename: "probe.jeti".into() };
+        let mut unit = AstUnit { decls: vec![func], filename: "probe.jeti".into(), namespaces: Vec::new() };
         desugar_unit(&mut unit);
 
         assert!(
@@ -2044,6 +2044,6 @@ mod tests {
             end_line: 0,
             end_col: 0,
         };
-        AstUnit { decls: vec![func], filename: "probe.jeti".into() }
+        AstUnit { decls: vec![func], filename: "probe.jeti".into(), namespaces: Vec::new() }
     }
 }

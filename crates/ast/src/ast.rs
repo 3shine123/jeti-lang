@@ -511,4 +511,37 @@ pub struct AstDecl {
 pub struct AstUnit {
     pub decls: Vec<AstDecl>,
     pub filename: String,
+    /// Every `@namespace` block of the translation unit, in source order.
+    ///
+    /// The declarations inside one are lifted into [`AstUnit::decls`] under
+    /// their qualified names (see [`AstNamespace`]) — this is the block's own
+    /// declaration, which the flat stream has no room for.
+    pub namespaces: Vec<AstNamespace>,
+}
+
+/// A `@namespace` block, kept for the consumers that need the source structure
+/// the compiler itself drops.
+///
+/// C has no namespaces, so the elaborator lifts a namespace's members into
+/// [`AstUnit::decls`] as top-level declarations named `A::B::C` (codegen
+/// mangles those into `A__B__C`). What is lost by that lift is *where* the
+/// namespace was written — which the editor's outline, go-to-definition on a
+/// namespace name and breadcrumbs all need, and which no other node carries.
+///
+/// This is the one fact recorded here rather than as a declaration, on purpose:
+/// adding a wrapper node to `decls` would change what every lowering pass walks
+/// (and a pass that forgot to recurse would silently skip everything inside a
+/// namespace), while this list cannot hide a declaration from anyone.
+#[derive(Debug, Clone)]
+pub struct AstNamespace {
+    /// Fully-qualified name, spelled the way the members of the block are
+    /// prefixed (`A::B` for `@namespace B` inside `@namespace A`).
+    pub name: String,
+    /// Extent of the whole block — the `@namespace` line through
+    /// `@endnamespace` — in the shape [`AstDecl`] uses (1-based line, end
+    /// exclusive; see `docs/plans/source_locations_debug_lsp_plan.md`).
+    pub line: usize,
+    pub col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
 }
