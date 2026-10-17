@@ -529,6 +529,8 @@ impl Server {
                         "textDocumentSync": 2,
                         "documentSymbolProvider": true,
                         "definitionProvider": true,
+                        "referencesProvider": true,
+                        "renameProvider": true,
                         "hoverProvider": true,
                         // No `resolveProvider`: everything a completion item
                         // needs (label, kind, detail) is in the same answer.
@@ -623,6 +625,37 @@ impl Server {
                 };
                 vec![response(id, result)]
             }
+            // Every reference to the symbol under the cursor, in the edited
+            // document. LSP answers this one as an array — possibly empty —
+            // rather than `null`: an empty list is a complete answer.
+            "textDocument/references" => {
+                let uri = request_uri(message);
+                let position = request_position(message);
+                let locations = self.references(uri, position);
+                vec![response(id, Value::Array(locations))]
+            }
+            // What a rename should preselect: the name's range, or `null` for
+            // a name that cannot be renamed (not a symbol, a namespace in v1).
+            "textDocument/prepareRename" => {
+                let uri = request_uri(message);
+                let position = request_position(message);
+                let result = self
+                    .rename_range(uri, position)
+                    .map_or(Value::Null, range_json);
+                vec![response(id, result)]
+            }
+            // The symbol under the cursor, renamed everywhere it occurs in the
+            // edited document. The answer is a workspace edit; an invalid new
+            // name is an empty edit, not a guess.
+            "textDocument/rename" => {
+                let uri = request_uri(message);
+                let position = request_position(message);
+                let new_name = message
+                    .pointer("/params/newName")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                vec![response(id, self.rename(uri, position, new_name))]
+            }
             // What the symbol under the cursor *is*, with its declaration text.
             "textDocument/hover" => {
                 let position = request_position(message);
@@ -676,8 +709,13 @@ impl Server {
                         access_receiver_at(&doc.text, position)
                             .and_then(|name| index.receiver_class(&name, position))
                     });
-                    if let Some((class, class_receiver)) = receiver {
-                        for member in index.member_completion(&class, class_receiver, &prefix) {
+                    if let Some(receiver) = receiver {
+                        for member in index.member_completion(
+                            receiver.class.as_deref(),
+                            &receiver.protocols,
+                            receiver.is_class_receiver,
+                            &prefix,
+                        ) {
                             entries.push((member.label, member.kind, member.detail));
                         }
                     }
@@ -816,6 +854,53 @@ impl Server {
             })
             .collect()
     }
+
+    fn references(&self, uri: &str, position: LspPosition) -> Vec<Value> {
+        let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) else {
+            return Vec::new();
+        };
+        index
+            .find_references(&doc.text, position)
+            .iter()
+            .map(|location| {
+                json!({
+                    "uri": self.uri_for(&location.path),
+                    "range": range_json(location.range),
+                })
+            })
+            .collect()
+    }
+
+    fn rename_range(&self, uri: &str, position: LspPosition) -> Option<LspRange> {
+        let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) else {
+            return None;
+        };
+        index.rename_range_at(&doc.text, position)
+    }
+
+    fn rename(&self, uri: &str, position: LspPosition, new_name: &str) -> Value {
+        // The compiler's identifier rules, minus the shape of a selector (the
+        // client typed what it typed; the diagnostics will say if it is wrong).
+        let valid_name = new_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && new_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':');
+        let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) else {
+            return json!({ "changes": {} });
+        };
+        if !valid_name {
+            return json!({ "changes": {} });
+        }
+        let edits: Vec<Value> = index
+            .rename_ranges(&doc.text, position)
+            .iter()
+            .map(|range| json!({ "range": range_json(*range), "newText": new_name }))
+            .collect();
+        json!({ "changes": { self.uri_for(&doc.path): edits } })
+    }
 }
 
 fn publish_empty(uri: &str) -> Value {
@@ -952,6 +1037,7 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index::ReceiverInfo;
 
     fn no_open_files() -> impl Fn(&str) -> Option<String> {
         |_: &str| None
@@ -1230,7 +1316,9 @@ mod tests {
     #[test]
     fn unhandled_request_gets_method_not_found() {
         let mut server = Server::new(AnalysisOptions::default());
-        let req = json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/rename", "params": {}});
+        // A method the server does not offer — the capability list in
+        // `initialize` is the truth about what it does.
+        let req = json!({"jsonrpc": "2.0", "id": 7, "method": "textDocument/formatting", "params": {}});
         let out = server.handle(&req);
         assert_eq!(out[0]["error"]["code"], -32601);
     }
@@ -1426,6 +1514,124 @@ int main() {
         let unknown = "    C::Player *p;";
         assert_eq!(analyzed.index.resolve_at(unknown, position(unknown, "C::Player", 3)), None);
         assert!(analyzed.index.definitions_at(unknown, position(unknown, "C::Player", 3)).is_empty());
+    }
+
+    /// References, like definitions, honor the segment under the cursor: on
+    /// `Player` in `A::Player`, the answer is A's class and only A's — the
+    /// two same-named `Player`s in the other namespaces do not appear.
+    #[test]
+    fn find_references_lists_one_symbol_s_occurrences_only() {
+        let analyzed = analyze(NAMESPACES);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        // Cursor on the `Player` segment of `A::Player` in main.
+        let on_player = position(NAMESPACES, "A::Player", 3);
+        let references = analyzed.index.find_references(NAMESPACES, on_player);
+        assert_eq!(references.len(), 2, "{references:?}");
+        // The `@interface` declaration and the qualified use in main — the
+        // scan's hit inside the declaration's extent dedupes into it.
+        let lines: Vec<u32> = references.iter().map(|l| l.range.start.line).collect();
+        assert_eq!(lines, vec![1, 19]);
+
+        // The same answer from the other side: on B's qualified use, B's
+        // declaration and only B's.
+        let references = analyzed
+            .index
+            .find_references(NAMESPACES, position(NAMESPACES, "B::Player", 3));
+        let lines: Vec<u32> = references.iter().map(|l| l.range.start.line).collect();
+        assert_eq!(lines, vec![7, 20], "{references:?}");
+    }
+
+    /// A selector's references are found through its name without the colon,
+    /// the form the text carries: declaration, implementation, and the send.
+    #[test]
+    fn selector_and_class_references_are_found_the_same_way() {
+        let analyzed = analyze(PROGRAM);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        // Cursor on `run:` in the declaration.
+        let references = analyzed
+            .index
+            .find_references(PROGRAM, position(PROGRAM, "- (void)run:", 8));
+        let lines: Vec<u32> = references.iter().map(|l| l.range.start.line).collect();
+        assert_eq!(lines, vec![3, 7, 8], "{references:?}");
+
+        // A class: its `@interface` and `@implementation` names.
+        let references = analyzed
+            .index
+            .find_references(PROGRAM, position(PROGRAM, "@interface Thing", 11));
+        let lines: Vec<u32> = references.iter().map(|l| l.range.start.line).collect();
+        assert_eq!(lines, vec![2, 6], "{references:?}");
+    }
+
+    /// The scan reads code, not text: a name inside a comment or a string
+    /// literal is not a reference, however exactly it is spelled.
+    #[test]
+    fn names_in_comments_and_strings_are_not_references() {
+        const SRC: &str = "\
+@interface Thing : jeti_root
+@end
+
+int main() {
+    // Thing does not count
+    Thing *note;
+    char *s = \"Thing\";
+    return 0;
+}
+";
+        let analyzed = analyze(SRC);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        let references = analyzed
+            .index
+            .find_references(SRC, position(SRC, "@interface Thing", 11));
+        let lines: Vec<u32> = references.iter().map(|l| l.range.start.line).collect();
+        assert_eq!(lines, vec![0, 5], "{references:?}");
+    }
+
+    /// A rename preselects the name, and a qualified name's qualifier
+    /// survives: on the `Player` segment of `A::Player`, the range is the
+    /// segment alone, and the occurrences are the declaration's name and the
+    /// segment in main — not the whole qualified names, and not the other
+    /// same-named classes.
+    #[test]
+    fn rename_replaces_the_name_not_the_qualifier() {
+        let analyzed = analyze(NAMESPACES);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        // Cursor on the `Player` segment of `A::Player` in main
+        // (`    A::Player *p;`: the segment is characters 7..13).
+        let on_player = position(NAMESPACES, "A::Player", 5);
+        let range = analyzed.index.rename_range_at(NAMESPACES, on_player).expect("renameable");
+        assert_eq!((range.start.line, range.start.character), (19, 7));
+        assert_eq!((range.end.line, range.end.character), (19, 13));
+
+        let ranges = analyzed.index.rename_ranges(NAMESPACES, on_player);
+        assert_eq!(ranges.len(), 2, "{ranges:?}");
+        // The declaration's name (line 1, `@interface Player`) and the
+        // segment in main.
+        assert_eq!((ranges[0].start.line, ranges[0].start.character), (1, 11));
+        assert_eq!((ranges[1].start.line, ranges[1].start.character), (19, 7));
+    }
+
+    /// A selector travels with its colon: renaming `run:` rewrites `run:` in
+    /// the declaration, the implementation, and the send — four characters
+    /// each time.
+    #[test]
+    fn rename_a_selector_keeps_its_colon() {
+        let analyzed = analyze(PROGRAM);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        let on_run = position(PROGRAM, "- (void)run:", 8);
+        let range = analyzed.index.rename_range_at(PROGRAM, on_run).expect("renameable");
+        assert_eq!((range.start.line, range.start.character), (3, 8));
+        assert_eq!((range.end.line, range.end.character), (3, 12));
+
+        let ranges = analyzed.index.rename_ranges(PROGRAM, on_run);
+        assert_eq!(ranges.len(), 3, "{ranges:?}");
+        for range in &ranges {
+            assert_eq!(range.end.character - range.start.character, 4, "{ranges:?}");
+        }
     }
 
     /// A bare name written inside a `@namespace` block stands for that block's
@@ -1901,6 +2107,113 @@ int main() {
     }
 
     #[test]
+    fn an_id_receiver_completes_its_protocols() {
+        const SRC: &str = r#"
+@protocol Root
+- (void)rootAction:;
+@end
+
+@protocol Task <Root>
+- (void)taskAction:;
+@end
+
+@interface TaskWorker : jeti_root
+- (void)worker;
+@end
+
+@implementation TaskWorker
+- (void)worker {
+    id<Task> t = nil;
+    [t taskAction:nil];
+    [t rootAction:nil];
+    id u = nil;
+    [u worker];
+}
+@end
+"#;
+        let analyzed = analyze(SRC);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        // An `id<Task>` local: the receiver is a protocol, not a class.
+        let receiver = analyzed.index.send_receiver(position(SRC, "[t taskAction", 3));
+        assert_eq!(
+            receiver,
+            Some(ReceiverInfo {
+                class: None,
+                protocols: vec!["Task".to_string()],
+                is_class_receiver: false,
+                type_args: Vec::new(),
+            })
+        );
+
+        // Members: Task's own selectors plus the ones inherited from Root.
+        // Labels are the binder's canonical selector form (the same
+        // colon-stripped spelling the conformance checker compares with).
+        let protocols = receiver.map(|r| r.protocols).unwrap_or_default();
+        let members = analyzed
+            .index
+            .member_completion(None, &protocols, false, "");
+        let labels = members
+            .into_iter()
+            .map(|member| member.label)
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"taskAction".to_string()), "{labels:?}");
+        assert!(labels.contains(&"rootAction".to_string()), "{labels:?}");
+
+        // An untyped id has no protocol to complete against: no members.
+        let receiver = analyzed.index.send_receiver(position(SRC, "[u worker", 3));
+        assert_eq!(receiver, None);
+    }
+
+    /// A concrete receiver instantiates its class: the signature it is
+    /// filling in shows the receiver's arguments where the class declares
+    /// its parameters — in the return type and in the parameter labels.
+    #[test]
+    fn a_generic_receivers_signature_shows_its_arguments() {
+        const SRC: &str = "\
+@interface Thing : jeti_root
+@end
+
+@interface NPBox<T> : jeti_root
+- (T *)value;
+- (void)store:(T *)thing;
+@end
+
+@implementation NPBox
+@end
+
+int main() {
+    Thing *thing;
+    NPBox<Thing> *box;
+    [box value];
+    [box store:thing];
+    return 0;
+}
+";
+        let analyzed = analyze(SRC);
+        assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
+
+        // Inside `[box value]`: the declared `T *` return is the receiver's
+        // argument.
+        let help = analyzed
+            .index
+            .signature_help(position(SRC, "[box value]", 6))
+            .expect("a signature under the cursor");
+        assert_eq!(help.signatures.len(), 1, "{help:?}");
+        assert!(help.signatures[0].label.contains("Thing"), "{help:?}");
+        assert!(!help.signatures[0].label.contains("T *"), "{help:?}");
+
+        // And the parameter labels carry it too (LSP matches them as
+        // substrings of the label).
+        let help = analyzed
+            .index
+            .signature_help(position(SRC, "[box store", 5))
+            .expect("a signature under the cursor");
+        assert_eq!(help.signatures[0].parameters, vec!["(Thing *)thing".to_string()], "{help:?}");
+        assert!(help.signatures[0].label.contains("(Thing *)thing"), "{help:?}");
+    }
+
+    #[test]
     fn member_completion_follows_the_class_chain() {
         let analyzed = analyze(MEMBERS);
         assert!(analyzed.diagnostics.is_empty(), "{:?}", analyzed.diagnostics);
@@ -1910,14 +2223,14 @@ int main() {
 
         // An object receiver gets its class's instance members *and* the
         // inherited ones, but never the class methods.
-        let instance = labels(analyzed.index.member_completion("Widget", false, ""));
+        let instance = labels(analyzed.index.member_completion(Some("Widget"), &[], false, ""));
         assert_eq!(instance, vec!["baseMethod", "count", "widgetMethod:"], "{instance:?}");
         // A class receiver gets the class methods only.
-        let class_methods = labels(analyzed.index.member_completion("Widget", true, ""));
+        let class_methods = labels(analyzed.index.member_completion(Some("Widget"), &[], true, ""));
         assert_eq!(class_methods, vec!["make"]);
         // The prefix filters, and the completion kind is the completion enum's
         // (Method = 2).
-        let filtered = analyzed.index.member_completion("Widget", false, "widget");
+        let filtered = analyzed.index.member_completion(Some("Widget"), &[], false, "widget");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].label, "widgetMethod:");
         assert_eq!(filtered[0].kind, 2);
@@ -1930,15 +2243,15 @@ int main() {
 
         // `[self …` — the enclosing method's class, for a selector position.
         let receiver = analyzed.index.send_receiver(position(MEMBERS, "[self widgetMethod", 6));
-        assert_eq!(receiver, Some(("Widget".to_string(), false)));
+        assert_eq!(receiver, Some(ReceiverInfo { class: Some("Widget".to_string()), protocols: Vec::new(), is_class_receiver: false, type_args: Vec::new() }));
 
         // `[w …` — a local, resolved through the scope.
         let receiver = analyzed.index.send_receiver(position(MEMBERS, "[w widgetMethod", 3));
-        assert_eq!(receiver, Some(("Widget".to_string(), false)));
+        assert_eq!(receiver, Some(ReceiverInfo { class: Some("Widget".to_string()), protocols: Vec::new(), is_class_receiver: false, type_args: Vec::new() }));
 
         // `[Widget …` — a class receiver, so class methods answer.
         let receiver = analyzed.index.send_receiver(position(MEMBERS, "[Widget make", 8));
-        assert_eq!(receiver, Some(("Widget".to_string(), true)));
+        assert_eq!(receiver, Some(ReceiverInfo { class: Some("Widget".to_string()), protocols: Vec::new(), is_class_receiver: true, type_args: Vec::new() }));
 
         // On the receiver itself, and inside an argument: not selector
         // positions, so no members (completion falls back to global names).

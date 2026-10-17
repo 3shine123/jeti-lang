@@ -156,6 +156,10 @@ struct NamespaceBlock {
 struct ClassInfo {
     super_name: Option<String>,
     members: Vec<MemberEntry>,
+    /// The class's own generic type parameters, in declaration order
+    /// (`@interface Box<T, U>` → `["T", "U"]`): the keys a concrete receiver's
+    /// type arguments are substituted against.
+    type_params: Vec<String>,
 }
 
 /// A callable's signature, as an editor wants it: the label to show, and the
@@ -191,6 +195,25 @@ pub struct MemberEntry {
     pub signature: Option<Signature>,
 }
 
+/// A name visible in a scope: what class it declares (when its type names a
+/// class) and what protocols an `id<P>` / `id<P1, P2>` receiver conforms to.
+///
+/// A local can be both at once is impossible, but keeping two fields rather
+/// than one string keeps `id<P>` first-class: the protocol is the type, not a
+/// detail of it.
+#[derive(Debug, Clone)]
+struct ScopeLocal {
+    name: String,
+    /// The declared type's class name, when the type names a class.
+    class: Option<String>,
+    /// Protocols the declared type conforms to, for `id` receivers.
+    protocols: Vec<String>,
+    /// The declared type's concrete generic arguments, when the type instantiates
+    /// a generic class (`NPArray<NPString> *a` → `["NPString"]`): what the class's
+    /// type parameters are substituted with for a member of this local.
+    type_args: Vec<String>,
+}
+
 /// What is visible at a position: the enclosing method's parameters, `self`, the
 /// enclosing class's ivars, and the locals declared in the body — plus, as a
 /// fallback for any position, the file's globals.
@@ -207,8 +230,23 @@ pub struct Scope {
     pub owner: String,
     /// `self`'s class, inside a method.
     pub self_type: Option<String>,
-    /// Visible names → their declared class name.
-    pub locals: Vec<(String, String)>,
+    /// Visible names and what their declared types resolve to.
+    pub locals: Vec<ScopeLocal>,
+}
+
+/// What a receiver resolves to at a position: the class whose members answer
+/// (when its type names a class), the protocols an `id` receiver conforms to,
+/// and whether the receiver is a class itself (class methods only).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReceiverInfo {
+    pub class: Option<String>,
+    pub protocols: Vec<String>,
+    pub is_class_receiver: bool,
+    /// The receiver's concrete generic arguments, when its type instantiates a
+    /// generic class: what the class's type parameters are substituted with for
+    /// the receiver's members. Empty for a bare (non-instantiated) class, an
+    /// `id`, or a class receiver.
+    pub type_args: Vec<String>,
 }
 
 /// A message send in the edited document.
@@ -230,6 +268,14 @@ struct SendSite {
     receiver_name: Option<String>,
     /// The receiver's static type, as the checker recorded it.
     receiver_type: Option<String>,
+    /// Protocols the receiver conforms to, for `id<P>` receivers: the
+    /// checker's type name is class-only, so the protocols ride along
+    /// separately (the same split `ScopeLocal` keeps).
+    receiver_protocols: Vec<String>,
+    /// The receiver's concrete generic arguments, from the same source as
+    /// `receiver_type` (the checker's `expr_type`): what the class's type
+    /// parameters are substituted with for the receiver's members.
+    receiver_type_args: Vec<String>,
     /// The selector being sent, for signature help.
     selector: String,
     /// Every argument expression: a cursor inside one of these is not completing
@@ -258,6 +304,14 @@ pub struct SymbolIndex {
     /// Class name → its members and ancestor, from every file in the
     /// compilation (a local's type is usually declared in a header).
     classes: HashMap<String, ClassInfo>,
+    /// Protocol name → the selectors it declares, after parent protocols are
+    /// merged in (`build` resolves the inheritance). Member completion for an
+    /// `id<P>` receiver answers from here: the protocols are the type, and a
+    /// protocol's method list is all it has (no bodies, no parameter types).
+    protocols: HashMap<String, Vec<MemberEntry>>,
+    /// Protocol name → the protocols it inherits, as written, until
+    /// `resolve_protocol_inheritance` folds them into [`Self::protocols`].
+    protocol_parents: HashMap<String, Vec<String>>,
     /// Scopes of the document being edited.
     scopes: Vec<Scope>,
     /// Message sends of the document being edited, in source order.
@@ -317,7 +371,33 @@ impl SymbolIndex {
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
         index.attach_namespaces(ast, source_map, &mut lookup);
         index.read_usings(&ast.usings);
+        index.resolve_protocol_inheritance();
         index
+    }
+
+    /// Parent protocols' selectors become members of the child, ObjC-style:
+    /// conforming to a protocol means seeing everything its parents declared.
+    /// One pass per child is enough for the shapes programs use; a protocol
+    /// cycle would at worst miss a level, never spin.
+    fn resolve_protocol_inheritance(&mut self) {
+        let entries: Vec<(String, Vec<String>)> = self.protocol_parents.clone().into_iter().collect();
+        for (name, parents) in entries {
+            let mut inherited: Vec<MemberEntry> = Vec::new();
+            for parent in parents {
+                if let Some(parent_members) = self.protocols.get(&parent).cloned() {
+                    inherited.extend(parent_members);
+                }
+            }
+            if inherited.is_empty() {
+                continue;
+            }
+            let members = self.protocols.entry(name).or_default();
+            for member in inherited {
+                if !members.iter().any(|existing| existing.label == member.label) {
+                    members.insert(0, member.clone());
+                }
+            }
+        }
     }
 
     /// Record what each `@using` makes visible.
@@ -461,22 +541,30 @@ impl SymbolIndex {
     /// indistinguishable: every reference to either one answered with all of
     /// them.
     pub fn resolve_at(&self, text: &str, position: LspPosition) -> Option<Resolved> {
-        for candidate in lookup_names(text, position) {
-            // A name a `@using` introduces is checked first, the order the
-            // elaborator resolves in: the binder has already rejected a file
-            // where one would shadow a declaration, so a name import is the
-            // answer wherever it applies.
-            if let Some((_, target)) = self.aliases.iter().find(|(name, _)| *name == candidate) {
-                return Some(Resolved::Symbol(target.clone()));
-            }
-            // A declaration beats a namespace of the same name: it is the more
-            // specific answer.
-            if self.by_name.contains_key(&candidate) {
-                return Some(Resolved::Symbol(self.narrow(&candidate, position)));
-            }
-            if self.namespaces.contains(&candidate) {
-                return Some(Resolved::Namespace(candidate));
-            }
+        lookup_names(text, position)
+            .into_iter()
+            .find_map(|candidate| self.resolve_candidate(&candidate, position))
+    }
+
+    /// The answer for one raw name at one position: `@using` first, a
+    /// declaration next (the more specific answer), a namespace last. Shared by
+    /// `resolve_at` (cursor) and `find_references` (every name occurrence), so
+    /// the two can never disagree about what a name means.
+    fn resolve_candidate(&self, candidate: &str, position: LspPosition) -> Option<Resolved> {
+        // A name a `@using` introduces is checked first, the order the
+        // elaborator resolves in: the binder has already rejected a file where
+        // one would shadow a declaration, so a name import is the answer
+        // wherever it applies.
+        if let Some((_, target)) = self.aliases.iter().find(|(name, _)| *name == candidate) {
+            return Some(Resolved::Symbol(target.clone()));
+        }
+        // A declaration beats a namespace of the same name: it is the more
+        // specific answer.
+        if self.by_name.contains_key(candidate) {
+            return Some(Resolved::Symbol(self.narrow(candidate, position)));
+        }
+        if self.namespaces.contains(candidate) {
+            return Some(Resolved::Namespace(candidate.to_string()));
         }
         None
     }
@@ -558,6 +646,162 @@ impl SymbolIndex {
         }
     }
 
+    /// Every reference to the symbol under `position`, in the edited document.
+    ///
+    /// The answer is a text scan confirmed by the same resolution the cursor
+    /// uses: `find_references` walks the document's maximal name tokens —
+    /// type references have no source origin of their own in the AST
+    /// (`AstType` carries no position), so the text is the only place that sees
+    /// every occurrence — and keeps a token only when resolving it at its own
+    /// position yields the same symbol the cursor resolved to. That last step
+    /// is what excludes a same-named symbol in another namespace: the bare
+    /// `Player` written in `@namespace B` resolves to `B::Player` and drops out
+    /// of `A::Player`'s references.
+    ///
+    /// v1 scope: the edited document only, declaration-name symbols plus
+    /// selector references (`token:` is tried when `token` alone does not
+    /// resolve); local-variable reads are not in the declaration index, so a
+    /// reference to one is answered by its declaration alone.
+    pub fn find_references(&self, text: &str, position: LspPosition) -> Vec<Location> {
+        let Some(Resolved::Symbol(target)) = self.resolve_at(text, position) else {
+            return Vec::new();
+        };
+        let ranges = self
+            .scan_target_tokens(text, &target)
+            .into_iter()
+            .map(|(_, start, end)| LspRange {
+                start: offset_to_position(text, start),
+                end: offset_to_position(text, end),
+            })
+            .collect::<Vec<_>>();
+
+        // The declarations themselves are references too (LSP's
+        // `includeDeclaration` defaults to true), and they are the answer for a
+        // symbol the scan cannot see (a local, for instance). A scan range that
+        // sits inside a declaration's own extent is the same reference, not a
+        // second one: the name is on the declaration's first line, and the
+        // extent starts where the declaration starts (the `@interface`
+        // keyword), so equality would never hold.
+        let mut locations: Vec<Location> = self.definitions(&target);
+        // The scan only saw the edited document: every range it produced is a
+        // position in this index's own file.
+        for range in ranges {
+            let duplicate = locations.iter().any(|l| {
+                l.path == self.document
+                    && l.range.start.line == range.start.line
+                    && l.range.start.character <= range.start.character
+                    && (l.range.end.line > range.end.line
+                        || (l.range.end.line == range.end.line
+                            && l.range.end.character >= range.end.character))
+            });
+            if !duplicate {
+                locations.push(Location {
+                    name: target.clone(),
+                    kind: 1,
+                    detail: String::new(),
+                    container: None,
+                    path: self.document.clone(),
+                    range,
+                });
+            }
+        }
+        locations.sort_by(|a, b| (&a.path, a.range.start).cmp(&(&b.path, b.range.start)));
+        locations.dedup_by(|a, b| a.path == b.path && a.range.start == b.range.start);
+        locations
+    }
+
+    /// Every maximal name token of the document that resolves to `target`,
+    /// with its byte extent — the scan shared by `find_references` and the
+    /// rename.
+    ///
+    /// The forms a usage may be written in: the full name, its short form, and
+    /// — for a selector, which the token scan reads without its trailing colon
+    /// — the colon-stripped form. A token is kept only when resolving it at
+    /// its own position yields `target`: the step that excludes a same-named
+    /// symbol in another namespace (the bare `Player` written in
+    /// `@namespace B` resolves to `B::Player` and drops out of
+    /// `A::Player`'s occurrences).
+    fn scan_target_tokens(&self, text: &str, target: &str) -> Vec<(String, usize, usize)> {
+        let mut forms: Vec<String> = vec![target.to_string()];
+        if let Some(short) = target.rsplit("::").next() {
+            if short != target && !forms.iter().any(|f| f == short) {
+                forms.push(short.to_string());
+            }
+        }
+        let stripped = target.trim_end_matches(':');
+        if !forms.iter().any(|f| f == stripped) {
+            forms.push(stripped.to_string());
+        }
+        let mask = code_mask(text);
+        name_tokens(text, &mask)
+            .into_iter()
+            .filter(|(token, _, _)| forms.iter().any(|f| f == token))
+            .filter(|(token, start, _)| {
+                // A selector occurrence is written `name:`; try the colon
+                // when the bare name does not resolve (methods are keyed by
+                // their selector).
+                let at = offset_to_position(text, *start);
+                self.resolve_candidate(token, at)
+                    .or_else(|| self.resolve_candidate(&format!("{token}:"), at))
+                    .is_some_and(|resolved| {
+                        matches!(&resolved, Resolved::Symbol(name) if name == target)
+                    })
+            })
+            .collect()
+    }
+
+    /// The range rename should preselect: the name under the cursor, and —
+    /// for a qualified name — its last segment only, so renaming `A::Player`
+    /// keeps the qualifier. A selector's range carries its trailing colon (the
+    /// spelling the text has). A namespace declines: in v1 there is no
+    /// consistent set of occurrences for one, and a partial answer is worse
+    /// than none.
+    pub fn rename_range_at(&self, text: &str, position: LspPosition) -> Option<LspRange> {
+        let Some(Resolved::Symbol(target)) = self.resolve_at(text, position) else {
+            return None;
+        };
+        if self.namespaces.contains(&target) {
+            return None;
+        }
+        let offset = jeti_cst::source_map::SourceFile::lsp_to_offset(text, position)?;
+        let is_selector = target.ends_with(':');
+        for (token, start, end) in self.scan_target_tokens(text, &target) {
+            let (seg_start, seg_end) = rename_segment(&token, start, end, is_selector, text);
+            // The end is inclusive: an editor reports the position after the
+            // last character when a word is selected.
+            if offset >= seg_start && offset <= seg_end {
+                return Some(LspRange {
+                    start: offset_to_position(text, seg_start),
+                    end: offset_to_position(text, seg_end),
+                });
+            }
+        }
+        None
+    }
+
+    /// Every range rename must replace for the symbol under `position`, in the
+    /// edited document: the same occurrences `find_references` scans, each
+    /// shrunk to the segment a rename rewrites.
+    pub fn rename_ranges(&self, text: &str, position: LspPosition) -> Vec<LspRange> {
+        let Some(Resolved::Symbol(target)) = self.resolve_at(text, position) else {
+            return Vec::new();
+        };
+        if self.namespaces.contains(&target) {
+            return Vec::new();
+        }
+        let is_selector = target.ends_with(':');
+        self.scan_target_tokens(text, &target)
+            .into_iter()
+            .map(|(token, start, end)| {
+                let (seg_start, seg_end) = rename_segment(&token, start, end, is_selector, text);
+                LspRange {
+                    start: offset_to_position(text, seg_start),
+                    end: offset_to_position(text, seg_end),
+                }
+            })
+            .collect()
+    }
+
     /// Completion candidates whose name starts with `prefix` (case-sensitive, as
     /// the language is). An empty prefix offers everything the index knows.
     ///
@@ -623,6 +867,26 @@ impl SymbolIndex {
             if let (Some(name), AstDeclData::Class { .. }) = (&decl.name, &decl.data) {
                 self.register_class(name, &decl.data);
             }
+            if let (Some(name), AstDeclData::Protocol { parents, required_methods, optional_methods }) =
+                (&decl.name, &decl.data)
+            {
+                // A protocol's whole API surface is its selector list — no
+                // parameter types come with it, so members carry no signature.
+                self.protocol_parents.insert(name.clone(), parents.clone());
+                let members = self.protocols.entry(name.clone()).or_default();
+                for selector in required_methods.iter().chain(optional_methods.iter()) {
+                    if !members.iter().any(|existing| existing.label == *selector) {
+                        members.push(MemberEntry {
+                            label: selector.clone(),
+                            kind: kind::METHOD,
+                            detail: "-".to_string(),
+                            is_class_method: false,
+                            type_name: None,
+                            signature: None,
+                        });
+                    }
+                }
+            }
             if let (Some(name), AstDeclData::Function { return_type, params, has_variadic, .. }) =
                 (&decl.name, &decl.data)
             {
@@ -671,12 +935,15 @@ impl SymbolIndex {
     /// one entry; the first non-empty ancestor wins, since an `@implementation`
     /// records only the implicit root.
     fn register_class(&mut self, name: &str, data: &AstDeclData) {
-        let AstDeclData::Class { super_name, methods, properties, ivars, impl_vars, .. } = data else {
+        let AstDeclData::Class { super_name, methods, properties, ivars, impl_vars, type_params, .. } = data else {
             return;
         };
         let entry = self.classes.entry(name.to_string()).or_default();
         if entry.super_name.is_none() {
             entry.super_name = super_name.clone();
+        }
+        if entry.type_params.is_empty() {
+            entry.type_params = type_params.clone();
         }
         let members = methods
             .iter()
@@ -713,15 +980,23 @@ impl SymbolIndex {
                     return None;
                 }
                 let name = decl.name.clone()?;
-                let type_name = match &decl.data {
-                    AstDeclData::Variable { var_type, .. } => var_type.as_deref().and_then(ast_type_name),
-                    _ => None,
-                }?;
+                let (class, protocols, type_args) = match &decl.data {
+                    AstDeclData::Variable { var_type, .. } => var_type
+                        .as_deref()
+                        .map(|ty| (ast_type_name(ty), ast_id_protocols(ty), ast_type_args(ty)))
+                        .unwrap_or_default(),
+                    _ => (None, Vec::new(), Vec::new()),
+                };
+                // A name only enters the scope when its type says something:
+                // a class to complete against or a protocol an id conforms to.
+                if class.is_none() && protocols.is_empty() {
+                    return None;
+                }
                 return Some(Scope {
                     range: None,
                     owner: "<file>".to_string(),
                     self_type: None,
-                    locals: vec![(name, type_name)],
+                    locals: vec![ScopeLocal { name, class, protocols, type_args }],
                 });
             }
             _ => return None,
@@ -747,8 +1022,11 @@ impl SymbolIndex {
         let mut param = params;
         while let Some(current) = param {
             if let (Some(name), Some(ty)) = (&current.name, current.par_type.as_deref()) {
-                if let Some(class) = cst_type_name(ty) {
-                    scope.locals.push((name.clone(), class));
+                let class = cst_type_name(ty);
+                let protocols = cst_id_protocols(ty);
+                let type_args = cst_type_args(ty);
+                if class.is_some() || !protocols.is_empty() {
+                    scope.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
                 }
             }
             param = current.next.as_deref();
@@ -758,7 +1036,14 @@ impl SymbolIndex {
             if let Some(info) = self.classes.get(class) {
                 for member in &info.members {
                     if let (Some(class_name), false) = (&member.type_name, member.is_class_method) {
-                        scope.locals.push((member.label.clone(), class_name.clone()));
+                        scope.locals.push(ScopeLocal {
+                            name: member.label.clone(),
+                            class: Some(class_name.clone()),
+                            protocols: Vec::new(),
+                            // A member's declared type is recorded by name
+                            // alone: no type arguments to carry.
+                            type_args: Vec::new(),
+                        });
                     }
                 }
             }
@@ -785,7 +1070,7 @@ impl SymbolIndex {
     /// type cannot be determined (an `id`, a scalar, an expression the checker
     /// did not type) — completion then offers the global names instead of
     /// guessing.
-    pub fn send_receiver(&self, position: LspPosition) -> Option<(String, bool)> {
+    pub fn send_receiver(&self, position: LspPosition) -> Option<ReceiverInfo> {
         // Innermost send wins: it starts last of the sends containing the cursor.
         let site = self
             .sites
@@ -811,7 +1096,27 @@ impl SymbolIndex {
                 return Some(resolved);
             }
         }
-        site.receiver_type.clone().map(|class| (class, false))
+        self.receiver_from_type(&site.receiver_type, &site.receiver_protocols, &site.receiver_type_args)
+    }
+
+    /// A receiver the checker typed but nobody named: its type is the answer,
+    /// and an `id<P>` type is a protocol, not a class.
+    fn receiver_from_type(
+        &self,
+        receiver_type: &Option<String>,
+        receiver_protocols: &[String],
+        receiver_type_args: &[String],
+    ) -> Option<ReceiverInfo> {
+        if receiver_type.is_some() || !receiver_protocols.is_empty() {
+            Some(ReceiverInfo {
+                class: receiver_type.clone(),
+                protocols: receiver_protocols.to_vec(),
+                is_class_receiver: false,
+                type_args: receiver_type_args.to_vec(),
+            })
+        } else {
+            None
+        }
     }
 
     /// The signature the cursor is inside a call of, with the parameter it is
@@ -830,16 +1135,35 @@ impl SymbolIndex {
             .max_by_key(|site| (site.send.start.line, site.send.start.character))
         {
             let receiver = self.receiver_for_site(site, position)?;
-            let signature = self.method_signature_in(&receiver.0, &site.selector)?;
+            let Some(class) = receiver.class else {
+                // An `id<P>` receiver has no class, so no declared signature to
+                // show: signature help is class-member-shaped, and a protocol's
+                // selectors carry no parameter list.
+                return None;
+            };
+            let signature = self.method_signature_in(&class, &site.selector)?;
             // Several declarations of one selector can differ (a category
             // overriding it); the first is the one to show, and every candidate
             // is reported so the editor can offer the rest.
             let mut signatures = vec![signature];
             signatures.extend(
-                self.method_signatures_in(&receiver.0, &site.selector)
+                self.method_signatures_in(&class, &site.selector)
                     .into_iter()
                     .skip(1),
             );
+            // A concrete receiver instantiates its class: the parameters in
+            // the signature it is filling in are the receiver's arguments.
+            let type_params = self
+                .classes
+                .get(&class)
+                .map(|info| info.type_params.clone())
+                .unwrap_or_default();
+            if !receiver.type_args.is_empty() && !type_params.is_empty() {
+                signatures = signatures
+                    .into_iter()
+                    .map(|signature| substitute_signature(&signature, &type_params, &receiver.type_args))
+                    .collect();
+            }
             return Some(SignatureHelp {
                 active_parameter: active_parameter(&site.args, position, signatures[0].parameters.len()),
                 active_signature: 0,
@@ -862,13 +1186,13 @@ impl SymbolIndex {
 
     /// The receiver class of a send site, without the "is the cursor in an
     /// argument" rule: signature help *wants* the argument positions.
-    fn receiver_for_site(&self, site: &SendSite, position: LspPosition) -> Option<(String, bool)> {
+    fn receiver_for_site(&self, site: &SendSite, position: LspPosition) -> Option<ReceiverInfo> {
         if let Some(name) = &site.receiver_name {
             if let Some(resolved) = self.receiver_class(name, position) {
                 return Some(resolved);
             }
         }
-        site.receiver_type.clone().map(|class| (class, false))
+        self.receiver_from_type(&site.receiver_type, &site.receiver_protocols, &site.receiver_type_args)
     }
 
     /// Every signature declared for `selector` in `class` or its ancestors.
@@ -922,29 +1246,62 @@ impl SymbolIndex {
     ///
     /// `self` resolves through the enclosing method; a name resolves through the
     /// scopes or, failing that, through the classes themselves.
-    pub fn receiver_class(&self, name: &str, position: LspPosition) -> Option<(String, bool)> {
+    pub fn receiver_class(&self, name: &str, position: LspPosition) -> Option<ReceiverInfo> {
         let scope = self.scope_at(position);
         if name == "self" {
-            return scope.and_then(|scope| scope.self_type.clone()).map(|class| (class, false));
+            let Some(class) = scope.and_then(|scope| scope.self_type.clone()) else {
+                return None;
+            };
+            // `self` is the generic class itself: its "arguments" are the
+            // declared parameters, so the substitution is the identity.
+            let type_args = self
+                .classes
+                .get(&class)
+                .map(|info| info.type_params.clone())
+                .unwrap_or_default();
+            return Some(ReceiverInfo {
+                class: Some(class),
+                protocols: Vec::new(),
+                is_class_receiver: false,
+                type_args,
+            });
         }
         if !is_identifier(name) {
             return None;
         }
         if let Some(scope) = scope {
             // Later declarations win (block-level shadowing flattened).
-            if let Some((_, class)) = scope.locals.iter().rev().find(|(local, _)| local == name) {
-                return Some((class.clone(), false));
+            if let Some(local) = scope.locals.iter().rev().find(|local| local.name == name) {
+                return Some(ReceiverInfo {
+                    class: local.class.clone(),
+                    protocols: local.protocols.clone(),
+                    is_class_receiver: false,
+                    type_args: local.type_args.clone(),
+                });
             }
         }
-        self.classes.contains_key(name).then(|| (name.to_string(), true))
+        self.classes.contains_key(name).then(|| ReceiverInfo {
+            class: Some(name.to_string()),
+            protocols: Vec::new(),
+            is_class_receiver: true,
+            type_args: Vec::new(),
+        })
     }
 
-    /// Members of `class`, walking up the ancestor chain, filtered to what a
-    /// receiver of that kind can call (class methods for a class receiver,
-    /// instance members for an object) and by `prefix`.
-    pub fn member_completion(&self, class: &str, class_receiver: bool, prefix: &str) -> Vec<Completion> {
+    /// Members of `class` (walking up the ancestor chain) and of the
+    /// `protocols` an `id` receiver conforms to, filtered to what a receiver of
+    /// that kind can call (class methods for a class receiver, instance members
+    /// for an object) and by `prefix`. A concrete class was collected first, so
+    /// it wins on a label conflict with a protocol member.
+    pub fn member_completion(
+        &self,
+        class: Option<&str>,
+        protocols: &[String],
+        class_receiver: bool,
+        prefix: &str,
+    ) -> Vec<Completion> {
         let mut members: Vec<MemberEntry> = Vec::new();
-        let mut current = Some(class.to_string());
+        let mut current = class.map(str::to_string);
         let mut depth = 0usize;
         while let Some(name) = current {
             // A malformed hierarchy must not loop forever.
@@ -962,6 +1319,18 @@ impl SymbolIndex {
                 }
             }
             current = info.super_name.clone();
+        }
+        for protocol in protocols {
+            if let Some(protocol_members) = self.protocols.get(protocol) {
+                for member in protocol_members {
+                    if member.is_class_method == class_receiver
+                        && member.label.starts_with(prefix)
+                        && !members.iter().any(|existing| existing.label == member.label)
+                    {
+                        members.push(member.clone());
+                    }
+                }
+            }
         }
         members.sort_by(|a, b| a.label.cmp(&b.label));
         members
@@ -1222,6 +1591,96 @@ fn ast_type_name(ty: &AstType) -> Option<String> {
     }
 }
 
+/// The protocols an `id<P>` / `id<P1, P2>` type conforms to — the only
+/// members an untyped `id` receiver can have.
+fn ast_id_protocols(ty: &AstType) -> Vec<String> {
+    (ty.prim == TypePrim::Id)
+        .then(|| {
+            if ty.protocol_refs.is_empty() {
+                ty.protocol_ref.clone().into_iter().collect()
+            } else {
+                ty.protocol_refs.clone()
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// The CST-side twin of [`ast_id_protocols`], for parameter types, which stay
+/// in CST form in the elaborated AST.
+fn cst_id_protocols(ty: &CstType) -> Vec<String> {
+    (ty.prim == TypePrim::Id).then(|| ty.protocols.clone()).unwrap_or_default()
+}
+
+/// The rendered names of a type's generic arguments, in order
+/// (`NPArray<NPString>` → `["NPString"]`): the values a class's type
+/// parameters are substituted with for this type's members.
+fn ast_type_args(ty: &AstType) -> Vec<String> {
+    ty.type_args.iter().filter_map(ast_type_name).collect()
+}
+
+/// The CST-side twin of [`ast_type_args`], for parameter types.
+fn cst_type_args(ty: &CstType) -> Vec<String> {
+    ty.type_args.iter().filter_map(cst_type_name).collect()
+}
+
+/// A signature with a receiver's concrete arguments substituted for the
+/// class's type parameters, in the label and in every parameter label (the
+/// parameters are substrings of the label, but LSP matches on them
+/// separately).
+fn substitute_signature(signature: &Signature, type_params: &[String], type_args: &[String]) -> Signature {
+    Signature {
+        label: substitute_generic_params(&signature.label, type_params, type_args),
+        parameters: signature
+            .parameters
+            .iter()
+            .map(|parameter| substitute_generic_params(parameter, type_params, type_args))
+            .collect(),
+    }
+}
+
+/// Each whole-word occurrence of a class's type parameter in a rendered
+/// signature, rewritten as the receiver's corresponding argument. A
+/// parameter with no corresponding argument (the receiver was declared with
+/// fewer arguments than the class declares) stays as written: showing the
+/// parameter beats showing nothing.
+fn substitute_generic_params(text: &str, type_params: &[String], type_args: &[String]) -> String {
+    if type_args.is_empty() {
+        return text.to_string();
+    }
+    let mut result = text.to_string();
+    for (param, arg) in type_params.iter().zip(type_args.iter()) {
+        if param == arg {
+            continue;
+        }
+        result = replace_whole_word(&result, param, arg);
+    }
+    result
+}
+
+/// Whole-word occurrences of `from` rewritten as `to`; an occurrence
+/// identifier-adjacent is left alone, so `T` never rewrites `Trait`.
+fn replace_whole_word(text: &str, from: &str, to: &str) -> String {
+    let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let chars: Vec<char> = text.chars().collect();
+    let from_chars: Vec<char> = from.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0usize;
+    while i < chars.len() {
+        let hit = i + from_chars.len() <= chars.len()
+            && chars[i..i + from_chars.len()] == from_chars[..]
+            && (i == 0 || !is_ident(chars[i - 1]))
+            && (i + from_chars.len() == chars.len() || !is_ident(chars[i + from_chars.len()]));
+        if hit {
+            out.push_str(to);
+            i += from_chars.len();
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// [`ast_type_name`] for a parameter, which keeps its **CST** type node
 /// (`AstDeclData::Method` stores `CstParam`s verbatim).
 fn cst_type_name(ty: &CstType) -> Option<String> {
@@ -1454,7 +1913,7 @@ fn render_type(parts: TypeParts<'_>) -> String {
 /// the recorded extents are in the editor's own coordinates; a node the
 /// compiler synthesized has no source origin and is skipped.
 struct BodyWalk<'a> {
-    locals: &'a mut Vec<(String, String)>,
+    locals: &'a mut Vec<ScopeLocal>,
     sites: &'a mut Vec<SendSite>,
     calls: &'a mut Vec<CallSite>,
     source_map: &'a SourceMap,
@@ -1483,8 +1942,11 @@ impl BodyWalk<'_> {
                 return;
             };
             if let (Some(name), Some(ty)) = (&declaration.name, var_type.as_deref()) {
-                if let Some(class) = ast_type_name(ty) {
-                    self.locals.push((name.clone(), class));
+                let class = ast_type_name(ty);
+                let protocols = ast_id_protocols(ty);
+                let type_args = ast_type_args(ty);
+                if class.is_some() || !protocols.is_empty() {
+                    self.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
                 }
             }
             if let Some(init) = init {
@@ -1498,8 +1960,11 @@ impl BodyWalk<'_> {
         // A parameter's `external_name` is a selector part; the body refers to
         // it by `name`.
         if let (Some(name), Some(ty)) = (&param.name, param.par_type.as_deref()) {
-            if let Some(class) = cst_type_name(ty) {
-                self.locals.push((name.clone(), class));
+            let class = cst_type_name(ty);
+            let protocols = cst_id_protocols(ty);
+            let type_args = cst_type_args(ty);
+            if class.is_some() || !protocols.is_empty() {
+                self.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
             }
         }
     }
@@ -1617,6 +2082,16 @@ impl BodyWalk<'_> {
                             _ => None,
                         },
                         receiver_type: receiver.expr_type.as_deref().and_then(ast_type_name),
+                        receiver_protocols: receiver
+                            .expr_type
+                            .as_deref()
+                            .map(ast_id_protocols)
+                            .unwrap_or_default(),
+                        receiver_type_args: receiver
+                            .expr_type
+                            .as_deref()
+                            .map(ast_type_args)
+                            .unwrap_or_default(),
                         selector: selector.clone(),
                         args: args.iter().filter_map(|arg| self.expr_range(arg)).collect(),
                     });
@@ -1684,8 +2159,11 @@ impl BodyWalk<'_> {
             }
             AstExprData::Block { params, body, .. } => {
                 for (ty, name) in params {
-                    if let Some(class) = ast_type_name(ty) {
-                        self.locals.push((name.clone(), class));
+                    let class = ast_type_name(ty);
+                    let protocols = ast_id_protocols(ty);
+                    let type_args = ast_type_args(ty);
+                    if class.is_some() || !protocols.is_empty() {
+                        self.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
                     }
                 }
                 if let Some(body) = body {
@@ -1953,6 +2431,162 @@ fn is_blank(byte: u8) -> bool {
 /// simply itself, and the index holds the short form of every qualified name it
 /// knows, so an unqualified reference still resolves.
 ///
+/// Per-byte mask of one document: `true` where the byte is code, `false`
+/// inside a comment, a string, a character literal, or a preprocessor line —
+/// the places a reference to a name cannot occur. References are found in the
+/// text, so the same pass that reads the text has to say where it is not code.
+fn code_mask(text: &str) -> Vec<bool> {
+    let bytes = text.as_bytes();
+    let mut mask = vec![true; bytes.len()];
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // String or character literal (`@"` is the same literal; the `@` stays
+        // code, it cannot start a name anyway).
+        if b == b'"' || b == b'\'' {
+            let quote = b;
+            mask[i] = false;
+            i += 1;
+            while i < bytes.len() {
+                mask[i] = false;
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    mask[i + 1] = false;
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == quote {
+                    i += 1;
+                    break;
+                }
+                // An unterminated literal ends where the lexer ends it: at the
+                // newline (the parser reports the error).
+                if bytes[i] == b'\n' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            // Line comment: through the newline, which stays code.
+            while i < bytes.len() && bytes[i] != b'\n' {
+                mask[i] = false;
+                i += 1;
+            }
+            continue;
+        }
+        if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+            // Block comment: through the closing `*/`, which is not code either.
+            mask[i] = false;
+            mask[i + 1] = false;
+            i += 2;
+            while i < bytes.len() {
+                if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    mask[i] = false;
+                    mask[i + 1] = false;
+                    i += 2;
+                    break;
+                }
+                mask[i] = false;
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    // Preprocessor lines name the file, not a symbol: a header path's
+    // components are tokens that could fake a reference, so the whole line is
+    // not code.
+    let mut line_start = 0usize;
+    let mut directive_lines: Vec<(usize, usize)> = Vec::new();
+    for (i, b) in bytes.iter().enumerate() {
+        if *b == b'\n' {
+            if is_directive_line(bytes, line_start, i) {
+                directive_lines.push((line_start, i));
+            }
+            line_start = i + 1;
+        }
+    }
+    if is_directive_line(bytes, line_start, bytes.len()) {
+        directive_lines.push((line_start, bytes.len()));
+    }
+    for (start, end) in directive_lines {
+        for k in start..end {
+            mask[k] = false;
+        }
+    }
+    mask
+}
+
+/// A preprocessor line: first non-blank character is `#`.
+fn is_directive_line(bytes: &[u8], start: usize, end: usize) -> bool {
+    let mut j = start;
+    while j < end && (bytes[j] == b' ' || bytes[j] == b'\t') {
+        j += 1;
+    }
+    j < end && bytes[j] == b'#'
+}
+
+/// The maximal name tokens of one document at code positions: runs of
+/// identifier characters, extended across `::` (a qualified name is one name),
+/// with their byte extents. Selectors are read without their trailing colon —
+/// a colon is not an identifier character — and callers asking about a method
+/// retry with the colon appended.
+fn name_tokens(text: &str, mask: &[bool]) -> Vec<(String, usize, usize)> {
+    let bytes = text.as_bytes();
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut tokens = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if mask[i] && is_ident(bytes[i]) {
+            let start = i;
+            while i < bytes.len() && is_ident(bytes[i]) {
+                i += 1;
+            }
+            // A qualified name extends across `::` to the next identifier.
+            while i + 1 < bytes.len() && bytes[i] == b':' && bytes[i + 1] == b':' {
+                if i + 2 < bytes.len() && is_ident(bytes[i + 2]) {
+                    i += 2;
+                    while i < bytes.len() && is_ident(bytes[i]) {
+                        i += 1;
+                    }
+                } else {
+                    break;
+                }
+            }
+            let end = i;
+            tokens.push((text[start..end].to_string(), start, end));
+        } else {
+            i += 1;
+        }
+    }
+    tokens
+}
+
+/// A byte offset as an `LspPosition`: the one crossing from raw offsets to
+/// LSP's line + UTF-16 character coordinates (the same conversion
+/// `SourceSpan::to_lsp_range` makes on the way out).
+fn offset_to_position(text: &str, offset: usize) -> LspPosition {
+    let offset = offset.min(text.len());
+    let line = text[..offset].matches('\n').count();
+    let line_start = text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let character = text[line_start..offset].encode_utf16().count();
+    LspPosition { line: line as u32, character: character as u32 }
+}
+
+/// The byte range one rename replaces in one occurrence: the last segment of
+/// a qualified name, the whole bare token, a selector's trailing colon
+/// included (the spelling the text has, when it is there).
+fn rename_segment(token: &str, start: usize, end: usize, is_selector: bool, text: &str) -> (usize, usize) {
+    let seg_start = token.rfind("::").map(|i| start + i + 2).unwrap_or(start);
+    let mut seg_end = end;
+    if is_selector && text.as_bytes().get(seg_end) == Some(&b':') {
+        seg_end += 1;
+    }
+    (seg_start, seg_end)
+}
+
 /// A name that is whole by itself — a selector (`greet:from:`) or a declared
 /// keyword part (`run:`) — has one candidate, itself: it is never taken apart.
 fn lookup_names(text: &str, position: LspPosition) -> Vec<String> {
