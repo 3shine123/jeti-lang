@@ -517,6 +517,16 @@ pub struct AstUnit {
     /// their qualified names (see [`AstNamespace`]) — this is the block's own
     /// declaration, which the flat stream has no room for.
     pub namespaces: Vec<AstNamespace>,
+    /// Every `@using` declaration of the translation unit, in source order.
+    ///
+    /// The binder folds these into its symbol table's `using_list` and the
+    /// elaborator drops them, so a name the compiler resolves *through* one had
+    /// nothing left in the AST to answer from: `@using Alias = A::Player;` made
+    /// `Alias` mean that class to the compiler and nothing at all to the editor.
+    /// Recorded here for the same reason [`AstNamespace`] is — a list no pass
+    /// reads cannot hide a declaration from one, and the `fqn`/`alias` pair is
+    /// exactly what the binder resolved with.
+    pub usings: Vec<AstUsing>,
 }
 
 /// A `@namespace` block, kept for the consumers that need the source structure
@@ -540,6 +550,33 @@ pub struct AstNamespace {
     /// Extent of the whole block — the `@namespace` line through
     /// `@endnamespace` — in the shape [`AstDecl`] uses (1-based line, end
     /// exclusive; see `docs/plans/source_locations_debug_lsp_plan.md`).
+    pub line: usize,
+    pub col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
+/// One `@using` declaration, as written (see [`AstUnit::usings`]).
+///
+/// The two spellings are kept verbatim because the *policy* that turns them
+/// into visible names — an alias, an imported short name, or a namespace
+/// prefix — is the binder's, and a consumer that has to answer a query about
+/// one should read the same pair the binder read rather than a second-hand
+/// verdict. `@using` has no scope of its own: the binder folds every one of
+/// them into a single flat list, so there is nothing here about where it was
+/// written beyond the extent, which go-to-definition on the alias and a future
+/// rename need.
+#[derive(Debug, Clone)]
+pub struct AstUsing {
+    /// The fully-qualified name written on the right of the declaration: what
+    /// an alias stands for, the class an import names, or the namespace prefix
+    /// of `@using A;` / `@using A::B;`.
+    pub fqn: String,
+    /// The alias of `@using Alias = ...`; `None` for the forms that introduce a
+    /// name from their own right-hand side instead.
+    pub alias: Option<String>,
+    /// Extent of the whole declaration — `@using` through `;` — in the shape
+    /// [`AstDecl`] uses (1-based line, end exclusive).
     pub line: usize,
     pub col: usize,
     pub end_line: usize,

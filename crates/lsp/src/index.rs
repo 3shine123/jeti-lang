@@ -27,7 +27,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use jeti_ast::ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit};
+use jeti_ast::ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit, AstUsing};
 use jeti_cst::source_map::{LspPosition, LspRange, SourceMap};
 use jeti_cst::{CstParam, CstType, TypePrim};
 use serde_json::{json, Value};
@@ -282,6 +282,14 @@ pub struct SymbolIndex {
     /// `resolve_at` is asked about (an imported header's block must not claim a
     /// position in it).
     document: String,
+    /// Names each `@using` makes visible, in declaration order: the name it
+    /// introduces → the declaration it stands for (see [`Self::read_usings`]).
+    ///
+    /// A `Vec`, not a map: the elaborator resolves a name through these in the
+    /// order the binder recorded them, so the first entry that matches wins.
+    aliases: Vec<(String, String)>,
+    /// Namespace prefixes each `@using` makes visible, in declaration order.
+    using_namespaces: Vec<String>,
 }
 
 impl SymbolIndex {
@@ -308,7 +316,61 @@ impl SymbolIndex {
         index.document = document.to_string();
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
         index.attach_namespaces(ast, source_map, &mut lookup);
+        index.read_usings(&ast.usings);
         index
+    }
+
+    /// Record what each `@using` makes visible.
+    ///
+    /// The binder resolves these into its symbol table and the elaborator drops
+    /// them, so a name reached through one (`Alias` in `@using Alias = A::Player;`)
+    /// had nothing to answer from. The *policy* stays the binder's; this mirrors
+    /// its effect against the index instead of re-deciding it: a name is
+    /// imported when the index knows the fully-qualified name as a declaration,
+    /// and that name doubles as a namespace prefix. The binder imports only a
+    /// class or a protocol (anything else becomes a bare prefix) and rejects an
+    /// import that shadows an existing declaration (`ambiguous import`), so in a
+    /// file it accepts the two rules agree; where they differ — a typedef,
+    /// struct or enum target — the compiler resolves nothing at all, while the
+    /// index answers the declaration the `@using` names.
+    fn read_usings(&mut self, usings: &[AstUsing]) {
+        for using in usings {
+            match &using.alias {
+                Some(alias) => {
+                    if let Some(target) = self.known_type(&using.fqn) {
+                        self.aliases.push((alias.clone(), target));
+                    }
+                }
+                None => {
+                    // `@using A::B;` brings `B` in; `@using A;` brings in no
+                    // short name of its own (the binder's `short` is `None`).
+                    if let Some((_, last)) = using.fqn.rsplit_once("::") {
+                        if self.by_name.contains_key(&using.fqn) {
+                            self.aliases.push((last.to_string(), using.fqn.clone()));
+                        }
+                    }
+                    self.using_namespaces.push(using.fqn.clone());
+                }
+            }
+        }
+    }
+
+    /// The declaration a `@using` right-hand side names, if the index knows it.
+    ///
+    /// The spelling keeps what the binder strips before storing a name: a
+    /// trailing `*` (`@using Alias = A::Player*;`) and an `id<Protocol>`
+    /// qualifier. The qualifier is read as the protocol it names — that is the
+    /// declaration go-to-definition on the alias should reach — and a generic
+    /// argument list is dropped, since it is not part of the name the
+    /// declaration is indexed under.
+    fn known_type(&self, spelling: &str) -> Option<String> {
+        let spelling = spelling.trim_end_matches('*').trim();
+        if let Some(inner) = spelling.strip_prefix("id<") {
+            let protocol = inner.trim_end_matches('>').trim_end_matches('*').trim();
+            return self.by_name.contains_key(protocol).then(|| protocol.to_string());
+        }
+        let base = spelling.split('<').next().unwrap_or(spelling).trim();
+        self.by_name.contains_key(base).then(|| base.to_string())
     }
 
     /// Put each `@namespace` block back where it was written.
@@ -400,6 +462,13 @@ impl SymbolIndex {
     /// them.
     pub fn resolve_at(&self, text: &str, position: LspPosition) -> Option<Resolved> {
         for candidate in lookup_names(text, position) {
+            // A name a `@using` introduces is checked first, the order the
+            // elaborator resolves in: the binder has already rejected a file
+            // where one would shadow a declaration, so a name import is the
+            // answer wherever it applies.
+            if let Some((_, target)) = self.aliases.iter().find(|(name, _)| *name == candidate) {
+                return Some(Resolved::Symbol(target.clone()));
+            }
             // A declaration beats a namespace of the same name: it is the more
             // specific answer.
             if self.by_name.contains_key(&candidate) {
@@ -436,8 +505,16 @@ impl SymbolIndex {
         if !ambiguous {
             return name.to_string();
         }
-        for namespace in self.enclosing_namespaces(position) {
-            let scoped = format!("{namespace}::{name}");
+        // `@using A;` first, then the block walk outward: the same order the
+        // elaborator's `ns_fqn` tries a name, and the same reason the innermost
+        // block wins — the nearer name is the one the compiler resolves to.
+        let walk = self
+            .using_namespaces
+            .iter()
+            .map(String::as_str)
+            .chain(self.enclosing_namespaces(position));
+        for prefix in walk {
+            let scoped = format!("{prefix}::{name}");
             if self.by_name.contains_key(&scoped) {
                 return scoped;
             }

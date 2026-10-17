@@ -833,7 +833,7 @@ mod tests {
     }
 
     fn trace(stmts: Vec<AstStmt>) -> String {
-        let unit = AstUnit { decls: vec![function(stmts)], filename: "test.jeti".to_string(), namespaces: Vec::new() };
+        let unit = AstUnit { decls: vec![function(stmts)], filename: "test.jeti".to_string(), namespaces: Vec::new(), usings: Vec::new() };
         trace_refcounts(&unit, &TraceOptions { max_iters: 2, color: false })
     }
 

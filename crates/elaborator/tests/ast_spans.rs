@@ -172,3 +172,43 @@ int g(void) { return 0; }
     let names: Vec<Option<&str>> = unit.decls.iter().map(|d| d.name.as_deref()).collect();
     assert_eq!(names, vec![Some("Game::Entities::Player"), Some("g")]);
 }
+
+#[test]
+fn a_using_declaration_is_recorded_with_its_extent() {
+    // The binder resolves `@using` into its symbol table and the elaborator drops
+    // the declaration, so a name reached through one (`Alias`) had nothing in the
+    // AST to answer from. `AstUnit::usings` keeps the pair the binder resolved
+    // with — the alias and the fully-qualified name — plus the extent a consumer
+    // needs to point at the declaration itself.
+    let src = "\
+@namespace Game
+    @interface Player : jeti_root
+    @end
+@endnamespace
+
+@using Game::Player;
+@using Alias = Game::Player;
+@using Game;
+";
+    let unit = elaborate(src);
+
+    let recorded: Vec<(&str, Option<&str>, (usize, usize, usize, usize))> = unit
+        .usings
+        .iter()
+        .map(|u| (u.fqn.as_str(), u.alias.as_deref(), (u.line, u.col, u.end_line, u.end_col)))
+        .collect();
+    assert_eq!(
+        recorded,
+        vec![
+            ("Game::Player", None, (6, 1, 6, 21)),
+            ("Game::Player", Some("Alias"), (7, 1, 7, 29)),
+            ("Game", None, (8, 1, 8, 13)),
+        ],
+        "source order, each declaration's own extent"
+    );
+
+    // Like a namespace block, a `@using` adds nothing to the flat declaration
+    // stream: a lowering pass that walks `decls` never meets one.
+    let names: Vec<Option<&str>> = unit.decls.iter().map(|d| d.name.as_deref()).collect();
+    assert_eq!(names, vec![Some("Game::Player")]);
+}

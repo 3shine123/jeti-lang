@@ -14,6 +14,10 @@ pub struct Elaborator {
     /// members become top-level declarations, the block itself is recorded here
     /// instead of as a wrapper node a lowering pass might not recurse into.
     pub namespaces: Vec<AstNamespace>,
+    /// The `@using` declarations seen while flattening, in source order (see
+    /// [`AstUsing`]). Recorded for the same reason and the same way: the binder
+    /// has already resolved them and no AST declaration represents them.
+    pub usings: Vec<AstUsing>,
     pub verbose: bool,
     /// Scope stack of locally-declared variable types. Function/method bodies
     /// push a scope; `convert_dot_expr` uses this to resolve `obj.field` even
@@ -28,6 +32,7 @@ impl Elaborator {
             symtab, result: None, current_class_sym: None,
             has_error: false, err_msg: String::new(), ns_prefix: String::new(),
             namespaces: Vec::new(),
+            usings: Vec::new(),
             verbose: false, local_types: Vec::new(),
         }
     }
@@ -1084,8 +1089,20 @@ impl Elaborator {
                 self.ns_prefix = old;
                 return;
             }
-            CstDeclData::Using { .. } => {
-                // @using is handled by the binder; no ns_prefix change or AST decl needed
+            CstDeclData::Using { fqn, alias } => {
+                // `@using` is handled by the binder (it resolves the name and
+                // checks it for conflicts); nothing about it changes the
+                // namespace prefix or becomes an AST declaration. Record the
+                // declaration so a consumer can resolve a name the binder
+                // resolved and the AST would otherwise have no trace of.
+                self.usings.push(AstUsing {
+                    fqn: fqn.clone(),
+                    alias: alias.clone(),
+                    line: cd.line,
+                    col: cd.column,
+                    end_line: cd.end_line,
+                    end_col: cd.end_column,
+                });
                 return;
             }
             _ => {}
@@ -1113,7 +1130,8 @@ impl Elaborator {
             self.flatten_decls(decl, &mut ast_decls);
         }
         let namespaces = std::mem::take(&mut self.namespaces);
-        self.result = Some(AstUnit { decls: ast_decls, filename: unit.filename.clone(), namespaces });
+        let usings = std::mem::take(&mut self.usings);
+        self.result = Some(AstUnit { decls: ast_decls, filename: unit.filename.clone(), namespaces, usings });
         if self.has_error { -1 } else { 0 }
     }
 

@@ -116,6 +116,10 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
   诊断列表按**源位置**排序输出（`sort_by_position`），终端里的顺序就是从上到下读文件；发现顺序是阶段顺序（line 317 的
   parse 错误会排在 line 48 的类型错误之前），那看起来像"按消息类型分组"，不是读者要的顺序。
   没有这一条时，一个漏写的 `;` 会把它下面所有诊断全部藏起来，改一个才看一个（clang 的行为是两者一起报）。
+- 字符串字面量漏写收尾 `"`：lexer 按 C 的语义在**裸换行**处结束 `"…"` 的内容（换行本身不被吞掉），parser 把它
+  报成一条 error（`missing terminating '"' character`，clang 的措辞，位置就是那个字面量）。以前这种漏写会让 lexer
+  一路吞到文件尾，只有 clang 在生成的 C 上报错（位置还隔着 `#line`），编辑器则一声不吭。恢复出的文本照常继续解析，
+  所以后面的声明不会被这条错误连带吃掉；CLI 依旧拒绝生成代码。
 - 未做（后续阶段）：rename（需要项目级引用索引）、分析结果的缓存/编辑合并、workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`），以及成员补全里的协议/泛型细化。
 
@@ -202,8 +206,7 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 回归：`cargo test -p jeti-lsp`（新增限定名分段解析、分隔符补全前缀、同名类互不混淆等单测，以及
   真实子进程会话里 `greet:from:` 这类 selector 仍按整名解析）；探测脚本对 `tests/golden/12_namespace/`
   逐个位置验证过。
-- 未做：**不带限定名**的引用（`Player *p;`）仍走短名表，不同命名空间同名时依旧都命中；消歧要用 AST 里已经
-  解析好的类型（type 位置的 `expr_type`），是另一块活儿。
+- 未做（已由下一节解决）：**不带限定名**的引用（`Player *p;`）当时仍走短名表，不同命名空间同名时依旧都命中。
 
 **进展（`@namespace` 块的位置：跳转定义 + 大纲嵌套 —— 已落地）**
 
@@ -229,6 +232,47 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
 - 回归：`cargo test --workspace`、`cargo test -p jeti-lsp`（新增嵌套块的大纲/定义单测）、
   `crates/elaborator/tests/ast_spans.rs`（新增"块范围被记录"用例）、`./test_all.sh -j4`（基线不变——`decls`
   没变，生成的 C 自然不变，这也是选这条路最直接的收益）。
+
+**进展（不带限定名的引用：按块范围消歧 —— 已落地）**
+
+- 起因：限定名那节留的"未做"——`A::Player` 与 `B::Player` 在不带限定名的引用处（`Player *p;`）都命中，
+  悬停显示一条、F12 一口气给两份。
+- 一条看似自然的路被否掉：用 AST 类型上已经解析好的 `class_ref` / `expr_type`。`AstType` 不带源码位置
+  （见本文件开头"两点位置投影"的约定），而让索引回头去消费同一次运行的 CST 重做一遍名字解析，正是
+  "`crates/lsp` 不得自带 parser/checker 链"要防的。所以这一路只能是**文本 + 索引里已有的块范围**。
+- 采用：镜像编译器 `ns_fqn` 的判定，数据只用上一节留下的 `AstUnit::namespaces`。**只在短名有歧义时**收窄
+  （短名表里有任何一条记录的限定名不等于短名，说明这个名字被某个限定名声明占用）；然后由内向外试
+  `<块>::<名字>`——内层块的起点更大、终点更小，先试，与 binder 由内向外的查找方向一致——命中即返回。
+  顶层名、以及没有块能解释的名字，仍旧走短名表：不多此一举，也就不会把一个本来正确的答案改坏。
+- 效果：`@namespace A` 里写 `Player *p;` → `A::Player`（只这一份）；同一个名字写在顶层 → 仍是短名表，
+  按源码顺序给全部（这正是 clangd 对"没有作用域能解释它"的名字的行为）。悬停/补全读的是同一个答案。
+- 回归：`cargo test -p jeti-lsp`（新增"块内裸名解析到块内那一份"单测，并去掉一条原先依赖歧义的断言——
+  它的位置其实落在 `A` 块内部，属于这次要修的形状）；探测脚本 `ns_scoped.jeti` 逐位置验证（块内两层、
+  顶层三份）；`./test_all.sh -j4` 基线不变（不动声明流，生成的 C 不变）。
+
+**进展（`@using`：别名与导入名解析 —— 已落地）**
+
+- 起因：binder 把每条 `@using` 折进符号表的 `using_list`，elaborator 整个丢掉。于是
+  `@using Alias = A::Player;` 之后，`Alias` 对编译器是个类名，对编辑器什么都不是：它不声明任何东西，
+  `by_name` 里自然没有它，悬停/跳转都返回空。
+- 采用：照 `@namespace` 那张表的模版，**加一张表、不动声明流**——`AstUnit::usings`
+  （`AstUsing { fqn, alias, line, col, end_line, end_col }`，源码顺序）。elaborator 摊平时把 `fqn` / `alias`
+  原样记下，**不预判**"这是别名还是导入名"：那是 binder 的策略，消费者要问的问题应该用 binder 读过的那对
+  值去问，而不是读一份二手结论。范围留着的理由和块一样：跳到别名本身、以及将来的 rename 都要。
+- 索引侧（`read_usings`）：`@using Alias = X;` → `Alias` 指 `X`（`X` 带 `*`、`id<P>`、泛型实参时按原名归一：
+  `id<Proto>` 指协议本身，泛型实参不是声明名的一部分）；`@using A::B;` → 短名 `B` 指 `A::B`（索引认得这个
+  声明时）；`@using A;` 不引入名字，只记前缀。解析次序与编译器一致：`resolve_at` 先查 using 引入的名字，
+  `narrow` 里 using 前缀排在块范围之前——别名 → using 前缀 → 所在块，就是 `ns_fqn` 的次序。
+- 与编译器的差异被有意压到"编译器根本不解析"的情形：binder 只对类/协议目标登记导入名（typedef/struct/enum
+  目标它退化成裸前缀，那个前缀下裸名解析不到），而索引照 `@using` 写的那条声明回答。索引认得的不同，
+  编译器接受的文件体现不出来——会遮蔽已声明名字的导入，binder 直接报 `ambiguous import`。
+- 顺带发现（**不在本次改动内**，已单独报告）：给声明**命名**时也走了 `ns_fqn`，而 `ns_fqn` 先查 using 表，
+  于是 `@using A::Player;` 会把别的命名空间里声明为 `Player` 的类一并改名成 `A::Player`——两个类在生成的
+  C 里合成同一个符号。这是既有 bug（HEAD 上可复现），修它要动 binder/elaborator 对"声明名只由所在命名空间
+  限定"的规则，宜单独一次改动。
+- 回归：`crates/elaborator/tests/ast_spans.rs`（新增"using 被记录 + 不进 `decls`"用例）、
+  `cargo test -p jeti-lsp`（新增别名/导入名解析单测，其中刻意让两个类的短名不同——短名相同正是上面那个
+  bug 的形状，钉住它就会把 bug 当成语义）、`cargo test --workspace`、`./test_all.sh -j4` 基线不变。
 
 **进展（项目配置文件：compile_commands.json / compile_flags.txt —— 已落地）**
 

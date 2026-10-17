@@ -299,6 +299,20 @@ source extent, beside that list (`AstUnit::namespaces`). The index rebuilds them
 as symbols, so a namespace has a place to point at instead of being inferred
 from the `::` in the names.
 
+A **bare** name resolves the way the compiler resolves it, not by the short-name
+table alone: inside `@namespace A`, `Player *p;` gets `A::Player` even while
+`B::Player` exists, because the block the reference is written in is the nearer
+name. Only an *ambiguous* short name — one that a qualified declaration shares —
+is narrowed at all, so a top-level name keeps the answer it always had, and a
+name no enclosing block explains still gets every declaration of it.
+`@using` answers through the same model: `@using Alias = B::Hero;` makes `Alias`
+mean that class, which is the one question the index could not answer at all
+before (an alias declares nothing of its own, so nothing was indexed), and
+`@using B::Hero;` is what lets the bare `Hero` reach it. Each `@using` is
+recorded (`AstUnit::usings`) beside the flat declaration stream for the same
+reason the `@namespace` blocks are: the binder has already resolved the name into
+its symbol table, and the AST had no trace of the declaration left.
+
 A syntax error does not hide the rest of the file. The parse still fails, but the
 recovered syntax tree is handed to the later stages, so the editor reports the
 syntax mistake **and** the type/ARC errors below it, and the outline, definition,

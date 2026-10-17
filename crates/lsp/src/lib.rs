@@ -1500,6 +1500,69 @@ int useTop(void) {
         assert_eq!(names, vec!["A::Player", "A::Inner::Player", "B::Player"], "{names:?}");
     }
 
+    /// The `@using` spellings the binder resolves and the AST used to drop: an
+    /// alias, an imported short name, and a namespace prefix.
+    ///
+    /// The two classes have deliberately different short names: a `@using` whose
+    /// name would also be a *declaration's* short name is miscompiled today
+    /// (the elaborator names declarations through the using list, so two
+    /// classes can collapse into one), and a test built on that would pin the
+    /// bug instead of the resolution.
+    const USINGS: &str = "\
+@namespace A
+@interface Player : jeti_root
+- (void)fromA;
+@end
+@endnamespace
+
+@namespace B
+@interface Hero : jeti_root
+- (void)fromB;
+@end
+@endnamespace
+
+@using A::Player;
+@using Alias = B::Hero;
+@using A;
+
+void runUse(void) {
+    Player *p;
+    Alias *q;
+}
+";
+
+    /// A name introduced by `@using` answers where the compiler resolves it: the
+    /// alias is the class it renames — the one case the index could not answer
+    /// at all before, since an alias introduces no declaration of its own — and
+    /// the imported short name is that one class.
+    #[test]
+    fn a_using_name_resolves_to_what_it_imports() {
+        let analyzed = analyze(USINGS);
+        let at = |needle: &str| position(USINGS, needle, 0);
+
+        let alias = analyzed.index.definitions_at(USINGS, at("Alias *q;"));
+        assert_eq!(alias.len(), 1, "{alias:?}");
+        assert_eq!(alias[0].name, "B::Hero");
+
+        let imported = analyzed.index.definitions_at(USINGS, at("Player *p;"));
+        assert_eq!(imported.len(), 1, "{imported:?}");
+        assert_eq!(imported[0].name, "A::Player");
+
+        // On the alias inside the declaration itself, go-to-definition reaches
+        // the class it renames — as clangd's does.
+        assert_eq!(
+            analyzed.index.resolve_at(USINGS, at("Alias = B::Hero")),
+            Some(index::Resolved::Symbol("B::Hero".to_string()))
+        );
+
+        // The namespace form introduces no name of its own; the name it spells
+        // is the block, which the index already knows.
+        assert_eq!(
+            analyzed.index.resolve_at(USINGS, position(USINGS, "@using A;", 7)),
+            Some(index::Resolved::Symbol("A".to_string()))
+        );
+    }
+
     #[test]
     fn hover_and_completion_speak_qualified_names() {
         let mut server = Server::new(AnalysisOptions::default());

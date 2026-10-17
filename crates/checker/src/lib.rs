@@ -3638,7 +3638,7 @@ mod tests {
             end_line: 0,
             end_col: 0,
         };
-        let mut unit = AstUnit { decls: vec![method], filename: String::new(), namespaces: Vec::new() };
+        let mut unit = AstUnit { decls: vec![method], filename: String::new(), namespaces: Vec::new(), usings: Vec::new() };
         let mut c = Checker::new(None);
         c.check(&mut unit)
     }
@@ -3735,7 +3735,7 @@ mod tests {
             end_line: 0,
             end_col: 0,
         };
-        let mut unit = AstUnit { decls: vec![method], filename: String::new(), namespaces: Vec::new() };
+        let mut unit = AstUnit { decls: vec![method], filename: String::new(), namespaces: Vec::new(), usings: Vec::new() };
         let mut c = Checker::new(None);
         let r = c.check(&mut unit);
         (r, c.warnings().to_vec())
