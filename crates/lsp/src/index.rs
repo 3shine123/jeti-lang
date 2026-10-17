@@ -138,6 +138,18 @@ fn completion_kind(symbol_kind: u8) -> u8 {
 /// stops a pathological index from producing a megabyte of JSON.
 const COMPLETION_LIMIT: usize = 2000;
 
+/// One `@namespace` block's extent, kept so a bare name written inside it can be
+/// read the way the elaborator reads it — prefixed with the block's
+/// fully-qualified name (see [`SymbolIndex::narrow`]).
+#[derive(Debug, Clone)]
+struct NamespaceBlock {
+    /// Fully-qualified name of the block, `A::Inner` for a nested one.
+    name: String,
+    path: String,
+    /// The block's extent, `@namespace` line through `@endnamespace`.
+    range: LspRange,
+}
+
 /// One class as member completion needs it: its ancestors' names and its own
 /// members, all keyed by the class's lookup name.
 #[derive(Debug, Default)]
@@ -263,6 +275,13 @@ pub struct SymbolIndex {
     /// rebuilt as a symbol here. This set is what answers for a namespace that
     /// has no block to point at, and what filters a completion after `Game::`.
     namespaces: BTreeSet<String>,
+    /// `@namespace` blocks of the compilation, by extent, for reading a bare
+    /// name the way the elaborator reads it.
+    blocks: Vec<NamespaceBlock>,
+    /// The document this index was built for: the one file whose positions
+    /// `resolve_at` is asked about (an imported header's block must not claim a
+    /// position in it).
+    document: String,
 }
 
 impl SymbolIndex {
@@ -286,6 +305,7 @@ impl SymbolIndex {
                 .clone()
         };
         let mut index = SymbolIndex::default();
+        index.document = document.to_string();
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
         index.attach_namespaces(ast, source_map, &mut lookup);
         index
@@ -333,6 +353,11 @@ impl SymbolIndex {
             };
             self.record(&symbol);
             self.namespaces.insert(symbol.lookup.clone());
+            self.blocks.push(NamespaceBlock {
+                name: symbol.lookup.clone(),
+                path: symbol.path.clone(),
+                range: symbol.range,
+            });
             blocks.push(symbol);
         }
         for block in blocks.into_iter().rev() {
@@ -378,13 +403,71 @@ impl SymbolIndex {
             // A declaration beats a namespace of the same name: it is the more
             // specific answer.
             if self.by_name.contains_key(&candidate) {
-                return Some(Resolved::Symbol(candidate));
+                return Some(Resolved::Symbol(self.narrow(&candidate, position)));
             }
             if self.namespaces.contains(&candidate) {
                 return Some(Resolved::Namespace(candidate));
             }
         }
         None
+    }
+
+    /// The key a bare name at `position` stands for.
+    ///
+    /// `Player` written in three namespaces is one short name claiming three
+    /// declarations, and answering with all three is a guess: inside
+    /// `@namespace A` the elaborator reads it as `A::Player` (it prefixes a name
+    /// written in a block with the block's fully-qualified name, walking outward
+    /// when the inner name does not exist), so the block the cursor sits in
+    /// decides. A name only one declaration claims, a name already written with
+    /// a qualifier, and a name with no block around it all stay exactly as they
+    /// were — the short form is indexed for them.
+    fn narrow(&self, name: &str, position: LspPosition) -> String {
+        if name.contains("::") {
+            return name.to_string();
+        }
+        // Ambiguity means a *qualified* declaration shares this short name. A
+        // name claimed only by bare declarations (the same class in two headers,
+        // a selector implemented in two classes) has nothing to choose between.
+        let ambiguous = self
+            .by_name
+            .get(name)
+            .is_some_and(|symbols| symbols.iter().any(|symbol| symbol.lookup != name));
+        if !ambiguous {
+            return name.to_string();
+        }
+        for namespace in self.enclosing_namespaces(position) {
+            let scoped = format!("{namespace}::{name}");
+            if self.by_name.contains_key(&scoped) {
+                return scoped;
+            }
+        }
+        name.to_string()
+    }
+
+    /// The `@namespace` blocks containing `position`, innermost first.
+    ///
+    /// Blocks are per file: an imported header's block covers its own lines, so
+    /// only the document's blocks can say anything about a position in it.
+    fn enclosing_namespaces(&self, position: LspPosition) -> Vec<&str> {
+        let mut blocks: Vec<&NamespaceBlock> = self
+            .blocks
+            .iter()
+            .filter(|block| {
+                same_file(&block.path, &self.document)
+                    && block.range.start <= position
+                    && position <= block.range.end
+            })
+            .collect();
+        // Innermost first: of two blocks holding the cursor, the one that starts
+        // later is written inside the other, so its name is the longer prefix.
+        blocks.sort_by(|a, b| {
+            b.range
+                .start
+                .cmp(&a.range.start)
+                .then(a.range.end.cmp(&b.range.end))
+        });
+        blocks.into_iter().map(|block| block.name.as_str()).collect()
     }
 
     /// Declarations of the name at `position` — the editor's

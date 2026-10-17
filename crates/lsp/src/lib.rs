@@ -1426,13 +1426,78 @@ int main() {
         let unknown = "    C::Player *p;";
         assert_eq!(analyzed.index.resolve_at(unknown, position(unknown, "C::Player", 3)), None);
         assert!(analyzed.index.definitions_at(unknown, position(unknown, "C::Player", 3)).is_empty());
-        // Written without a qualifier, a name the index knows still resolves —
-        // the short form is indexed for exactly that.
-        let short = "    Player *p;";
-        assert_eq!(
-            analyzed.index.resolve_at(short, position(short, "Player", 0)),
-            Some(index::Resolved::Symbol("Player".to_string()))
-        );
+    }
+
+    /// A bare name written inside a `@namespace` block stands for that block's
+    /// member, which is how the elaborator reads it: it prefixes the name with
+    /// the block's fully-qualified name and walks outward when the inner name
+    /// does not exist.
+    const SCOPED: &str = "\
+@namespace A
+@interface Player : jeti_root
+- (void)fromA;
+@end
+
+@namespace Inner
+@interface Player : jeti_root
+- (void)deep;
+@end
+
+int useInner(void) {
+    Player *p;
+    return 0;
+}
+@endnamespace
+
+int useOuter(void) {
+    Player *q;
+    return 0;
+}
+@endnamespace
+
+@namespace B
+@interface Player : jeti_root
+- (void)fromB;
+@end
+@endnamespace
+
+int useTop(void) {
+    Player *r;
+    return 0;
+}
+";
+
+    /// The same short name in three namespaces used to answer with all three
+    /// wherever it was written. Inside a block it now answers with that block's
+    /// declaration — and only at the top level, where the source qualifies
+    /// nothing, does the name stay the three-way one it looks like.
+    #[test]
+    fn a_bare_name_resolves_to_the_block_it_is_written_in() {
+        let analyzed = analyze(SCOPED);
+        let on = |needle: &str| {
+            analyzed
+                .index
+                .definitions_at(SCOPED, position(SCOPED, needle, 0))
+        };
+
+        // The innermost block the cursor is in decides first.
+        let inner = on("Player *p;");
+        assert_eq!(inner.len(), 1, "{inner:?}");
+        assert_eq!(inner[0].name, "A::Inner::Player");
+        assert_eq!(inner[0].range.start.line, 6);
+
+        // Outside the inner block the walk goes outward, to `A`.
+        let outer = on("Player *q;");
+        assert_eq!(outer.len(), 1, "{outer:?}");
+        assert_eq!(outer[0].name, "A::Player");
+        assert_eq!(outer[0].range.start.line, 1);
+
+        // At the top level no block holds it, so nothing is narrowed: all three
+        // declarations are the honest answer, in source order — the short form
+        // is indexed for exactly this case.
+        let top = on("Player *r;");
+        let names: Vec<&str> = top.iter().map(|location| location.name.as_str()).collect();
+        assert_eq!(names, vec!["A::Player", "A::Inner::Player", "B::Player"], "{names:?}");
     }
 
     #[test]
