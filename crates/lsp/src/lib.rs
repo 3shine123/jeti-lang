@@ -1579,7 +1579,9 @@ mod tests {
         // editor must be able to say "this project builds with -fno-jeti-arc"
         // and stop reporting what the build accepts.
         let mrc = "\
-@interface Node : jeti_root
+@interface Node : jeti_root {
+    NPObject *_next;
+}
 @end
 
 @implementation Node
@@ -2762,5 +2764,188 @@ int helper(int value, int other) {
             "params": { "textDocument": { "uri": uri }, "position": { "line": 0, "character": 0 } },
         }));
         assert!(out[0]["result"].is_null());
+    }
+
+    // ─── C17 6.5.x / 6.8.4.2 diagnostic families ────────────────────────
+    //
+    // clang-frozen wording/severity (tests/negative/c_std/README.md matrix).
+    // These run the same analyze_for_editor path the editor sees — the whole
+    // point of the families is that the terminal and the editor agree.
+
+    fn diag_messages(src: &str) -> Vec<String> {
+        let doc = analyze_for_editor(
+            "/tmp/jeti_lsp_unit/family.jeti",
+            src,
+            &AnalysisOptions::default(),
+            &no_open_files(),
+        );
+        doc.diagnostics.iter()
+            .filter_map(|d| d["message"].as_str().map(String::from))
+            .collect()
+    }
+
+    #[test]
+    fn undeclared_identifier_family_matches_clang() {
+        let msgs = diag_messages("\
+int known(int v) { return v; }
+int main(void) {
+    int y = x + 1;      // ① undeclared identifier → error
+    ghost_fn(1);        // ② implicit function declaration → error
+    int z = known(2);   // ③ declared → silent
+    return y + z;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains("use of undeclared identifier 'x'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "call to undeclared function 'ghost_fn'; ISO C99 and later do not support implicit function declarations")),
+            "{msgs:?}");
+        assert_eq!(msgs.len(), 2, "declared call must stay silent: {msgs:?}");
+    }
+
+    #[test]
+    fn call_family_matches_clang() {
+        let msgs = diag_messages("\
+int two_args(int a, int b) { return a + b; }
+int one_arg(int a) { return a; }
+int main(void) {
+    int r = two_args(1);      // too few → error
+    r = one_arg(1, 2);        // too many (single param names it) → error
+    int not_fn = 0;
+    not_fn(1);                // called object type 'int' → error
+    r = two_args(1, 2);       // exact → silent
+    r = one_arg(3);           // exact → silent
+    return r;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains(
+            "too few arguments to function call, expected 2, have 1")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "too many arguments to function call, expected single argument 'a', have 2 arguments")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "called object type 'int' is not a function or function pointer")), "{msgs:?}");
+        assert_eq!(msgs.len(), 3, "exact-arity calls must stay silent: {msgs:?}");
+    }
+
+    #[test]
+    fn assign_family_matches_clang() {
+        let msgs = diag_messages("\
+struct S { int a; };
+struct T { int b; };
+int main(void) {
+    int v = 0;
+    int *p = &v;
+    char *c = 0;
+    struct S s;
+    struct T t;
+    p = c;        // ptr ↔ ptr → warning (clang -Wincompatible-pointer-types)
+    v = p;        // ptr → int → error 'dereference with *'
+    v = &v;       // &value → error 'remove &'
+    p = v;        // int → ptr → error 'take the address with &'
+    s = v;        // struct ← scalar → error
+    s = t;        // struct ← foreign struct → error
+    p = 0;        // zero literal → silent
+    v = 2;        // int ← int → silent
+    return 0;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains(
+            "incompatible pointer types assigning to 'int *' from 'char *'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "incompatible pointer to integer conversion assigning to 'int' from 'int *'; dereference with *")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "incompatible pointer to integer conversion assigning to 'int' from 'int *'; remove &")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "incompatible integer to pointer conversion assigning to 'int *' from 'int'; take the address with &")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "assigning to 'struct S' from incompatible type 'int'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "assigning to 'struct S' from incompatible type 'struct T'")), "{msgs:?}");
+        // Zero/int literals stay silent: exactly the six shapes above.
+        let loud = msgs.iter().filter(|m| m.contains("assigning")
+            || m.contains("conversion")).count();
+        assert_eq!(loud, 6, "silent shapes must not fire: {msgs:?}");
+    }
+
+    #[test]
+    fn object_pointer_upcast_is_silent_downcast_warns() {
+        let msgs = diag_messages("\
+@interface Foo : jeti_root
+@end
+@interface Sub : Foo
+@end
+@interface Other : jeti_root
+@end
+
+@implementation Foo
+-(void) m {
+    Foo *f = 0;
+    Sub *s = 0;
+    Other *o = 0;
+    f = s;   // child → parent: silent (probe_objc ①)
+    s = f;   // parent → child: warning
+    f = o;   // unrelated: warning
+    return;
+}
+@end
+");
+        let warns: Vec<&String> = msgs.iter().filter(|m| m.contains("incompatible pointer types assigning")).collect();
+        assert_eq!(warns.len(), 2, "upcast must be silent: {msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "incompatible pointer types assigning to 'Sub *' from 'Foo *'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "incompatible pointer types assigning to 'Foo *' from 'Other *'")), "{msgs:?}");
+    }
+
+    #[test]
+    fn switch_family_matches_clang() {
+        let msgs = diag_messages("\
+enum Color { RED = 1 };
+int main(void) {
+    int v = 1;
+    int *pv = &v;
+    switch (pv) {          // pointer subject → error
+        case 1: break;
+    }
+    switch (v) {
+        case 1: break;
+        case 1: break;     // duplicate → error
+        case 1.5: break;   // non-integer constant → error
+        default: break;
+        default: break;    // multiple default → error
+    }
+    switch (v) {
+        case 1: break;
+        default: break;
+        case 2: break;     // case after default → silent (measured legal)
+    }
+    return 0;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains(
+            "statement requires expression of integer type ('int *' invalid)")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains("duplicate case value '1'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "integer constant expression must have integer type, not 'double'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains("multiple default labels in one switch")), "{msgs:?}");
+        assert_eq!(msgs.len(), 4, "case-after-default must stay silent: {msgs:?}");
+    }
+
+    #[test]
+    fn stdlib_calls_and_bindings_stay_silent_under_includes() {
+        // Passthrough headers gate the whitelists: stdlib functions and
+        // header-declared bindings (errno, STDIN_FILENO…) must not trip the
+        // undeclared checks, while a genuinely undeclared name still does.
+        let msgs = diag_messages("\
+#include <stdio.h>
+#include <errno.h>
+int main(void) {
+    printf(\"%d\\n\", errno);
+    ghost_fn(1);
+    return 0;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains("call to undeclared function 'ghost_fn'")), "{msgs:?}");
+        assert!(!msgs.iter().any(|m| m.contains("'printf'")), "{msgs:?}");
+        assert!(!msgs.iter().any(|m| m.contains("'errno'")), "{msgs:?}");
     }
 }

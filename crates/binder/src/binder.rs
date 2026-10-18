@@ -152,21 +152,14 @@ impl Binder {
 
     fn bind_expr(&mut self, e: &mut CstExpr) {
         match &mut e.data {
-            CstExprData::Ident(name) => {
-                if name.starts_with("__") {
-                    return;
-                }
-                if self.symtab.lookup(name).is_none() {
-                    if let Some(ref cls_name) = self.current_class {
-                        if let Some(cls_sym) = self.symtab.find_class(cls_name) {
-                            if let SymbolData::Class { ref ivars, .. } = cls_sym.data {
-                                if ivars.contains(name) { return; }
-                            }
-                        }
-                    }
-                    self.symtab.declare(Symbol::new(SymbolKind::Variable, name));
-                }
-            }
+            // Bare identifier *mentions* used to auto-declare an (untyped)
+            // Variable symbol. That poisons every consumer that treats a
+            // symtab hit as "declared": the checker's use-of-undeclared
+            // check, the call family's called-object test — plus clang
+            // errors on the same C, so nothing was ever actually known.
+            // Real declarations register through bind_decl / params /
+            // protocol members; a mention registers nothing.
+            CstExprData::Ident(_) => { }
             CstExprData::Message { receiver, args, .. } => {
                 self.bind_expr(receiver);
                 for a in args.iter_mut() { self.bind_expr(a); }

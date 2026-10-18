@@ -1,0 +1,14 @@
+// Call-family probe — jetic side (mirror of call_family.c).
+//   ./target/debug/jetic tests/negative/c_std/call_family.jeti -rewrite-jeti -o /tmp/x.c
+int two_args(int a, int b) { return a + b; }
+int one_arg(int a) { return a; }
+
+int main(void) {
+    int r = two_args(1);        // ① too few arguments → error, caret at ')'
+    r = one_arg(1, 2);          // ② too many arguments → error, caret at ')'
+    int not_fn = 0;
+    not_fn(1);                  // ③ called object type 'int' is not a function → error, caret at '('
+    r = two_args(1, 2);         // ④ correct arity → silent
+    r = one_arg(3);             // ⑤ correct arity → silent
+    return r;
+}

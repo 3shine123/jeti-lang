@@ -79,7 +79,9 @@ fn the_arc_switch_reaches_the_analysis() {
     std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join("mrc.jeti");
     let mrc = "\
-@interface Node : jeti_root
+@interface Node : jeti_root {
+    NPObject *_next;
+}
 @end
 
 @implementation Node
@@ -239,7 +241,9 @@ fn a_compile_flags_file_configures_the_analysis() {
     std::fs::write(root.join("compile_flags.txt"), "-fno-jeti-arc\n").expect("flags file");
     let path = root.join("src/legacy.jeti");
     let mrc = "\
-@interface Node : jeti_root
+@interface Node : jeti_root {
+    NPObject *_next;
+}
 @end
 
 @implementation Node

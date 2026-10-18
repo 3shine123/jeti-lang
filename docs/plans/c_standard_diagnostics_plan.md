@@ -52,9 +52,24 @@
 ### G-expr 表达式 / 语句面（6.5 / 6.8）
 - 标识符未声明（6.5.1）→ error（implicit declaration 时代差异：C17 必须
   诊断，clang 默认 error，`[测]`）
+  —— **已实现并双侧冻结**：`tests/negative/c_std/undecl_family.*`（2026-10-18）。
+  前置修复：binder 曾把任何提及的 `Ident` 自动注册为无类型 Variable（提及
+  即注册），毒化 symtab 使检查恒静默——已移除；头文件表面（`errno`、
+  `stdin`、`STDIN_FILENO`…）经 `feed_included_headers` + 策展绑定表豁免，
+  引号 `#include "x.h"` 在场则整个未声明函数检查关闭。`for (id x in arr)`
+  循环变量由 checker ForIn 臂自行入 scope（binder 不再代劳）。
 - 下标（6.5.2.1）：操作数须指针/数组 → error；非整数下标 → error
 - 调用（6.5.2.2）：对象非函数指针 → error；原型已知：
   实参过少 → error `[测]`；实参过多（变参/原型）→ `[测]`
+  —— **已实现并双侧冻结**：`tests/negative/c_std/call_family.*`（2026-10-18）。
+  措辞三形：too few `expected N, have M`（caret 在 `)`）；too many 多参
+  `expected N, have M`；too many 单参 `expected single argument 'a'`（引用
+  参数名，`function_param_names` 表）。called-object caret 在 `(`。
+  `(void)` 参数列表计 0 参；block 与 fn-ptr 变量、typedef 别名
+  （`IntFn`/`SimpleBlock`，`block_alias_names`）合法调用；成员 fn-ptr
+  `d.fn(9)` 空名 callee 跳过；stdlib 白名单（`feed_included_headers` 门）
+  豁免 passthrough 头；引号 include 关闭检查。嵌套调用（参数位、cast
+  操作数内）为记录缺口；assign 值位 caret 差 1 列。
 - 成员访问（6.5.2.3）：非 struct/union 操作数 → error；`->`/`.` 混用类型错 → error
 - `++/--/`（6.5.2.4/6.5.3.1）：须可修改左值且为标量 → error（含 const 写、
   对 rvalue 自增）
@@ -77,11 +92,27 @@
 - 赋值（6.5.16）：目标须可修改左值（const/rvalue/数组/成员 const  atte）
   → error；不兼容指针赋值 → warning（clang 默认不升 error）`[测]`；
   整↔指针赋值 → warning；struct↔标量冲突 → error `[测]`
+  —— **已实现并双侧冻结**：`tests/negative/c_std/assign_family.*`
+  （2026-10-18；实测量化不对称：指针↔指针不合 = **warning**，int↔指针 =
+  **error**，与 clang 一致）。hint 随值形状变（`&v` → `remove &`、普通变量
+  → `dereference with *` / `take the address with &`）。目标类型只信
+  scope frames 真实声明（宽松回退曾把 `self = [super init]`、ivar 存
+  全线误报）；子类值→父类目标 silent（probe_objc.m 测量），id/Class/SEL/
+  instancetype/NPObject* 通配与 codegen `obj_wildcard_cast` 同策略；
+  `void *` 双向 silent、0/nil 字面量 silent。const-赋值形状被既有
+  `int *const` declarator 缺口阻塞（记录于 README 缺口清单）。
 - return（6.8.6.4）：void 函数 return 带值 → error `[测]`；
   非 void 落尾无 return → clang 默认对非空函数有 `-Wreturn-type`（warning）`[测]`
 - switch（6.8.4.2）：条件须整型 → error（Jeti pattern 分支豁免：
   对象 switch 是 Jeti 扩展语法，仅对 C 常量形态分支执行本约束）；
   case 值重复 → error；default 多个 → error；case 非常量 → error
+  —— **已实现并双侧冻结**：`tests/negative/c_std/switch_family.*`
+  （2026-10-18）。`case 1.5` 措辞 `integer constant expression must have
+  integer type, not 'double'`；重复 literal case caret 在值；第二个
+  default caret 在关键字；default 之后的 case legal（实测 silent）。
+  解引用链主体（`switch (*p)`）经 `deref_subject_type` 折叠（宽松 Unary
+  推导不解引用，曾误报）。枚举成员与字面量同值的重复（`case RED` after
+  `case 1`）clang 报、jetic silent —— 无常量折叠，记录缺口。
 - label（6.8.1）：goto 目标不存在（6.8.6.1 须指向同函数 label）/ 函数内重复 label → error
 - break/continue 位置（6.8.6.2/6.8.6.3）：循环外 → error（parser 层）
 - 逗号/条件里的 void 等类型约束随项收录
@@ -102,10 +133,18 @@
 
 `crates/checker` 今日覆盖：ARC 内存模型/空安全/throws 对账/格式串/泛型/
 消息解析 —— 全部是 Jeti 语义域；C17 约束族（G-ex/G-decl/G-init/G-expr/G-tu）
-除占位外**未实现**。基础设施已备好：
+中 **G-expr 五族已实现并冻结**（cast 往返、未声明标识符、调用、赋值、
+switch/case —— 见 §2 各条目与 `tests/negative/c_std/README.md` 矩阵），
+其余（G-init/G-tu/G-ex 及 G-expr 余量：下标/成员访问/自增/一元/sizeof/
+`%`/移位/关系/相等/位运算/`&&`/`?:`/return/label/break-continue）未实现。
+基础设施已备好：
 `check_error/check_warning/check_error_span/record` + journal span + Severity
 + `warnings_as_diagnostics` 通道（LSP 自动可见），并已有
 `is_subclass_of`/`type_display`/`AstType` 全套类型骨干可复用。
+新增可复用件：`function_returns`/`function_param_names`/`function_variadic`/
+`block_alias_names` 四张登记表、`feed_included_headers`（passthrough 头
+豁免面）、`deref_subject_type`（解引用链折叠）、
+`assign_target_type`（只信真实声明的目标解析）。
 
 ## 4. 里程碑
 
@@ -141,12 +180,26 @@
   cast 往返族已实现（见 §G-expr cast 条目的测量记录与 corpus）。
   未穷尽项（后续 TU 扩大验收时再收）：语句位裸函数参 `@""` 字面量
   进入非注册 runtime 原型的路径仍依赖 FUNC_PARAM_TYPES 登记面。
-- **Phase 1 矩阵测量**：建立 `tests/negative/c_std/` 对照 corpus
-  （每族 ≥1 正例 + 1~2 反例，`.c`/`.jeti` 同源），跑 clang/jetic 提供
-  matrix.md（报/不报、severity、caret 位）。防污染纪律：只跑行为，不读实现。
-- **Phase 2 首批落地（G-expr 核心 + G-decl 最大项**）：
-  未声明标识符、赋值族 three-way、调用族、switch/case、cast 往返
-  （1.22 夹具转正），checker 单测 per family + `-Werror` 贯通。
+- **Phase 1 矩阵测量（已完成 2026-10-18）**：`tests/negative/c_std/`
+  对照 corpus 扩到 5 族（cast / undecl / call / assign / switch，每对
+  `.c`/`.jeti` 同源，正例+反例齐备），矩阵入同目录 README.md（报/不报、
+  severity、caret 位、缺口显式记录）。clang oracle 探针（/tmp probe_*）：
+  未声明标识符、too few/many（单参命名形）、called-object、const 赋值、
+  指针互赋 warning、int↔指针 error+hint、struct←标量/异名 struct、
+  switch 四形、`(void)`=0 参、void* 双向 silent、ObjC 子类上转 silent
+  （probe_objc.m）、`default` 后 case legal。
+- **Phase 2 首批落地（已完成 2026-10-18，G-expr 五族）**：未声明标识符、
+  调用族（arity 三形 + called-object + 未声明函数）、赋值族（warning/
+  error 不对称 + hint + ObjC 通配策略）、switch/case 四形、cast 往返
+  （Phase 0 已含）。checker 单测 per family（lsp harness，clang 冻结
+  措辞逐条断言）+ `-Werror` 贯通单测（jetic pipeline）。
+  前置基建：`function_returns`/`function_param_names`/`function_variadic`
+  三表、`block_alias_names`（block+fn-ptr typedef）、
+  `feed_included_headers`（stdlib 函数/绑定双表豁免）、克隆求值深度闸门
+  （防 clone 二次报）、binder 提及注册移除（未声明检查的前提）。
+  全基线回归绿：cargo test --workspace 272/0、test_all 482/493 0 失败
+  （39 ARC→MRC 与 Phase 0 完全一致）、multi_tu 16/16、eh_matrix 18/18、
+  eh_diff 8/8、strong_metadata 10/10、arc_intern PASS。
 - **Phase 3 全量铺开**：G-init/G-tu/G-ex 余量按表逐族推进，每族一 PR。
 - **Phase 4 验收基准**：全语料 clang vs jetic 双向 matrix 一致率 ≥
   12/12 同构（解析层前例），matrix.md 入 tests/negative 文档；回归全绿。
@@ -156,8 +209,10 @@
 - 消息措辞以 C 标准术语名命名（"constraint violation" 不出现在文案，
   直接陈述事实），句式沿用 expected 家族的 clang 措辞（fetch 行为是
   实测产物，非源码拷贝）。
-- severity 默认每族一个决定（存储为常量表），`-Werror` 统一升级路径
-  已有（`jetic -Werror`），给 checker warnings 对其打通。
+- severity 默认每族一个决定（存储为常量表），**默认严重度 = 与 clang 实测
+  一致**（多为 warning，逐条同severity同caret位）；`-Werror` 统一升级路径
+  已有（`jetic -Werror`），给 checker warnings 对其打通（2026-10-18 用户
+  裁决：clang 对齐 + `-Werror`，不采用"约束违反一律 error"路线）。
 - 每条消息尾部不带标记类别（不仿 `-Wxxx` 标签），类别映射存表供未来
   `-W(no)-family` 开关扩展。
 - 一切 `TBD[测]` 的测量记录进 `tests/negative/c_std/matrix.md`，测量命令

@@ -83,6 +83,39 @@ pub struct Checker {
     pub source_map: Option<jeti_cst::source_map::SourceMap>,
     /// Function name → param types (from AST function declarations).
     pub function_params: HashMap<String, Vec<Option<AstType>>>,
+    /// Function name → declared return type (same AST pass as
+    /// `function_params`). The call family (C17 6.5.2.2) needs the type of a
+    /// call expression, not just arity; `None` = not tracked yet.
+    pub function_returns: HashMap<String, Option<AstType>>,
+    /// Function name → `...` (variadic) flag from the same AST pass. Arity
+    /// checks skip variadic functions (C17 6.5.2.2p2).
+    pub function_variadic: HashMap<String, bool>,
+    /// Typedef aliases whose underlying type is a block (`typedef void
+    /// (^SimpleBlock)(void)`). The alias spelling carries no `is_block` flag
+    /// on variable types, so the call family's called-object guard needs this
+    /// registry to keep `b()` (block invocation through an alias) legal.
+    pub block_alias_names: std::collections::HashSet<String>,
+    /// Function name → declared parameter names, same order as
+    /// `function_params`. Single-parameter functions report clang's
+    /// "expected single argument 'a'" form, which quotes the parameter name.
+    pub function_param_names: HashMap<String, Vec<Option<String>>>,
+    /// Angle-bracket C headers this TU pulled in (`#include <stdio.h>`,
+    /// fed by the pipeline from the preprocessor's include lines). Gate for
+    /// the stdlib callee whitelist: headers whose `#include` reaches the C
+    /// compiler verbatim (passthrough is an escape hatch) still declare
+    /// functions the AST never saw, so the "call to undeclared function"
+    /// check must consult what was included before firing (§G-expr 调用族).
+    pub included_c_headers: Vec<String>,
+    /// Any quoted `#include "…h"` in this TU. Quoted headers are the escape
+    /// hatch's escape hatch — their declarations are not auditable, so a TU
+    /// containing one disables the undeclared-function check entirely
+    /// rather than flooding false errors over extern C surface.
+    pub has_quoted_c_include: bool,
+    /// Depth of clone-evaluation currently running (cast-family and
+    /// assignment-family type snapshots recurse through `check_expr` on
+    /// cloned nodes; the post-inner diagnostics hooks must not fire there,
+    /// or every diagnostic doubles). Nonzero = inside a clone.
+    pub in_clone_eval: usize,
     /// Selector → is_class_method (from AST declarations), used to reject
     /// calling a class method on an instance or an instance method on a class.
     /// Selector → is_class_method (from AST declarations), used to reject
@@ -169,6 +202,13 @@ impl Checker {
             method_param_decls: HashMap::new(),
             method_returns: HashMap::new(),
             function_params: HashMap::new(),
+            function_returns: HashMap::new(),
+            function_variadic: HashMap::new(),
+            function_param_names: HashMap::new(),
+            block_alias_names: std::collections::HashSet::new(),
+            included_c_headers: Vec::new(),
+            has_quoted_c_include: false,
+            in_clone_eval: 0,
             method_kinds: HashMap::new(),
             shadowed_locals: Vec::new(),
             struct_eq_tags: Vec::new(),
@@ -577,6 +617,651 @@ impl Checker {
             _ => false,
         }
     }
+
+    // ─── C17 6.5.2.2 call family / 6.5.16 assignment family / 6.8.4.2
+    //     switch family ──────────────────────────────────────────────────
+    //
+    // All three land clang-measured wording/severity. Shared gates first —
+    // synthesized spans and Foundation's own sources stay silent, exactly
+    // like the cast family above.
+    fn family_span_gates(&self, line: usize, end_line: usize, end_col: usize) -> bool {
+        if end_line == 0 || end_col == 0 { return true; }
+        if self.is_foundation_source(line) { return true; }
+        false
+    }
+
+    /// Does the type name resolve to a known `enum` in this TU? Enum-typed
+    /// switch subjects are legal integer-ish subjects (switch exhaustiveness
+    /// is a separate, already-shipped check).
+    fn is_enum_type(&self, t: &AstType) -> bool {
+        t.tag == TagKind::Enum
+            || t.name.as_ref().is_some_and(|n| {
+                self.enum_members.contains_key(n)
+                    || self.enum_alias_tags.contains_key(n)
+            })
+    }
+
+    // ─── call family (C17 6.5.2.2) ──────────────────────────────────────
+    //
+    // clang-measured (probe_call / probe2 / probe3, clang 18, LP64):
+    //   `too few arguments to function call, expected 2, have 1`      error, caret at `)`
+    //   `too many arguments to function call, expected 3, have 4`     error, caret at `)`
+    //   `too many arguments to function call, expected single argument 'a',
+    //      have 2 arguments`                                          error (1-param fns quote the name)
+    //   `called object type 'int' is not a function or function pointer` error, caret at `(`
+    //   `call to undeclared function 'f'; ISO C99 and later do not support
+    //      implicit function declarations`                            error, caret at name
+    fn check_call_family(&mut self, e: &AstExpr) {
+        if Self::family_span_gates(self, e.line, e.end_line, e.end_col) { return; }
+        let Some((name, arg_count)) = (match &e.data {
+            AstExprData::FuncCall { name, args, .. } => Some((name.clone(), args.len())),
+            _ => None,
+        }) else { return };
+        // Callee-expression calls (`d.fn(9)` — a member function pointer,
+        // chained calls): no spelled name, the callee is checked recursively
+        // and the name-based undeclared test cannot apply.
+        if name.is_empty() { return; }
+        // Innermost-name-wins: a local/param/global of the same name shadows
+        // any function. Blocks (direct or typedef-aliased) and fn pointers
+        // are proper callees (skip); everything else fails the "called
+        // object" test in C.
+        if let Some(ty) = self.lookup_scope_var_type(&name) {
+            if ty.is_block || ty.is_fn_ptr { return; } // proper block invocation
+            if ty.prim == TypePrim::Named
+                && ty.name.as_ref().is_some_and(|n| self.block_alias_names.contains(n))
+            {
+                return; // block invocation through a typedef alias
+            }
+            self.check_error(e.line, e.col + name.len(), &format!(
+                "called object type '{}' is not a function or function pointer",
+                Self::type_display(&ty)));
+            return;
+        }
+        let Some(expected_types) = self.function_params.get(&name).cloned() else {
+            // Not a declared function → callee type/declaration checks.
+            if name.starts_with("__") || name.starts_with("jeti_") || name.starts_with('&') {
+                return; // compiler-internal namespace, never diagnose
+            }
+            if let Some(ref st) = self.symtab {
+                if st.lookup(&name).is_some() { return; }
+            }
+            // Passthrough headers and quoted includes declare functions the
+            // AST never saw (escape hatch, not the normal channel — §1 决策).
+            // The quoted-include escape hatch is un-auditable in total, so it
+            // disables the check for this TU; angle headers are gated through
+            // the curated C17-library table.
+            if self.has_quoted_c_include || Self::c_stdlib_declares(self, &name) { return; }
+            self.check_error(e.line, e.col, &format!(
+                "call to undeclared function '{}'; ISO C99 and later do not support implicit function declarations",
+                name));
+            return;
+        };
+        if *self.function_variadic.get(&name).unwrap_or(&false) { return; }
+        if Self::refs_jeti_synth(e) { return; }
+        if expected_types.is_empty() && arg_count == 1 {
+            // Ambiguous empty signature (parser dropped the parameter chain):
+            // stay silent rather than guess.
+            return;
+        }
+        // Caret at the closing parenthesis — measured on three shapes.
+        let caret = if e.end_line == e.line { e.end_col.saturating_sub(1) } else { e.end_col };
+        if arg_count < expected_types.len() {
+            self.check_error(e.end_line, caret, &format!(
+                "too few arguments to function call, expected {}, have {}",
+                expected_types.len(), arg_count));
+        } else if arg_count > expected_types.len() {
+            if expected_types.len() == 1 {
+                let pname = self.function_param_names.get(&name)
+                    .and_then(|v| v.first())
+                    .and_then(|p| p.clone())
+                    .unwrap_or_else(|| "the parameter".to_string());
+                self.check_error(e.end_line, caret, &format!(
+                    "too many arguments to function call, expected single argument '{}', have {} arguments",
+                    pname, arg_count));
+            } else {
+                self.check_error(e.end_line, caret, &format!(
+                    "too many arguments to function call, expected {}, have {}",
+                    expected_types.len(), arg_count));
+            }
+        }
+    }
+
+    // ─── assignment family (C17 6.5.16) ─────────────────────────────────
+    //
+    // clang-measured (probe_assign / probe2 / probe_objc.m):
+    //   const target            error `cannot assign to variable 'cp' with
+    //                             const-qualified type 'int *const'`
+    //   cast target             error `assignment to cast is illegal, lvalue
+    //                             casts are not supported`
+    //   ptr ↔ ptr mismatch      WARN  `incompatible pointer types assigning
+    //                             to 'char *' from 'int *'`
+    //   int → ptr (variable)    error `incompatible integer to pointer
+    //                             conversion assigning to 'int *' from 'int';
+    //                             take the address with &`
+    //   ptr → int (plain value) error `incompatible pointer to integer
+    //                             conversion assigning to 'int' from 'int *';
+    //                             dereference with *`
+    //   ptr → int (&value)      same, but hint `remove &`
+    //   struct ← builtin/other  error `assigning to 'struct A' from
+    //                             incompatible type 'int'`
+    // Silent by measurement: `void *` both ways, 0/nil literal → pointer,
+    // id/Class/SEL/instancetype/NPObject* wildcards, child-class value into
+    // parent-class target (obj_wildcard_cast parity with codegen Phase 0).
+    fn check_assign_family(
+        &mut self,
+        e: &AstExpr,
+        target: &AstExpr,
+        value: &AstExpr,
+        vty_snapshot: Option<&AstType>,
+    ) {
+        // Only shapes whose static types both sides can prove get judged —
+        // everything else is silent, never guessed.
+        if Self::family_span_gates(self, e.line, e.end_line, e.end_col) { return; }
+        if Self::refs_jeti_synth(target) || Self::refs_jeti_synth(value) { return; }
+        // Lvalue-ness first (needs no types): casts as assignment targets.
+        if matches!(target.data, AstExprData::Cast { .. }) {
+            self.check_error(target.line, target.col,
+                "assignment to cast is illegal, lvalue casts are not supported");
+            return;
+        }
+        // Target type: scope-frames only (see assign_target_type). The clone
+        // snapshot would answer `int` for `self`/ivar reads — the loose
+        // fallback — which reported every `self = [super init]` and plain
+        // ivar store as a pointer/int conversion error (regression: TOMLEditor).
+        let Some(tty) = self.assign_target_type(target) else { return };
+        // const target (probe ⑩): clang quotes the variable back.
+        if tty.is_const {
+            if let AstExprData::VarRef { name, .. } = &target.data {
+                self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
+                    "cannot assign to variable '{}' with const-qualified type '{}'",
+                    name, Self::type_display(&tty)));
+                return;
+            }
+        }
+        // Value type: the snapshot from clone-evaluation, with calls typed
+        // through the declared return-type table. A call with NO tracked
+        // return (`va_arg`, extern passthrough decls) is outside this
+        // family's proof — the checker's call arm answers `int` loosely,
+        // which would misreport `p = v()`; silent instead.
+        let Some(mut vty) = vty_snapshot.cloned() else { return };
+        if let AstExprData::FuncCall { name, .. } = &value.data {
+            match self.function_returns.get(name).cloned().flatten() {
+                Some(rt) => vty = rt,
+                None => return,
+            }
+        }
+        // `&x` in value place: the loose Unary arm answers the operand's
+        // type; the address-of shape is a pointer TO that type. Only plain
+        // variable operands are folded (probe2 ⑰ measured this shape).
+        if let AstExprData::Unary { op, operand, .. } = &value.data {
+            if *op == 4 {
+                if let AstExprData::VarRef { name, .. } = &operand.data {
+                    if let Some(t) = self.lookup_scope_var_type(name) {
+                        let mut pt = t.clone();
+                        pt.is_pointer = true;
+                        vty = pt;
+                    }
+                }
+            }
+        }
+        // Value shapes the loose type model collapses to `int` (Binary,
+        // Ternary, Comma, subscript/member reads) are outside this family's
+        // proof — pointer-arithmetic and member loads would misreport here.
+        // `&x` IS judgeable — the wrap above supplies its pointer type.
+        if !Self::assign_value_shape_judgeable(value) { return; }
+        let v_is_zero_literal = Self::is_nil_or_zero(value);
+        // Both pointer-like: the incompatible-pointer sub-family. `void *`
+        // joins implicitly (C17 6.3.2.3p1-2 — probe2 ⑫⑬ silent), and the
+        // ObjC wildcards mirror codegen's obj_wildcard_cast.
+        if Self::is_pointer_like(&tty) && Self::is_pointer_like(&vty) {
+            if tty.prim == TypePrim::Void || vty.prim == TypePrim::Void { return; }
+            if Self::obj_wildcard(&tty) || Self::obj_wildcard(&vty) { return; }
+            let tn = Self::named_class_of(&tty);
+            let vn = Self::named_class_of(&vty);
+            match (&tn, &vn) {
+                // Same named class: the same spelling joins itself.
+                (Some(t), Some(v)) if t == v => return,
+                // Both primitive pointers with the same spelling (`int *` ←
+                // `int *`): silent. Different spellings fall through to the
+                // warning (char * ← int * — probe_assign ③ measured).
+                (None, None) if Self::type_display(&tty) == Self::type_display(&vty) => return,
+                _ => {}
+            }
+            // Child-class value into parent-class target is the ordinary
+            // upcast (probe_objc ① silent); everything else warns.
+            if let (Some(tn), Some(vn)) = (&tn, &vn) {
+                if let Some(ref st) = self.symtab {
+                    if self.is_subclass_of(st, vn, tn) { return; }
+                }
+            }
+            self.check_warning_over(e.line, e.col, e.end_line, e.end_col, &format!(
+                "incompatible pointer types assigning to '{}' from '{}'",
+                Self::type_display(&tty), Self::type_display(&vty)));
+            return;
+        }
+        // Pointer-target ← scalar (probe ⑭): zero/nil literals are the
+        // documented null constant, silent.
+        if Self::is_pointer_like(&tty) && Self::is_integral_type(&vty) && !v_is_zero_literal {
+            let hint = Self::ptr_source_hint(value, "take the address with &");
+            self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
+                "incompatible integer to pointer conversion assigning to '{}' from '{}'; {}",
+                Self::type_display(&tty), Self::type_display(&vty), hint));
+            return;
+        }
+        // Scalar-target ← pointer (probe ⑯⑰): hint differs by shape —
+        // `&x` wants its & removed, a dereferenceable variable wants `*`.
+        if Self::is_integral_type(&tty) && Self::is_pointer_like(&vty) {
+            let hint = Self::ptr_source_hint(value, "dereference with *");
+            self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
+                "incompatible pointer to integer conversion assigning to '{}' from '{}'; {}",
+                Self::type_display(&tty), Self::type_display(&vty), hint));
+            return;
+        }
+        // Struct target ← builtin / foreign struct (probe ⑮⑱ — both measured
+        // under one wording; the value side spells `struct T` with its tag).
+        if tty.is_struct && !vty.is_block && (!vty.is_struct || tty.name != vty.name) {
+            self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
+                "assigning to '{}' from incompatible type '{}'",
+                Self::struct_spell(&tty),
+                if vty.is_struct { Self::struct_spell(&vty) } else { Self::type_display(&vty) }));
+        }
+    }
+
+    /// Type of an assignment target — **simple declared variables only**, and
+    /// only types that were *declared*: `scope_vars` frames are written by
+    /// real declarations (globals in frame 0, params/locals in body frames)
+    /// plus the compiler-synthetic `__jeti_*` state. Everything the loose
+    /// resolver answers by fallback (`self` in methods, ivar reads) never
+    /// reaches here, because those shapes are either not VarRefs the family
+    /// accepts or not frame entries at all — so the conversion family stays
+    /// silent instead of misfiring on `self = [super init]`.
+    fn assign_target_type(&self, target: &AstExpr) -> Option<AstType> {
+        let AstExprData::VarRef { name, .. } = &target.data else { return None };
+        self.lookup_scope_var_type(name)
+    }
+
+    /// Does this identifier spelling name something the symbol table really
+    /// knows — directly, or through a `@using` fold? Generic type-arg
+    /// suffixes are stripped first (`LogBuffer<LogTool::LogEntry *>` names
+    /// the class `LogBuffer` / `LogTool::LogBuffer`).
+    fn symtab_knows_spelling(&self, name: &str) -> bool {
+        let base = name.split('<').next().unwrap_or(name);
+        let Some(ref st) = self.symtab else { return false };
+        if st.lookup(base).is_some() || st.find_class(base).is_some() {
+            return true;
+        }
+        if let Some(u) = st.find_using(base) {
+            return st.lookup(&u.fqn).is_some() || st.find_class(&u.fqn).is_some();
+        }
+        false
+    }
+
+    /// Static type of a dereference-chain subject (`**p`, `*p`) for the
+    /// switch family: the loose Unary arm does NOT deref (it returns the
+    /// operand's own type), so `switch (*p)` over `char *p` looked like a
+    /// pointer subject and misfired the integrality check (regression:
+    /// TOMLEditor). Fold one deref level per `*`, through scope-frame types
+    /// only; `None` = cannot prove → silent.
+    fn deref_subject_type(&self, e: &AstExpr) -> Option<AstType> {
+        if let AstExprData::Unary { op, operand, .. } = &e.data {
+            if *op == 2 {
+                let base = match &operand.data {
+                    AstExprData::VarRef { name, .. } => self.lookup_scope_var_type(name),
+                    _ => self.deref_subject_type(operand),
+                };
+                if let Some(mut t) = base {
+                    if t.is_pointer {
+                        t.is_pointer = false;
+                        return Some(t);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Value shapes whose inferred type is trustworthy for the mixed
+    /// conversions: literals, declared variables, explicit casts, message
+    /// sends and calls (through the tables below). Everything else — whose
+    /// model collapses to `int` — stays silent.
+    fn assign_value_shape_judgeable(value: &AstExpr) -> bool {
+        matches!(&value.data,
+            AstExprData::Int(_) | AstExprData::Char(_) | AstExprData::Bool(_)
+            | AstExprData::Float(_) | AstExprData::FloatRaw(_)
+            | AstExprData::String(_) | AstExprData::AtString(_)
+            | AstExprData::VarRef { .. } | AstExprData::Cast { .. }
+            | AstExprData::MsgSend { .. } | AstExprData::FuncCall { .. }
+            // address-of: judgeable only through the wrap in
+            // check_assign_family (`&plain-variable`); the wrap guarantees
+            // the pointer type, so the shape is proven.
+            | AstExprData::Unary { op: 4, .. })
+    }
+
+    /// clang appends a fix-it hint to the int↔pointer conversion errors; the
+    /// hint depends on the value's shape (`v = &v` → "remove &", plain
+    /// variable → "dereference with *"). `default_hint` for the int→pointer
+    /// direction ("take the address with &") unless the shape says otherwise.
+    fn ptr_source_hint(value: &AstExpr, default_hint: &'static str) -> &'static str {
+        match &value.data {
+            AstExprData::Unary { op, .. } if *op == 4 => "remove &",
+            AstExprData::Unary { op, .. } if *op == 2 => "dereference with *",
+            AstExprData::VarRef { .. } => default_hint,
+            _ => "", // unmeasured shape — no hint rather than a wrong one
+        }
+    }
+
+    /// Object-pointer wildcard parity with codegen's `obj_wildcard_cast`
+    /// (Phase 0): id / instancetype / Class / SEL / NPObject * are the
+    /// neutral pointer spellings; substantive class pointers join only
+    /// through them.
+    fn obj_wildcard(t: &AstType) -> bool {
+        matches!(t.prim, TypePrim::Id | TypePrim::Instancetype | TypePrim::Class | TypePrim::Sel)
+            || t.name.as_deref() == Some("NPObject")
+    }
+
+    /// Struct spelling in diagnostics the way clang quotes it back: it keeps
+    /// the tag keyword (`struct A`), which `type_display` alone does not add.
+    fn struct_spell(t: &AstType) -> String {
+        format!("{} {}", t.tag.keyword(), Self::type_display(t))
+    }
+
+    // ─── switch family (C17 6.8.4.2) ────────────────────────────────────
+    //
+    // clang-measured (probe_switch):
+    //   pointer/struct/float subject   error `statement requires expression
+    //     of integer type ('int *' invalid)` — caret at `switch`
+    //   `case 1.5:`                    error `integer constant expression must
+    //     have integer type, not 'double'` — caret at the value
+    //   duplicate literal case         error `duplicate case value '1'` — caret at value
+    //   second `default:`              error `multiple default labels in one
+    //     switch` — caret at the second `default`
+    //   `case after default:`          legal (no diagnostic) — measured silent
+    fn check_switch_family(
+        &mut self,
+        switch_line: usize,
+        switch_col: usize,
+        switch_end_line: usize,
+        switch_end_col: usize,
+        expr: &AstExpr,
+        body: &AstStmt,
+    ) {
+        if Self::family_span_gates(self, switch_line, switch_end_line, switch_end_col) { return; }
+        // Subject integrality — only shapes whose static type is known get
+        // judged; unknown, enum, and lowering-synth subjects stay silent.
+        // Deref-chain subjects (`**p`) fold through deref_subject_type: the
+        // loose Unary typing does not deref and would misjudge `switch (*p)`
+        // over `char *p` as a pointer subject.
+        let subject_ty = if matches!(expr.data, AstExprData::Unary { .. }) {
+            self.deref_subject_type(expr)
+        } else {
+            expr.expr_type.as_deref().cloned()
+        };
+        if let Some(ty) = subject_ty {
+            if !Self::is_integral_type(&ty)
+                && !self.is_enum_type(&ty)
+                && !Self::refs_jeti_synth(expr)
+            {
+                self.check_error_over(switch_line, switch_col, switch_end_line, switch_end_col, &format!(
+                    "statement requires expression of integer type ('{}' invalid)",
+                    Self::type_display(&ty)));
+            }
+        }
+        // Case/default labels of THIS switch: the same walk shape as
+        // check_switch_exhaustiveness (labels at the switch body's level),
+        // evaluating only literal constants — expression-valued cases are
+        // not constant-folded here, and enum-member spellings stay out.
+        let mut seen: Vec<i64> = Vec::new();
+        let mut default_seen = false;
+        self.walk_switch_labels(body, &mut seen, &mut default_seen);
+    }
+
+    /// Duplicate/multi-default/label-well-formedness walk for one switch.
+    /// Nested switches are their own family — descent stops at them; labels
+    /// inside an arm's braces DO belong to this switch (C17 6.8.4.2p2),
+    /// mirroring clang's duplicate detection.
+    fn walk_switch_labels(&mut self, s: &AstStmt, seen: &mut Vec<i64>, default_seen: &mut bool) {
+        if matches!(&s.data, AstStmtData::Switch { .. }) { return; }
+        if Self::family_span_gates(self, s.line, s.end_line, s.end_col) { return; }
+        match &s.data {
+            AstStmtData::Case { value, body } => {                match &value.data {
+                    AstExprData::Int(v) => {
+                        if seen.contains(v) {
+                            self.check_error_over(value.line, value.col, value.end_line, value.end_col,
+                                &format!("duplicate case value '{}'", v));
+                        } else {
+                            seen.push(*v);
+                        }
+                    }
+                    AstExprData::Float(_) | AstExprData::FloatRaw(_) => {
+                        self.check_error_over(value.line, value.col, value.end_line, value.end_col,
+                            "integer constant expression must have integer type, not 'double'");
+                    }
+                    // Enum members, integer expressions, object literals:
+                    // not judged here (no constant folding in this checker).
+                    _ => {}
+                }
+                self.walk_switch_labels(body, seen, default_seen);
+            }
+            AstStmtData::Default(body) => {
+                if *default_seen {
+                    self.check_error_over(s.line, s.col, s.end_line, s.end_col,
+                        "multiple default labels in one switch");
+                }
+                *default_seen = true;
+                self.walk_switch_labels(body, seen, default_seen);
+            }
+            AstStmtData::Compound(v) => {
+                for st in v {
+                    self.walk_switch_labels(st, seen, default_seen);
+                }
+            }
+            AstStmtData::If { cond: _, then, else_ } => {
+                self.walk_switch_labels(then, seen, default_seen);
+                if let Some(el) = else_ {
+                    self.walk_switch_labels(el, seen, default_seen);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ─── stdlib callee whitelist (angle-header gated) ───────────────────
+    //
+    /// `#include <stdio.h>` etc. reach the C compiler verbatim (escape
+    /// hatch), so every function they declare is real at codegen time with
+    /// no AST trace. This table names the functions each C17 library header
+    /// declares (curated from the library clause — clang sources are off
+    /// limits). It is a whitelist gate for the undeclared-function check
+    /// ONLY; it never invents arity or type information.
+    fn c_stdlib_declares(&self, name: &str) -> bool {
+        const STDIO: &[&str] = &[
+            "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
+            "vsprintf", "vsnprintf", "puts", "putchar", "fputs", "fputc",
+            "fgets", "fgetc", "getc", "putc", "getchar", "gets", "ungetc",
+            "fopen", "fclose", "fflush", "fread", "fwrite", "fseek", "ftell",
+            "rewind", "feof", "ferror", "remove", "rename", "tmpfile",
+            "perror", "getline", "sscanf", "fscanf", "scanf",
+            "setvbuf", "setbuf", "fsetpos", "fgetpos",
+        ];
+        const STDLIB: &[&str] = &[
+            "malloc", "calloc", "realloc", "free", "abort", "exit", "_Exit",
+            "atexit", "at_quick_exit", "quick_exit", "rand", "srand",
+            "qsort", "bsearch", "abs", "labs", "llabs", "div", "ldiv",
+            "getenv", "setenv", "putenv", "unsetenv", "system", "strtol",
+            "strtoul", "strtoll", "strtoull", "strtod", "strtof", "strtold",
+            "atoi", "atol", "atoll", "strdup", "mkstemp", "mkdtemp", "rand_r",
+        ];
+        const STRING: &[&str] = &[
+            "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
+            "strchr", "strrchr", "strstr", "strlen", "memset", "memcmp",
+            "memcpy", "memmove", "memchr", "strtok", "strerror", "strspn",
+            "strcspn", "strpbrk", "strcoll", "strxfrm",
+        ];
+        const TIME: &[&str] = &[
+            "time", "clock", "localtime", "gmtime", "mktime", "strftime",
+            "difftime", "nanosleep", "timegm",
+        ];
+        const CTYPE: &[&str] = &[
+            "isdigit", "isalpha", "isalnum", "isspace", "isupper", "islower",
+            "ispunct", "isprint", "isgraph", "iscntrl", "isxdigit", "toupper",
+            "tolower", "isblank",
+        ];
+        const STDARG: &[&str] = &["va_start", "va_arg", "va_end", "va_copy"];
+        const MATH: &[&str] = &[
+            "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "exp",
+            "log", "log2", "log10", "pow", "sqrt", "cbrt", "fmod", "ceil",
+            "floor", "fabs", "round", "rint", "trunc", "fmin", "fmax",
+            "hypot", "copysign", "nan", "nearbyint",
+        ];
+        const SETJMP: &[&str] = &["setjmp", "longjmp"];
+        const UNISTD: &[&str] = &[
+            "unlink", "getpid", "getppid", "getuid", "getgid", "getopt",
+            "access", "dup", "dup2", "isatty", "ttyname", "fsync", "fork",
+            "execve", "usleep", "getcwd", "chdir",
+        ];
+        const SIGNAL: &[&str] = &[
+            "signal", "raise", "kill", "sigemptyset", "sigaddset",
+            "sigfillset", "sigprocmask", "sigismember", "sigdelset",
+            "sigaction", "sigpending", "sigsuspend",
+        ];
+        const DIRENT: &[&str] = &["opendir", "readdir", "closedir"];
+        const STDBOOL: &[&str] = &[];
+        const STDDEF: &[&str] = &[];
+        const STDINT: &[&str] = &[];
+        const PTHREAD: &[&str] = &[
+            "pthread_create", "pthread_join", "pthread_detach", "pthread_exit",
+            "pthread_mutex_lock", "pthread_mutex_unlock", "pthread_self",
+            "pthread_cancel", "pthread_cond_wait", "pthread_cond_signal",
+            "pthread_attr_init", "pthread_attr_destroy", "pthread_mutex_init",
+            "pthread_mutex_destroy", "pthread_cond_init", "pthread_cond_destroy",
+        ];
+        const COMPLEX: &[&str] = &[
+            "creal", "cimag", "crealf", "cimagf", "cabs", "cabsf", "carg",
+            "cargf", "conj", "conjf",
+        ];
+        for h in &self.included_c_headers {
+            let table = match h.as_str() {
+                "stdio.h" => STDIO,
+                "stdlib.h" => STDLIB,
+                "string.h" => STRING,
+                "time.h" => TIME,
+                "ctype.h" => CTYPE,
+                "stdarg.h" => STDARG,
+                "math.h" => MATH,
+                "setjmp.h" => SETJMP,
+                "unistd.h" => UNISTD,
+                "signal.h" => SIGNAL,
+                "dirent.h" => DIRENT,
+                "stdbool.h" => STDBOOL,
+                "stddef.h" => STDDEF,
+                "stdint.h" => STDINT,
+                "pthread.h" => PTHREAD,
+                "complex.h" => COMPLEX,
+                _ => continue,
+            };
+            if table.contains(&name) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Same gate, for *bindings*: the globals and macro constants C headers
+    /// declare (`errno`, `stdin`, `STDIN_FILENO`, `ECHO`, `INT_MAX`…). The
+    /// use-of-undeclared-identifier check consults this before firing — a
+    /// mention of `stderr` is real C that reaches the compiler through the
+    /// passthrough header, never through the AST.
+    fn c_stdlib_binds(&self, name: &str) -> bool {
+        const ERRNO: &[&str] = &[
+            "errno", "EPERM", "ENOENT", "ESRCH", "EINTR", "EIO", "ENXIO", "E2BIG",
+            "ENOEXEC", "EBADF", "ECHILD", "EAGAIN", "ENOMEM", "EACCES", "EFAULT",
+            "EBUSY", "EEXIST", "EXDEV", "ENODEV", "ENOTDIR", "EISDIR", "EINVAL",
+            "ENFILE", "EMFILE", "ENOTTY", "EFBIG", "EPIPE", "EDOM", "ERANGE",
+            "EDEADLK", "ENAMETOOLONG", "ENOLCK", "ENOSYS", "ENOTEMPTY", "ELOOP",
+            "EWOULDBLOCK", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED",
+            "EADDRINUSE", "EINPROGRESS", "EHOSTUNREACH", "ENETUNREACH",
+        ];
+        const STDIO: &[&str] = &[
+            "stdin", "stdout", "stderr", "EOF", "FILE", "BUFSIZ", "SEEK_SET",
+            "SEEK_CUR", "SEEK_END",
+        ];
+        const UNISTD: &[&str] = &[
+            "STDIN_FILENO", "STDOUT_FILENO", "STDERR_FILENO", "environ",
+            "optarg", "optind", "opterr", "optopt",
+        ];
+        const TERMIOS: &[&str] = &[
+            "ECHO", "ECHONL", "ECHOE", "ECHOK", "ICANON", "ISIG", "IEXTEN",
+            "OPOST", "ONLCR", "O_NONBLOCK", "VMIN", "VTIME", "TCSANOW",
+            "TCSADRAIN", "TCSAFLUSH", "IGNBRK", "BRKINT", "PARMRK", "ISTRIP",
+            "INLCR", "IGNCR", "ICRNL", "IXON", "IXOFF", "PARENB", "PARODD",
+            "CS7", "CS8", "CSTOPB", "CREAD", "CLOCAL", "TIOCGWINSZ",
+        ];
+        const FCNTL: &[&str] = &[
+            "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND",
+            "O_EXCL", "O_NONBLOCK", "O_SYNC", "F_GETFL", "F_SETFL", "F_GETFD",
+            "F_SETFD",
+        ];
+        const SIGNAL: &[&str] = &[
+            "SIGINT", "SIGTERM", "SIGKILL", "SIGSEGV", "SIGHUP", "SIGPIPE",
+            "SIGABRT", "SIGQUIT", "SIG_DFL", "SIG_IGN", "SIG_ERR",
+        ];
+        const LIMITS: &[&str] = &[
+            "CHAR_BIT", "SCHAR_MIN", "SCHAR_MAX", "UCHAR_MAX", "CHAR_MIN",
+            "CHAR_MAX", "SHRT_MIN", "SHRT_MAX", "USHRT_MAX", "INT_MIN",
+            "INT_MAX", "UINT_MAX", "LONG_MIN", "LONG_MAX", "ULONG_MAX",
+            "LLONG_MIN", "LLONG_MAX", "ULLONG_MAX", "SIZE_MAX", "SSIZE_MAX",
+            "INT8_MAX", "INT16_MAX", "INT32_MAX", "INT64_MAX", "UINT8_MAX",
+            "UINT16_MAX", "UINT32_MAX", "UINT64_MAX", "INT32_MIN", "INT64_MIN",
+            "PATH_MAX", "NAME_MAX",
+        ];
+        const MATH: &[&str] = &[
+            "M_PI", "M_E", "M_LOG2E", "M_SQRT2", "INFINITY", "NAN", "HUGE_VAL",
+            "HUGE_VALF",
+        ];
+        const TIME: &[&str] = &["CLOCKS_PER_SEC"];
+        const STDLIB: &[&str] = &["EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX"];
+        // Bindings are a transitive surface: `#import <termios.h>` pulls
+        // unistd's STDIN_FILENO, stdio.h pulls EOF, errno.h pulls the E*
+        // codes. The gate is therefore "the TU included at least one audited
+        // C header", and the whole curated union applies. A missed diagnostic
+        // here is the escape hatch working as designed; a false error would
+        // not be.
+        const BINDINGS_HEADERS: &[&str] = &[
+            "errno.h", "stdio.h", "unistd.h", "termios.h", "fcntl.h",
+            "signal.h", "limits.h", "stdint.h", "math.h", "time.h", "stdlib.h",
+        ];
+        if !self.included_c_headers.iter().any(|h| BINDINGS_HEADERS.contains(&h.as_str())) {
+            return false;
+        }
+        const TABLES: &[&[&str]] = &[ERRNO, STDIO, UNISTD, TERMIOS, FCNTL, SIGNAL, LIMITS, MATH, TIME, STDLIB];
+        TABLES.iter().any(|t| t.contains(&name))
+    }
+
+    /// C headers the pipeline already collected (`pre.c_headers`, whole
+    /// `#include <…>` / `#import <…>` lines — the preprocessor routes both
+    /// spellings of C-header includes here verbatim). Angle spells become
+    /// the audited gate for the undeclared-function check; any quoted C
+    /// include sets `has_quoted_c_include` (un-auditable extern surface →
+    /// check off).
+    pub fn feed_included_headers(&mut self, lines: &[String]) {
+        for line in lines {
+            let t = line.trim();
+            let spec = t.strip_prefix("#include")
+                .or_else(|| t.strip_prefix("#import"))
+                .or_else(|| t.strip_prefix("#include_next"))
+                .map(str::trim);
+            let Some(spec) = spec else { continue };
+            if let Some(h) = spec.strip_prefix('<').and_then(|x| x.strip_suffix('>')) {
+                let h = h.trim();
+                if !self.included_c_headers.iter().any(|x| x == h) {
+                    self.included_c_headers.push(h.to_string());
+                }
+            } else if spec.starts_with('"') && spec.contains(".h") {
+                self.has_quoted_c_include = true;
+            }
+        }
+    }
+
 
     /// Do any operand references point to a lowering-desugar internal
     /// (`__jeti_*` variables — async task state, eh exception state)? The
@@ -1279,6 +1964,18 @@ impl Checker {
     /// `method_params` / `function_params` maps.  Runs once before checking.
     fn collect_signatures(&mut self, decl: &AstDecl) {
         match &decl.data {
+            AstDeclData::Typedef { aliased_type: Some(at), .. } => {
+                // Block-typed and function-pointer typedefs (`typedef void
+                // (^SimpleBlock)(void)`, `typedef int (*IntFn)(int)`): the
+                // alias spelling carries no callee flag on variable types,
+                // so the call family's called-object guard consults this
+                // registry to keep calls through aliases legal.
+                if at.is_block || at.is_fn_ptr {
+                    if let Some(alias) = &decl.name {
+                        self.block_alias_names.insert(alias.clone());
+                    }
+                }
+            }
             AstDeclData::Class { methods, properties, .. } => {
                 let cls_name = decl.name.clone();
                 for m in methods {
@@ -1362,15 +2059,29 @@ impl Checker {
                     self.method_param_decls.entry(sel.clone()).or_default().push(v);
                 }
             }
-            AstDeclData::Function { params, .. } => {
+            AstDeclData::Function { params, return_type, has_variadic, .. } => {
                 if let Some(ref name) = decl.name {
                     let mut v = Vec::new();
+                    let mut names = Vec::new();
                     let mut cur = params.as_ref().map(|b| &**b);
                     while let Some(p) = cur {
-                        v.push(p.par_type.as_ref().map(|pt| Self::cst_type_to_ast_type(pt)));
+                        // `(void)` parameter lists are the C17 6.7.6.3 spelling
+                        // of "no parameters" — they are not a parameter (clang
+                        // would count zero). An unnamed parameter of other
+                        // type still counts as a position.
+                        let is_void_marker = p.par_type.as_ref().map_or(false, |pt| {
+                            pt.prim == TypePrim::Void && !pt.is_pointer && p.name.is_none()
+                        });
+                        if !is_void_marker {
+                            v.push(p.par_type.as_ref().map(|pt| Self::cst_type_to_ast_type(pt)));
+                            names.push(p.name.clone());
+                        }
                         cur = p.next.as_ref().map(|n| &**n);
                     }
                     self.function_params.insert(name.clone(), v);
+                    self.function_param_names.insert(name.clone(), names);
+                    self.function_returns.insert(name.clone(), return_type.as_ref().map(|rt| (**rt).clone()));
+                    self.function_variadic.insert(name.clone(), *has_variadic);
                 }
             }
             _ => {}
@@ -1561,9 +2272,45 @@ impl Checker {
         // this pass needs the node's span fields.
         if let AstExprData::Cast { target_type, expr } = &e.data {
             let mut src_expr = expr.clone();
+            self.in_clone_eval += 1;
             let src_ty = self.check_expr(&mut src_expr);
+            self.in_clone_eval -= 1;
             self.check_cast_types(&e.line, &e.col, e.end_line, e.end_col,
                                   target_type, &src_expr, src_ty.as_ref());
+        }
+        // C17 6.5.2.2 call family — post-inner so the node's span fields
+        // exist, and only outside clone evaluation (double-reporting).
+        if self.in_clone_eval == 0 {
+            if matches!(&e.data, AstExprData::FuncCall { .. }) {
+                self.check_call_family(e);
+            }
+            // C17 6.5.16 assignment family — same post-inner shape. The
+            // inner Assign arm only visits the target, so the value's expr
+            // type is recorded here through cloned evaluation.
+            if let AstExprData::Assign { target, value } = &e.data {
+                let mut tclone = (**target).clone();
+                let mut vclone = (**value).clone();
+                self.in_clone_eval += 1;
+                // Target eval still runs for its own diagnostics (undeclared
+                // identifiers, ivar-in-class-method); the family reads the
+                // target type from the scope frames instead — snapshots of
+                // the loose chain are not trustworthy for conversions.
+                self.check_expr(&mut tclone);
+                let vt = self.check_expr(&mut vclone);
+                self.in_clone_eval -= 1;
+                // Call family inside assignment values: the clone eval skips
+                // the post-inner hooks, so the value's own call gets its
+                // family check here. Nested calls (inside args, inside the
+                // target chain) are out of this tranche's proof — the
+                // plan's gap list records it.
+                if let AstExprData::FuncCall { .. } = &vclone.data {
+                    self.check_call_family(&vclone);
+                }
+                if let AstExprData::FuncCall { .. } = &tclone.data {
+                    self.check_call_family(&tclone);
+                }
+                self.check_assign_family(e, &tclone, &vclone, vt.as_ref());
+            }
         }
         // `a[i]` on an object receiver is not C indexing — C rejects it outright
         // ("operand of type 'NPArray' where arithmetic or pointer type is
@@ -2232,6 +2979,21 @@ impl Checker {
                         }
                     }
                 }
+                // C passthrough headers declare globals and macro constants
+                // (`errno`, `stdin`, `STDIN_FILENO`, `ECHO`…) the AST never
+                // sees — same escape hatch as the callee whitelist, gated on
+                // the headers this TU actually included.
+                if self.c_stdlib_binds(name) {
+                    return Some(AstType::new(TypePrim::Int));
+                }
+                // Generic instantiations (`Box<NPString *>`) and
+                // namespace-qualified spellings (`A::B::List<T *>`) arrive
+                // as ONE identifier whose base names a real class — possibly
+                // through a `@using` fold. Strip the type-arg suffix, then
+                // consult the table directly and via the using entry.
+                if self.symtab_knows_spelling(name) {
+                    return Some(AstType::new(TypePrim::Int));
+                }
                 self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!("use of undeclared identifier '{}'", name));
                 None
             }
@@ -2665,8 +3427,12 @@ impl Checker {
                 }
                 t
             }
-            AstExprData::Assign { target, .. } => {
-                self.check_expr(&mut *target.clone())
+            AstExprData::Assign { target: _, value: _ } => {
+                // Target/value checking happens after `check_expr_inner`
+                // (the assignment-family hook evaluates clones of both for
+                // their static types); doing it here as well made every
+                // target diagnostic record twice.
+                None
             }
             AstExprData::Cast { target_type, .. } => {
                 Some(target_type.clone())
@@ -2902,6 +3668,10 @@ AstExprData::Subscript { object, key, .. } => {
 
     /// Check a statement
     pub fn check_stmt(&mut self, s: &mut AstStmt) {
+        // Span scalars captured up front so family checks can be invoked
+        // from inside `match &mut s.data` without double-borrowing the
+        // statement (see check_switch_family).
+        let (s_line, s_col, s_end_line, s_end_col) = (s.line, s.col, s.end_line, s.end_col);
         match &mut s.data {
             AstStmtData::Expr(e) => { self.check_expr(e); }
             AstStmtData::Compound(stmts) => {
@@ -2979,6 +3749,41 @@ AstExprData::Subscript { object, key, .. } => {
                 self.check_stmt(&mut *body);
             }
             AstStmtData::ForIn { var, collection, body } => {
+                // The loop variable (`for (id item in arr)`) is a valid
+                // binding inside the body but is never a *declaration* the
+                // checker would meet — binder no longer registers mention
+                // identifiers (undeclared check honesty), so this is its
+                // one scope entry. `None`-typed spellings bind as `id`
+                // (objects are the for-each domain; scalars keep their
+                // declared type through the var expr).
+                let forin_var_ty = match &var.data {
+                    AstExprData::VarRef { name, .. } => {
+                        let mut t = AstType::new(TypePrim::Id);
+                        t.is_pointer = true;
+                        if let Some(scope) = self.scope_vars.last_mut() {
+                            if scope.iter().all(|(n, _)| n != name) {
+                                scope.push((name.clone(), t.clone()));
+                            }
+                        }
+                        Some(t)
+                    }
+                    AstExprData::Cast { target_type, expr } => {
+                        if let AstExprData::VarRef { name, .. } = &expr.data {
+                            let mut t = target_type.clone();
+                            t.is_pointer = t.is_pointer || Self::is_pointer_like(&t);
+                            if let Some(scope) = self.scope_vars.last_mut() {
+                                if scope.iter().all(|(n, _)| n != name) {
+                                    scope.push((name.clone(), t.clone()));
+                                }
+                            }
+                            Some(t)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                let _ = forin_var_ty;
                 self.check_expr(&mut *var);
                 self.check_expr(&mut *collection);
                 self.check_stmt(&mut *body);
@@ -2986,6 +3791,10 @@ AstExprData::Subscript { object, key, .. } => {
             AstStmtData::Switch { expr, body } => {
                 self.check_expr(&mut *expr);
                 self.check_stmt(&mut *body);
+                // C17 6.8.4.2 switch family (subject integrality, duplicate
+                // literal cases, multiple defaults) — BEFORE the enum
+                // exhaustiveness check, which assumes the same walk shape.
+                self.check_switch_family(s_line, s_col, s_end_line, s_end_col, expr, body);
                 self.check_switch_exhaustiveness(expr, body);
             }
             AstStmtData::Case { value, body } => {
@@ -3180,7 +3989,15 @@ AstExprData::Subscript { object, key, .. } => {
         }
         let mut p = params.as_ref().map(|b| &**b);
         while let Some(param) = p {
-            if let Some(ref name) = param.name {
+            // Function-pointer parameters spell their declarator name inside
+            // the type (`int (*cb)(int)` → par_type.block_name), not on the
+            // parameter node — both spellings declare `cb`.
+            let pname = param.name.clone().or_else(|| {
+                param.par_type.as_ref().and_then(|t| {
+                    if t.is_fn_ptr { t.block_name.clone() } else { None }
+                })
+            });
+            if let Some(ref name) = pname {
                 if let Some(scope) = self.scope_vars.last_mut() {
                     if !scope.iter().any(|(n, _)| n == name) {
                         let t = param.par_type.as_ref()
@@ -3483,6 +4300,9 @@ AstExprData::Subscript { object, key, .. } => {
         for decl in &unit.decls {
             self.collect_enums(decl);
         }
+        // Angle-bracket C headers feed through `Pipeline::prepare` from
+        // `pre.c_headers` (`feed_included_headers`) — the passthrough include
+        // lines live in the preprocessor, not in the AST.
         // Map `typedef struct Tag { ... } Alias;` so a variable declared with
         // the alias name still compares as a value struct (see struct_alias_tags).
         for decl in &unit.decls {

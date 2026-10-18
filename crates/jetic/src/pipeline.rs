@@ -387,6 +387,9 @@ impl Pipeline {
             checker.no_arc = self.no_arc;
             checker.source_map = Some(sm.clone());
             checker.eh_checked = self.eh_checked;
+            // Passthrough includes gate the undeclared-function check (the
+            // stdlib callee whitelist).
+            checker.feed_included_headers(&pre.c_headers);
             if checker.check(&mut ast) != 0 {
                 diags.extend(checker.errors_as_diagnostics());
             }
@@ -632,6 +635,9 @@ impl Pipeline {
             // bare `throws` "must really throw" rule cannot see the
             // statements it is meant to reconcile.
             checker.eh_checked = self.eh_checked;
+            // Passthrough includes gate the undeclared-function check (the
+            // stdlib callee whitelist).
+            checker.feed_included_headers(&pre.c_headers);
             if checker.check(&mut ast) != 0 {
                 return Err(format!("Type checking failed:\n{}", render_checker_diags(&checker.errors_as_diagnostics(), &pre.source_map)));
             }
@@ -1059,6 +1065,36 @@ mod eh_default_tests {
         let mut p = Pipeline::new();
         p.eh_checked = false;
         assert!(!p.eh_checked, "-eh legacy must produce the sjlj backend");
+    }
+
+    /// `-Werror` conveyance: a checker warning becomes a hard failure with
+    /// its own header, while the same source without the flag transpiles and
+    /// keeps the warning as a warning. The checker families (6.5.x) are
+    /// mostly warnings — this is the path that promotes them per the
+    /// "clang 对齐 + -Werror" severity ruling (plan §5).
+    #[test]
+    fn werror_promotes_checker_warnings_to_failure() {
+        // `p = c` on mismatched pointer types is a warning, never an error.
+        let src = "\
+int main(void) {
+    int v = 0;
+    int *p = &v;
+    char *c = 0;
+    p = c;
+    return 0;
+}
+";
+        let mut plain = Pipeline::new();
+        plain.werror = false;
+        let out = plain.transpile(src, "werror_probe.jeti");
+        assert!(out.is_ok(), "warning-only source must transpile: {out:?}");
+
+        let mut strict = Pipeline::new();
+        strict.werror = true;
+        let err = strict.transpile(src, "werror_probe.jeti")
+            .expect_err("-Werror must turn the warning into a failure");
+        assert!(err.contains("Type checking failed (-Werror)"), "{err}");
+        assert!(err.contains("incompatible pointer types assigning to 'int *' from 'char *'"), "{err}");
     }
 }
 
