@@ -1614,10 +1614,35 @@ fn rewrite_expr_stmt(_e: &mut AstExpr) {}
 /// the flag must stay armed across the invoke boundary, and the block's own
 /// return type is not ours to return from.
 fn rewrite_expr(e: &mut AstExpr, fx: &EffectTable) {
-    if let AstExprData::Block { body: Some(b), .. } = &mut e.data {
+    if let AstExprData::Block { return_type, body: Some(b), .. } = &mut e.data {
         if let AstStmtData::Compound(stmts) = &mut b.data {
-            let zero = return_zero(&AstType::new(TypePrim::Id));
+            let rt = return_type.as_ref()
+                .map(|t| t.as_ref().clone())
+                .unwrap_or_else(|| AstType::new(TypePrim::Id));
+            let zero = return_zero(&rt);
             rewrite_stmts(stmts, &zero, fx);
+            // A guarded tail can hop over a value `return` (flag armed → the
+            // guard falls through its compound end). Function bodies answer
+            // that with the `if_armed_ret` tail; a block literal body is its
+            // own C function for clang, which makes a missing value on the
+            // fallthrough path a hard error — micrit_rogue:
+            //   "non-void block does not return a value in all control paths"
+            // (errors are not suppressed by -w). Same flag-state semantics as
+            // the comment above: with the flag armed no value is consumed —
+            // the invoke returns normally and the caller's guard tail takes
+            // over — so returning the zero value here is behavior-neutral.
+            // Only appended for a DECLARED non-void return type (the
+            // parser fills it from the block literal's own spelling).
+            // Unconditional on purpose: clang's block analysis cannot prove
+            // `__jeti_eh_flag` only takes {0,1}, so a conditional arm leaves
+            // a phantom fallthrough path. `return <zero>` is only reachable
+            // when the guard arm (flag==0) did not already return, i.e. the
+            // runtime flag is set — where the value is never consumed.
+            let decl_non_void = return_type.as_ref()
+                .map_or(false, |t| t.prim != TypePrim::Void || t.is_pointer);
+            if decl_non_void && stmts.iter().any(|st| fx.stmt_may_arm(st)) {
+                stmts.push(zero);
+            }
         }
     }
 }
