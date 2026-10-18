@@ -1517,7 +1517,18 @@ fn desugar_method_m2(
             func: None, name: "jeti_task_create".to_string(), callee: None,
             args: vec![
                 ident_expr(&entry_name, body.line, body.col),
-                ident_expr(self_source, body.line, body.col),
+                // The runtime takes `NPObject *`: in a class method `self` is
+                // the `NPClass *` meta object, so spell the join plain C needs
+                // (jeti's ObjC semantics allow the implicit conversion).
+                AstExpr {
+                    kind: AstExprKind::Cast, expr_type: None, line: body.line, col: body.col,
+                    data: AstExprData::Cast {
+                        target_type: npobject_ptr_type(),
+                        expr: Box::new(ident_expr(self_source, body.line, body.col)),
+                    },
+                    end_line: 0,
+                    end_col: 0,
+                },
                 sizeof_frame,
             ],
         },
@@ -1665,6 +1676,12 @@ struct AsyncCtx {
     sel_ret_obj: std::collections::HashMap<String, bool>,
     block_ret_obj: std::collections::HashMap<String, bool>,
     task_var_obj: std::collections::HashMap<String, bool>,
+    /// The declared scalar business type of each async method (`NPTask<int>`
+    /// → `int`), keyed by colon-stripped selector. The await lowering casts
+    /// the restored word back to the precise width so user-visible scalars
+    /// keep their C type (`printf("%d", await …)` would otherwise see `(long)`
+    /// and trip -Wformat). Object results never consult this map.
+    sel_ret_scalar_ty: std::collections::HashMap<String, AstType>,
     /// §8-① elided-return inference (`async ^{ … }` with the return type
     /// omitted): the declared business return type of EVERY method — sync and
     /// async alike — keyed by colon-stripped selector. `sel_ret_obj` above only
@@ -1703,6 +1720,59 @@ fn type_is_object(t: &AstType) -> bool {
     t.is_pointer
         || matches!(t.prim, TypePrim::Id | TypePrim::Instancetype)
         || t.name.as_deref().map_or(false, |n| n == "id" || n == "instancetype")
+}
+
+/// The declared scalar business type of an awaited call, when known
+/// (`await [api load:3]` where `load:`'s declared business is `int`).
+/// Object results and unknown selectors yield None.
+fn awaited_scalar_business_type(e: &AstExpr, ctx: &AsyncCtx) -> Option<AstType> {
+    match &e.data {
+        AstExprData::MsgSend { selector, .. } => {
+            ctx.sel_ret_scalar_ty.get(&selector.replace(':', "")).cloned()
+        }
+        AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => {
+            awaited_scalar_business_type(inner, ctx)
+        }
+        _ => None,
+    }
+}
+
+/// Scalar await value: `(long)` restore by default. When the declared
+/// business type is known and narrower than long (`NPTask<int>`), re-narrow
+/// the word after the long restore — `(int)(long)jeti_task_await(e)` — so
+/// later uses see the scalar's own C type (`printf("%d", await …)` would
+/// otherwise trip -Wformat with the bare `(long)` word).
+fn scalar_await_value(await_call: AstExpr, business: Option<&AstType>) -> AstExpr {
+    let line = await_call.line;
+    let col = await_call.col;
+    let narrow = business.map_or(false, |t| {
+        !t.is_pointer
+            && matches!(
+                t.prim,
+                TypePrim::Int | TypePrim::Short | TypePrim::Char | TypePrim::Bool
+            )
+    });
+    let long = AstExpr {
+        kind: AstExprKind::Cast, expr_type: None, line, col,
+        data: AstExprData::Cast {
+            target_type: AstType::new(TypePrim::Long),
+            expr: Box::new(await_call),
+        },
+        end_line: 0,
+        end_col: 0,
+    };
+    if !narrow {
+        return long;
+    }
+    AstExpr {
+        kind: AstExprKind::Cast, expr_type: None, line, col,
+        data: AstExprData::Cast {
+            target_type: business.unwrap().clone(),
+            expr: Box::new(long),
+        },
+        end_line: 0,
+        end_col: 0,
+    }
 }
 
 /// §9: is the awaited call's business result an object? See `AsyncCtx`'s
@@ -1902,7 +1972,19 @@ fn expr_yields_task(e: &AstExpr, ctx: &AsyncCtx) -> bool {
 
 fn lower_awaits_m2(s: &mut AstStmt, entry: &str, state: &mut i32, ctx: &mut AsyncCtx) {
     match &mut s.data {
-        AstStmtData::Expr(e) => lower_awaits_m2_expr(e, state, ctx),
+        AstStmtData::Expr(e) => {
+            // Statement-position await: the lowered value (`(t->state = N,
+            // (long)jeti_task_await(e))`) is discarded here, and clang flags
+            // every unused comma part -Wunused-value. Wrap the whole
+            // statement expression in `(void)` — clang treats that cast as
+            // a deliberate-discarded marker (semantics untouched: statement
+            // discards anyway; the (long) cast keeps the scalar restore).
+            let had_await = expr_contains_await(&e.clone());
+            lower_awaits_m2_expr(e, state, ctx);
+            if had_await && !is_void_cast(e) {
+                wrap_void(e);
+            }
+        }
         AstStmtData::Compound(stmts) => { for st in stmts { lower_awaits_m2(st, entry, state, ctx); } }
         AstStmtData::If { cond, then, else_ } => {
             lower_awaits_m2_expr(cond, state, ctx);
@@ -1997,6 +2079,7 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
             // §9 value typing — must be read BEFORE `taken` moves into the
             // await call below.
             let result_is_object = awaited_result_is_object(&taken, ctx);
+            let scalar_business = awaited_scalar_business_type(&taken, ctx);
             if !yields_task {
                 *e = AstExpr {
                     kind: AstExprKind::Comma, expr_type: None, line, col,
@@ -2024,15 +2107,7 @@ fn lower_awaits_m2_expr(e: &mut AstExpr, state: &mut i32, ctx: &mut AsyncCtx) {
             let value_expr = if result_is_object {
                 await_call
             } else {
-                AstExpr {
-                    kind: AstExprKind::Cast, expr_type: None, line, col,
-                    data: AstExprData::Cast {
-                        target_type: AstType::new(TypePrim::Long),
-                        expr: Box::new(await_call),
-                    },
-                    end_line: 0,
-                    end_col: 0,
-                }
+                scalar_await_value(await_call, scalar_business.as_ref())
             };
             let cast = value_expr;
             // B′ (§9): no try-await passthrough — failure propagation rides
@@ -2392,6 +2467,16 @@ fn ident_expr(name: &str, line: usize, col: usize) -> AstExpr {
     }
 }
 
+/// `NPObject *` as an AST type (struct pointer) — the runtime parameter type
+/// synthesized call args must be spelled into.
+fn npobject_ptr_type() -> AstType {
+    let mut t = AstType::new(TypePrim::Named);
+    t.name = Some("NPObject".to_string());
+    t.is_struct = true;
+    t.is_pointer = true;
+    t
+}
+
 fn member_expr(obj: &str, field: &str, line: usize, col: usize) -> AstExpr {
     // t->state / t->result — obj is an identifier expression.
     AstExpr {
@@ -2527,6 +2612,10 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
     // leave object results alone (see AsyncCtx::sel_ret_obj).
     let mut sel_ret_obj: std::collections::HashMap<String, bool> =
         std::collections::HashMap::new();
+    // §9 scalar-width restore: the precise scalar business type per selector
+    // (see AsyncCtx::sel_ret_scalar_ty).
+    let mut sel_ret_scalar_ty: std::collections::HashMap<String, AstType> =
+        std::collections::HashMap::new();
     for decl in unit.decls.iter() {
         // Class implementations only — see check_unit's async_sels note
         // (protocol names carry no async marker and would poison the set).
@@ -2548,8 +2637,13 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
                             let key = sel.replace(':', "");
                             // Prefer an object answer when TUs disagree (a
                             // declaration-only client may see a weaker spelling).
-                            let slot = sel_ret_obj.entry(key).or_insert(is_obj);
+                            let slot = sel_ret_obj.entry(key.clone()).or_insert(is_obj);
                             *slot = *slot || is_obj;
+                            if !is_obj {
+                                if let Some(b) = business {
+                                    sel_ret_scalar_ty.insert(key, b.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -2598,6 +2692,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
         sel_ret_obj,
         sel_ret_obj_all,
         fn_ret_obj,
+        sel_ret_scalar_ty,
         block_ret_obj: std::collections::HashMap::new(),
         task_var_obj: std::collections::HashMap::new(),
         in_method: false,
@@ -2688,6 +2783,36 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
     (std::mem::take(&mut ctx.errors), std::mem::take(&mut ctx.warnings))
 }
 
+/// Cast `e` to `void` in place — the synthesized statement-level discard
+/// marker (see lower_awaits_m2 / lower_toplevel_awaits_stmt).
+fn wrap_void(e: &mut AstExpr) {
+    let line = e.line;
+    let col = e.col;
+    let inner = std::mem::replace(e, int_expr(0, line, col));
+    *e = AstExpr {
+        kind: AstExprKind::Cast, expr_type: None, line, col,
+        data: AstExprData::Cast {
+            target_type: AstType::new(TypePrim::Void),
+            expr: Box::new(inner),
+        },
+        end_line: 0,
+        end_col: 0,
+    };
+}
+
+/// Is this expression already a `(void)` cast (possibly parenthesized)?
+/// Guards the wrap above against stacking when two lowering passes both
+/// visit the same statement.
+fn is_void_cast(e: &AstExpr) -> bool {
+    match &e.data {
+        AstExprData::Cast { target_type, .. } => {
+            target_type.prim == TypePrim::Void && !target_type.is_pointer
+        }
+        AstExprData::Paren(inner) => is_void_cast(inner),
+        _ => false,
+    }
+}
+
 /// `await e` in a non-async (synchronous) body → `jeti_task_await(e)`.
 /// Async Semantics v1 rule 3: the only legal sync→async bridge is
 /// `+[NPTask blockOn:<async block>]`, which compiles to exactly this
@@ -2750,7 +2875,16 @@ fn lower_toplevel_awaits_expr(e: &mut AstExpr) {
 fn lower_toplevel_awaits_stmt(s: &mut AstStmt) {
     match &mut s.data {
         AstStmtData::Expr(e) => {
+            // Statement-position await (block-literal and sync-bridge bodies):
+            // same rationale as lower_awaits_m2 — the lowered `(long)
+            // jeti_task_await(e)` value is discarded, so wrap the whole
+            // statement expression in `(void)` (clang's deliberate-discard
+            // marker silences -Wunused-value; semantics untouched).
+            let await_before = expr_contains_await(&e.clone());
             lower_toplevel_awaits_expr(e);
+            if await_before && !is_void_cast(e) {
+                wrap_void(e);
+            }
         }
         AstStmtData::Return(Some(e)) => lower_toplevel_awaits_expr(e),
         AstStmtData::If { cond, then, else_ } => {

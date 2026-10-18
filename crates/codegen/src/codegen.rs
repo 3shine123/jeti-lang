@@ -312,7 +312,33 @@ fn parse_vtable_param_type(ptr_type: &str, param_index: usize) -> Option<String>
     if !last.is_empty() {
         params.push(last.to_string());
     }
-    params.get(param_index).cloned()
+    // Generic sentinel markers ride along on class-pointer params
+    // (`NPObject * /*V*/` in `setObject:forKey:`) — they are compile-time
+    // type-args hints for dispatch, not C. Strip them (plus the leftover
+    // spaces) or the non-`*` tail defeats `ends_with('*')` at every
+    // coercion site.
+    let cleaned: Vec<String> = params.iter()
+        .map(|p| strip_c_comment_markers(p).trim().to_string())
+        .collect();
+    cleaned.get(param_index).cloned()
+}
+
+/// Remove `/*V*/`-style C comment markers from a parameter spelling.
+fn strip_c_comment_markers(s: &str) -> String {
+    if !s.contains("/*") {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("/*") {
+        out.push_str(&rest[..i]);
+        match rest[i + 2..].find("*/") {
+            Some(j) => rest = &rest[i + 2 + j + 2..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 static BLOCK_TYPEDEF_NAMES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
@@ -324,6 +350,90 @@ static FNPTR_TYPEDEF_NAMES: OnceLock<Mutex<std::collections::HashSet<String>>> =
 
 // ─── Current function return type (for covariant return cast) ────────────────
 static CURRENT_RETURN_TYPE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+// Declared plain-C function signatures (name → C param type spellings) so
+// synthesized `Call` args can be cast where jeti's ObjC semantics allow an
+// implicit `id <-> class pointer` join and plain C would flag
+// -Wincompatible-pointer-types. Populated at Function-decl conversion
+// (prototypes included); read back when a body emitted later calls it.
+// jeti requires declaration-before-use, so earlier decls are enough.
+static FUNC_PARAM_TYPES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn register_func_sig(name: &str, params: &[(String, String)]) {
+    if name.is_empty() {
+        return;
+    }
+    FUNC_PARAM_TYPES
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), params.iter().map(|(t, _)| t.clone()).collect());
+}
+
+/// Explicit cast spelling for an implicit ObjC-style pointer join, or None
+/// when none is needed. Only `id`/`NPObject *` acts as the wildcard — a
+/// specific-class→specific-class conversion is NOT implicit in ObjC either,
+/// so that mismatch must keep warning. Builtin C pointers (`char *`,
+/// `void *`, `const …`) never join.
+fn obj_wildcard_cast(dst: &str, src: &str) -> Option<String> {
+    let d = dst.trim();
+    let s = src.trim();
+    if d == s || !s.ends_with(" *") || !d.ends_with(" *") {
+        return None;
+    }
+    for t in [d, s] {
+        if t.contains("char") || t.contains("void") || t.contains("const ") {
+            return None;
+        }
+    }
+    let is_id = |t: &str| t == "NPObject *" || t == "id" || t == "instancetype";
+    if is_id(s) || is_id(d) {
+        Some(d.to_string())
+    } else {
+        None
+    }
+}
+
+/// Wrap an object-pointer expression in `(NPObject *)` unless it already is
+/// one (or is not an object pointer at all — builtin C pointers pass through).
+fn upcast_to_npobject(e: CgExpr) -> CgExpr {
+    let Some(t) = e.type_str.as_deref().map(str::trim) else { return e; };
+    if t == "NPObject *" || t == "id" {
+        return e;
+    }
+    if obj_wildcard_cast("NPObject *", t).is_none() {
+        return e;
+    }
+    CgExpr {
+        kind: CgExprKind::Cast, type_str: Some("NPObject *".into()), line: e.line, col: e.col,
+        data: CgExprData::Cast {
+            target_type: "NPObject *".into(),
+            expr: Box::new(e),
+        },
+    }
+}
+
+/// Cast args of a plain C call per the registered declared signature.
+fn coerce_call_args_by_sig(name: &str, args: &mut [CgExpr]) {
+    let sig = FUNC_PARAM_TYPES.lock().unwrap().get(name).cloned();
+    let Some(pts) = sig else { return };
+    for (i, arg) in args.iter_mut().enumerate() {
+        let Some(pt) = pts.get(i) else { break };
+        let Some(at) = arg.type_str.clone() else { continue };
+        let Some(cast) = obj_wildcard_cast(pt, &at) else { continue };
+        let inner = std::mem::replace(arg, CgExpr {
+            kind: CgExprKind::Int, type_str: None, line: arg.line, col: arg.col,
+            data: CgExprData::Int(0),
+        });
+        *arg = CgExpr {
+            kind: CgExprKind::Cast, type_str: Some(cast.clone()), line: inner.line, col: inner.col,
+            data: CgExprData::Cast {
+                target_type: cast,
+                expr: Box::new(inner),
+            },
+        };
+    }
+}
 
 fn next_temp_id() -> usize {
     TEMP_VAR_COUNTER.fetch_add(1, Ordering::SeqCst)
@@ -786,7 +896,7 @@ fn emit_arc_dealloc_wrappers(classes: &[CgClassMeta]) -> (std::collections::Hash
         let releases: String = ivars
             .iter()
             .rev()
-            .map(|n| format!("    jeti_release(((struct {} *)self)->{});\n", flat, n))
+            .map(|n| format!("    jeti_release((NPObject *)(((struct {} *)self)->{}));\n", flat, n))
             .collect();
 
         defs.push_str(&format!(
@@ -1625,7 +1735,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                             kind: CgExprKind::Call, type_str, line, col,
                             data: CgExprData::Call {
                                 name: format!("jeti_resp_{}", member),
-                                args: vec![convert_expr(receiver, &class_infos)],
+                                args: vec![upcast_to_npobject(convert_expr(receiver, &class_infos))],
                                 vtable_class: None,
                                 alt_vtable_classes: Vec::new(),
                                 is_class_method: false,
@@ -2079,7 +2189,13 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     }
                 }
             }
-            let cg_args: Vec<CgExpr> = args.iter().map(|a| convert_expr(a, &class_infos)).collect();
+            let mut cg_args: Vec<CgExpr> = args.iter().map(|a| convert_expr(a, &class_infos)).collect();
+            // Plain C call: cast args per the registered declared signature
+            // (implicit id↔class joins), unless this call turned into a
+            // vtable dispatch (which casts args itself) or a block invoke.
+            if auto_sel.is_none() && callee.is_none() {
+                coerce_call_args_by_sig(&call_name, &mut cg_args);
+            }
             if let Some(sel) = auto_sel {
                 // Convert NPObject_* calls to vtable dispatch by setting vtable_class,
                 // sel_const_name, and using the method name (without NPObject_ prefix).
@@ -2172,11 +2288,23 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                 // C struct field access (`struct.field = val`), use the name as-is.
                 let field_name = if prop.is_some() { format!("_{}", name) } else { name.clone() };
                 let obj_cg = convert_expr(obj, &class_infos);
+                // The ivar's declared type (the `cls` @interface records it)
+                // rides on the target so emit-side assignment casts can spell
+                // the implicit id↔class-pointer join for the value.
+                let ivar_type = if prop.is_some() {
+                    cls.as_ref().and_then(|c| class_infos.get(c)).and_then(|info| {
+                        info.ivar_names.iter().position(|n| n == &field_name)
+                            .map(|idx| info.ivar_types[idx].clone())
+                    })
+                } else {
+                    None
+                };
+                let arrow_type = ivar_type.or_else(|| obj_cg.type_str.clone());
                 let target_cg = if *is_arrow || obj.expr_type.as_ref().map_or(false, |t| t.is_pointer) {
-                    CgExpr { kind: CgExprKind::Arrow, type_str: None, line, col,
+                    CgExpr { kind: CgExprKind::Arrow, type_str: arrow_type, line, col,
                              data: CgExprData::Arrow { obj: Box::new(obj_cg), field: field_name.clone() } }
                 } else {
-                    CgExpr { kind: CgExprKind::Member, type_str: None, line, col,
+                    CgExpr { kind: CgExprKind::Member, type_str: arrow_type, line, col,
                              data: CgExprData::Member { obj: Box::new(obj_cg), field: field_name.clone() } }
                 };
                 let value_cg = convert_expr(value, &class_infos);
@@ -2651,7 +2779,15 @@ fn convert_stmt(as_: &AstStmt, class_infos: &std::collections::BTreeMap<String, 
                         // return type to avoid `-Wincompatible-pointer-types` in gcc.
                         let is_self = value.as_ref().map_or(false, |v| matches!(&v.data, AstExprData::VarRef { name, .. } if name == "self" || name == "_self"));
                         let is_msg = value.as_ref().map_or(false, |v| matches!(v.data, AstExprData::MsgSend { .. }));
-                        if is_self || is_msg {
+                        // Also type-driven: a value typed `NPObject *`/`id`
+                        // returned from a specific-class function (e.g. the
+                        // `@"…"` literal's `jeti_stringFromCstr` call) joins
+                        // implicitly in ObjC; plain C wants the spelling.
+                        let is_id_val = cg_val
+                            .as_ref()
+                            .and_then(|c| c.type_str.as_deref())
+                            .map_or(false, |t| obj_wildcard_cast(rt, t).is_some());
+                        if is_self || is_msg || is_id_val {
                             cg_val = Some(Box::new(CgExpr {
                                 kind: CgExprKind::Cast, type_str: Some(rt.clone()), line, col,
                                 data: CgExprData::Cast { target_type: rt.clone(), expr: cg_val.take().unwrap() },
@@ -3335,6 +3471,10 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
                         cg_params.push((pt, pn));
                         p = param.next.as_ref().map(|n| &**n);
                     }
+                    // Record the declared signature so later Call sites in
+                    // this unit can spell the implicit id↔class-pointer
+                    // casts plain C requires.
+                    register_func_sig(&name, &cg_params);
                     // Set the enclosing function's return type so `convert_stmt`
                     // for Return can add covariant subclass casts.
                     *CURRENT_RETURN_TYPE.lock().unwrap() = Some(rt.clone());
@@ -3404,15 +3544,32 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
                 }
             }
             let (var_type, init, is_static, _is_extern, is_const, is_block_qual, is_weak) = match &ad.data {
-                AstDeclData::Variable { var_type, init, is_static, is_extern, is_const, is_block_qual, is_weak, .. } => (
-                    var_type.as_ref().map(|t| ast_type_to_c_str(t)).unwrap_or_else(|| "int".into()),
-                    init.as_ref().map(|i| Box::new(convert_expr(i, &class_infos))),
-                    *is_static,
-                    *is_extern,
-                    *is_const,
-                    *is_block_qual,
-                    *is_weak,
-                ),
+                AstDeclData::Variable { var_type, init, is_static, is_extern, is_const, is_block_qual, is_weak, .. } => {
+                    let vt = var_type.as_ref().map(|t| ast_type_to_c_str(t)).unwrap_or_else(|| "int".into());
+                    let mut init_cg = init.as_ref().map(|i| Box::new(convert_expr(i, &class_infos)));
+                    // Declared-type initializer upcast: `NPObject *o = str,`
+                    // joins implicitly in ObjC; plain C wants the spelling.
+                    if let Some(vt_s) = Some(vt.as_str()) {
+                        if let Some(init_val) = init_cg.as_deref_mut() {
+                            if let Some(st) = init_val.type_str.as_deref() {
+                                if let Some(cast) = obj_wildcard_cast(vt_s, st) {
+                                    let inner = std::mem::replace(init_val, CgExpr {
+                                        kind: CgExprKind::Int, type_str: None, line: init_val.line, col: init_val.col,
+                                        data: CgExprData::Int(0),
+                                    });
+                                    *init_val = CgExpr {
+                                        kind: CgExprKind::Cast, type_str: Some(cast.clone()), line: inner.line, col: inner.col,
+                                        data: CgExprData::Cast {
+                                            target_type: cast,
+                                            expr: Box::new(inner),
+                                        },
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    (vt, init_cg, *is_static, *is_extern, *is_const, *is_block_qual, *is_weak)
+                }
                 _ => ("int".into(), None, false, false, false, false, false),
             };
             let var_type = if is_weak && !var_type.contains("__block") {
@@ -6122,6 +6279,25 @@ fn nil_msg_fallback(type_str: Option<&str>) -> String {
     }
 }
 
+/// Emit an if/while condition without the redundant outer parenthesis
+/// layer. Binary sub-expressions always parenthesize themselves (bug #6:
+/// the precedence guard), so the usual shell doubles up: `if ((x == y))`
+/// clang reads as an `=` typo and warns -Wparentheses-equality (which the
+/// removed pipeline `-w` used to bury). Nested binaries keep their own
+/// parens — only the condition's outer shell is dropped.
+fn emit_condition(cond: &CgExpr, out: &mut String) {
+    match &cond.data {
+        CgExprData::Binary { left, op_str, right } => {
+            emit_expr(left, out);
+            out.push(' ');
+            out.push_str(op_str);
+            out.push(' ');
+            emit_expr(right, out);
+        }
+        _ => emit_expr(cond, out),
+    }
+}
+
 fn emit_expr(e: &CgExpr, out: &mut String) {
     match &e.data {
         CgExprData::Int(val) => {
@@ -6214,6 +6390,17 @@ fn emit_expr(e: &CgExpr, out: &mut String) {
                     emit_expr(value, out);
                     out.push(')');
                     return;
+                }
+                // Same call, but the value is not a (fn-ptr-cast) Call — or
+                // the target lies on the id side: spell the implicit
+                // id↔class-pointer join ObjC allows and plain C does not.
+                if let Some(vt) = value.type_str.as_deref() {
+                    if let Some(cast) = obj_wildcard_cast(ttype, vt) {
+                        let _ = write!(out, "({})(", cast);
+                        emit_expr(value, out);
+                        out.push(')');
+                        return;
+                    }
                 }
             }
             emit_expr(value, out);
@@ -6581,7 +6768,7 @@ fn emit_stmt_inline(s: &CgStmt, out: &mut String) {
         }
         CgStmtData::If { cond, then, else_ } => {
             out.push_str("if (");
-            emit_expr(cond, out);
+            emit_condition(cond, out);
             out.push_str(") ");
             emit_stmt_inline(then, out);
             if let Some(el) = else_ {
@@ -6591,7 +6778,7 @@ fn emit_stmt_inline(s: &CgStmt, out: &mut String) {
         }
         CgStmtData::While { cond, body } => {
             out.push_str("while (");
-            emit_expr(cond, out);
+            emit_condition(cond, out);
             out.push_str(") ");
             emit_stmt_inline(body, out);
         }
@@ -6599,7 +6786,7 @@ fn emit_stmt_inline(s: &CgStmt, out: &mut String) {
             out.push_str("do ");
             emit_stmt_inline(body, out);
             out.push_str(" while (");
-            emit_expr(cond, out);
+            emit_condition(cond, out);
             out.push_str(");");
         }
         CgStmtData::Empty => out.push_str(";"),
@@ -6634,7 +6821,7 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
         CgStmtData::If { cond, then, else_ } => {
             out.push_str(&ind);
             out.push_str("if (");
-            emit_expr(cond, out);
+            emit_condition(cond, out);
             out.push_str(") ");
             emit_body_inline(then, out, indent);
             if let Some(el) = else_ {
@@ -6646,7 +6833,7 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
         CgStmtData::While { cond, body } => {
             out.push_str(&ind);
             out.push_str("while (");
-            emit_expr(cond, out);
+            emit_condition(cond, out);
             out.push_str(") ");
             emit_body_inline(body, out, indent);
         }
@@ -6656,7 +6843,7 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
             emit_body_inline(body, out, indent);
             out.push_str(&ind);
             out.push_str("while (");
-            emit_expr(cond, out);
+            emit_condition(cond, out);
             out.push_str(");\n");
         }
         CgStmtData::For { init, cond, incr, body } => {
@@ -6823,14 +7010,17 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
                         Some((name.clone(), args.clone(), vc.clone(), is_class_method, is_super, sel_const_name.clone()))
                     } else { None }
                 });
-                if let Some((ref method_name, ref args, ref _vc, _is_class_method, _is_super, sel_const_name)) = init_data {
+                if let Some((ref method_name, ref args, ref vc, _is_class_method, _is_super, sel_const_name)) = init_data {
                     out.push_str(&ind);
                     if !args.is_empty() {
                             let tid = next_temp_id();
                             // Emit: NPObject *__jeti_tmp_N = receiver;
-                            let _ = write!(out, "NPObject *__jeti_tmp_{} = (", tid);
+                            // The `(NPObject *)` spelling mirrors the nil-safe
+                            // send arm: jeti allows the implicit subclass→id
+                            // join, plain C flags it.
+                            let _ = write!(out, "NPObject *__jeti_tmp_{} = ((NPObject *)(", tid);
                             emit_expr(&args[0], out);
-                            out.push_str(");\n");
+                            out.push_str("));\n");
                             out.push_str(&ind);
                             if *is_static { out.push_str("static "); }
                             out.push_str(decl_type);
@@ -6840,20 +7030,35 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
                             // Uniform vtable member dispatch with (SubClass*) cast for concrete class pointers.
                             // Guard the temp (the alloc result) against nil for safe nil-messaging.
                             let needs_cast = decl_type.ends_with(" *") && decl_type != "NPObject *";
+                            // A `NPObject *`/`id` decl takes any class-pointer
+                            // dispatch result — the implicit upcast ObjC allows
+                            // must be spelled in plain C.
+                            let needs_upcast = !needs_cast
+                                && (decl_type.trim() == "NPObject *" || decl_type.trim() == "id");
                             if needs_cast {
                                 let _ = write!(out, " = ({})(", decl_type.trim_end());
+                            } else if needs_upcast {
+                                out.push_str(" = (NPObject *)(");
                             } else {
                                 out.push_str(" = ");
                             }
                             let _ = write!(out, "__jeti_tmp_{} ? ((struct jeti_vtable *)__jeti_tmp_{}->isa->vtable)->{}(", tid, tid, method_name);
                             let _ = write!(out, "__jeti_tmp_{}", tid);
                         let _ = write!(out, ", {}", sel_const_name.as_deref().unwrap_or("0"));
-                        for arg in &args[1..] {
+                        for (ai, arg) in args[1..].iter().enumerate() {
                             out.push_str(", ");
+                            if let Some(pt) = get_vtable_param_type_for_class(vc, method_name, ai + 2) {
+                                if pt.ends_with('*') && !pt.trim_start().starts_with("const char") && !pt.trim_start().starts_with("char ") {
+                                    let _ = write!(out, "({})(", pt);
+                                    emit_expr(arg, out);
+                                    out.push_str(")");
+                                    continue;
+                                }
+                            }
                             emit_expr(arg, out);
                         }
                         out.push_str(") : 0");
-                        if needs_cast {
+                        if needs_cast || needs_upcast {
                             out.push_str(")");
                         }
                         out.push_str(";\n");
@@ -8009,12 +8214,16 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
                     // Class-method send: the receiver is the class object
                     // (&JETI_CLASS_$_NPNumber), same as an ordinary
                     // [NPNumber numberWithDouble:] lowering — NOT self.
+                    // The wrapper's C result type is `id` while the factory
+                    // returns `NPNumber *`: the explicit downcast keeps plain
+                    // C -Wincompatible-pointer-types silent (ObjC would allow
+                    // the implicit narrowing).
                     let _ = write!(kvc_out,
-                        "static id {w}(id self) {{\n    return NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, {s}, {f}((NPObject *)self, {s}));\n}}\n\n",
+                        "static id {w}(id self) {{\n    return (id)NPNumber_numberWithDouble_(&JETI_CLASS_$_NPNumber, {s}, {f}((NPObject *)self, {s}));\n}}\n\n",
                         w = wrapper, f = fn_sym, s = sel);
                 } else {
                     let _ = write!(kvc_out,
-                        "static id {w}(id self) {{\n    return NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, {s}, {f}((NPObject *)self, {s}));\n}}\n\n",
+                        "static id {w}(id self) {{\n    return (id)NPNumber_numberWithInt_(&JETI_CLASS_$_NPNumber, {s}, {f}((NPObject *)self, {s}));\n}}\n\n",
                         w = wrapper, f = fn_sym, s = sel);
                 }
                 entries.push((mname.clone(), wrapper));

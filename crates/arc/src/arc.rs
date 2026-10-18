@@ -48,13 +48,36 @@ impl ArcResult {
     }
 }
 
+fn npobject_ptr_type() -> AstType {
+    let mut t = AstType::new(TypePrim::Named);
+    t.name = Some("NPObject".to_string());
+    t.is_struct = true;
+    t.is_pointer = true;
+    t
+}
+
 fn make_release_stmt(target: &AstExpr) -> AstStmt {
+    // The release argument must always be an `NPObject *`: synthesized
+    // releases reach typed ivar slots (`NPMutableString *`, `FsApi *`, …)
+    // and plain C flags every narrowing to the runtime parameter
+    // (-Wincompatible-pointer-types), while jeti's ObjC semantics allow the
+    // implicit upcast. Spell the upcast in the AST so the emitted call is
+    // warning-clean on every backend.
+    let cast_arg = AstExpr {
+        kind: AstExprKind::Cast, expr_type: None, line: target.line, col: target.col,
+        data: AstExprData::Cast {
+            target_type: npobject_ptr_type(),
+            expr: Box::new(target.clone()),
+        },
+        end_line: 0,
+        end_col: 0,
+    };
     AstStmt {
         kind: AstStmtKind::Expr, line: 0, col: 0,
         data: AstStmtData::Expr(AstExpr {
             kind: AstExprKind::FuncCall, expr_type: None, line: 0, col: 0,
             data: AstExprData::FuncCall {
-                func: None, name: "jeti_release".to_string(), callee: None, args: vec![target.clone()],
+                func: None, name: "jeti_release".to_string(), callee: None, args: vec![cast_arg],
             },
             end_line: 0,
             end_col: 0,
@@ -1009,8 +1032,21 @@ fn is_retain_release_pair(s1: &AstStmt, s2: &AstStmt) -> Option<bool> {
     let (name1, args1) = match &e1.data { AstExprData::FuncCall { name, args, .. } => (name, args), _ => return None };
     let (name2, args2) = match &e2.data { AstExprData::FuncCall { name, args, .. } => (name, args), _ => return None };
     if args1.len() != 1 || args2.len() != 1 { return None; }
-    let t1 = match &args1[0].data { AstExprData::VarRef { name, .. } => name, _ => return None };
-    let t2 = match &args2[0].data { AstExprData::VarRef { name, .. } => name, _ => return None };
+    // The synthesize helper wraps release/retain args in an `(NPObject *)`
+    // upcast cast — unwrap it when identifying the variable (the cast is a
+    // pure C-pointer spelling, not a different slot).
+    let var_of = |a: &AstExpr| -> Option<String> {
+        match &a.data {
+            AstExprData::VarRef { name, .. } => Some(name.clone()),
+            AstExprData::Cast { expr, .. } => match &expr.data {
+                AstExprData::VarRef { name, .. } => Some(name.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    let t1 = var_of(&args1[0])?;
+    let t2 = var_of(&args2[0])?;
     if t1 != t2 { return None; }
     let is_retain = |n: &str| n == "jeti_retain";
     let is_release = |n: &str| n == "jeti_release";

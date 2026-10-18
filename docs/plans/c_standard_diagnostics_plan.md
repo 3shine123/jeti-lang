@@ -1,7 +1,7 @@
 # C 标准判错规划（checker 自实现 · clang 为行为 oracle）
 
-> 状态：规划。前置 Phase 0 已开工（后端 `-w` 恒定吞警告已去除，`<STDIN>` 合成
-> 代码噪音待清）。
+> 状态：规划。前置 Phase 0 已完成（2026-10-18：后端 `-w` 已去除；合成 C
+> 透传代码噪音已清零，代表 TU 只剩故意警告——见 §4 Phase 0 条目）。
 > 关联：`docs/plans/architecture.md`（诊断/SourceSpan 框架）、
 > `docs/plans/source_locations_debug_lsp_plan.md`（诊断对齐方法论——本规划沿用）。
 
@@ -109,13 +109,38 @@
 
 ## 4. 里程碑
 
-- **Phase 0（进行中）透传转换落地**：runtime ARC 调用点补
-  `(NPObject *)` 上转、KVC wrap 返回值族、其余聚类（full_syntax 单文件
-  152 条基线）→ 全库逐 TU 清零；全基线回归（cargo test --workspace /
-  test_all.sh / multi_tu / eh_matrix / eh_diff / strong_metadata /
-  arc_intern）绿。交付铁：clean `.jeti`（warns 视角）编译零警告。
+- **Phase 0（已完成 2026-10-18）透传转换落地**：全库（代表 TU
+  `full_syntax_test.jeti`）合成 C 警告清零——clang `-fsyntax-only` 仅剩
+  §1.22 故意保留的三条 int/ptr 往返警告与探针命令行假象。落地位置：
+  ① ARC dealloc 合成释放点补 `(NPObject *)`（codegen）；② ARC pass
+  AST 注入的 `jeti_release` 参数同样补上（arc `make_release_stmt`，
+  retain/release 配对识别同步拆 Cast）；③ KVC 包装器返回值补 `(id)`
+  （codegen）；④ `-Wparentheses-equality`：if/while/do 条件加
+  `emit_condition`——Binary 自身括号 bug #6 保留，只去掉 if/while 外壳
+  （41 条 → 0）；⑤ vtable 参数表带泛型哨兵标记 `NPObject * /*V*/`，
+  `parse_vtable_param_type` 剥标记+trim，nil-safe 分派臂的每参数强制
+  转换终于生效；⑥ alloc+init decl 分路：接收者上转 + 参数逐位强制 +
+  NPObject*/id 声明变量上转（codegen `should_split` 臂）；⑦ 属性赋值
+  目标补 ivar type_str（PropRef 臂），Assign 发射臂按
+  `obj_wildcard_cast`（仅 id/NPObject* 通配 join）上转；⑧ Return 转换
+  臂扩类型驱动上转（`@"…"` → `NPString *`）；⑨ plain-C 函数签名注册表
+  `FUNC_PARAM_TYPES`（Function decl 转换时登记），FuncCall 参数按声明
+  类型上转（`fs_take_fn(@"s")` 族）；⑩ respondsToSelector 合成帮手
+  接收者上转；⑪ async `jeti_task_create` self 补 `NPObject *`
+  （类方法 self 是 NPClass*）；⑫ async 语句位 await 整句包 `(void)`
+  （unused-value 4→0），并修 M2/tolevel 双包裹（`is_void_cast` 去重）；
+  ⑬ await 标量恢复按声明业务类型精确收窄（`printf("%d", await t:int)`
+  不再 -Wformat）；⑭ EH 方法体尾护在 `if (flag==1) return 0;` 后补
+  无条件零返回（clang 证不了 flag∈{0,1}；同 block-literal 修复理由；
+  值类型才加，void 免噪声）；⑮ jetic 驱动尾随 `-x none` 只在后有
+  文件输入时才发（eh_diff 7 个 diff 污染的根因之一是驱动命令行假象）。
+  全基线回归绿：cargo test --workspace / test_all 482/493 0 失败 /
+  multi_tu 16/16 / eh_matrix 18/18 / **eh_diff 8/8** / strong_metadata
+  10/10 / arc_intern PASS。
   附注：后端 `-w` 恒定参数已删除（checks 露出前置条件）；
   cast 往返族已实现（见 §G-expr cast 条目的测量记录与 corpus）。
+  未穷尽项（后续 TU 扩大验收时再收）：语句位裸函数参 `@""` 字面量
+  进入非注册 runtime 原型的路径仍依赖 FUNC_PARAM_TYPES 登记面。
 - **Phase 1 矩阵测量**：建立 `tests/negative/c_std/` 对照 corpus
   （每族 ≥1 正例 + 1~2 反例，`.c`/`.jeti` 同源），跑 clang/jetic 提供
   matrix.md（报/不报、severity、caret 位）。防污染纪律：只跑行为，不读实现。

@@ -571,6 +571,18 @@ fn desugar_body(body: &mut AstStmt, ret: &AstType, is_main: bool, fx: &EffectTab
                 });
             } else {
                 stmts.push(if_armed_ret(&zero_ret));
+                // An unconditional tail return is still required (non-void
+                // only; a void function never trips -Wreturn-type and would
+                // just gain a spurious `return;`): clang cannot prove
+                // `__jeti_eh_flag ∈ {0,1}`, so after the guarded arm the
+                // fall-through edge reads as "may not return a value"
+                // (-Wreturn-type; the removed pipeline `-w` used to bury it).
+                // Same rationale as the block-literal tail fix: dead for
+                // flag==1, identical to the old fall-through for flag==0, and
+                // it also papers over a genuinely missing C return.
+                if ret.prim != TypePrim::Void || ret.is_pointer {
+                    stmts.push(zero_ret.clone());
+                }
             }
         }
     }

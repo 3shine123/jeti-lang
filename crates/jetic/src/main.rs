@@ -386,11 +386,19 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
         eprintln!("[jetic]   self_dir={:?}", self_dir);
         eprintln!("[jetic]   runtime_c={:?}", runtime_c);
     }
-    let mut clang_args = vec![
-        "-x".to_string(), "c".to_string(),
-        "-".to_string(),
-        "-x".to_string(), "none".to_string(),
-    ];
+    // `-x none` resets the language mode after the stdin code so the file
+    // inputs below compile as their own languages. Only add it when something
+    // actually follows: a trailing `-x none` with no input files makes clang
+    // warn "'-x none' after last input file has no effect" — which real clang
+    // backends surface in stderr diffs (the removed `-w` force-feed used to
+    // silence even this).
+    let has_file_inputs =
+        !extra_c_files.is_empty() || !extra_objects.is_empty() || !asm_files.is_empty();
+    let mut clang_args = vec!["-x".to_string(), "c".to_string(), "-".to_string()];
+    if has_file_inputs {
+        clang_args.push("-x".to_string());
+        clang_args.push("none".to_string());
+    }
     if shared {
         // `-shared` is a gcc/clang shared flag (Linux → .so). Darwin's clang
         // accepts it too, but `-dynamiclib` is the platform convention for a
@@ -486,6 +494,12 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
             clang_args.push(lib_path);
             clang_args.push("-ljeti".to_string());
         } else {
+            if !has_file_inputs {
+                // Reset the language mode after the stdin code before the
+                // runtime source (no other file inputs followed).
+                clang_args.push("-x".to_string());
+                clang_args.push("none".to_string());
+            }
             clang_args.push(runtime_c.to_string_lossy().to_string());
         }
     }
