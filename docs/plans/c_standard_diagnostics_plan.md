@@ -68,8 +68,9 @@
   `(void)` 参数列表计 0 参；block 与 fn-ptr 变量、typedef 别名
   （`IntFn`/`SimpleBlock`，`block_alias_names`）合法调用；成员 fn-ptr
   `d.fn(9)` 空名 callee 跳过；stdlib 白名单（`feed_included_headers` 门）
-  豁免 passthrough 头；引号 include 关闭检查。嵌套调用（参数位、cast
-  操作数内）为记录缺口；assign 值位 caret 差 1 列。
+  豁免 passthrough 头；引号 include 关闭检查。assign 值内的调用（含
+  嵌套）经 `check_call_family_deep` 深遍历克隆子树覆盖；assign 值位
+  caret 差 1 列（span 含 `;`）。
 - 成员访问（6.5.2.3）：非 struct/union 操作数 → error；`->`/`.` 混用类型错 → error
 - `++/--/`（6.5.2.4/6.5.3.1）：须可修改左值且为标量 → error（含 const 写、
   对 rvalue 自增）
@@ -99,8 +100,10 @@
   scope frames 真实声明（宽松回退曾把 `self = [super init]`、ivar 存
   全线误报）；子类值→父类目标 silent（probe_objc.m 测量），id/Class/SEL/
   instancetype/NPObject* 通配与 codegen `obj_wildcard_cast` 同策略；
-  `void *` 双向 silent、0/nil 字面量 silent。const-赋值形状被既有
-  `int *const` declarator 缺口阻塞（记录于 README 缺口清单）。
+  `void *` 双向 silent、0/nil 字面量 silent。const-赋值随 declarator
+  修复转正（`int *const cp` 声明可解析可回显，`type_display` 按
+  `int *const` 拼写；前导 `const int` 的 decl 级标志折叠进 scope 类型；
+  顶层 const 读取 `q = cp` 按 C 静默）。
 - return（6.8.6.4）：void 函数 return 带值 → error `[测]`；
   非 void 落尾无 return → clang 默认对非空函数有 `-Wreturn-type`（warning）`[测]`
 - switch（6.8.4.2）：条件须整型 → error（Jeti pattern 分支豁免：
@@ -112,7 +115,8 @@
   default caret 在关键字；default 之后的 case legal（实测 silent）。
   解引用链主体（`switch (*p)`）经 `deref_subject_type` 折叠（宽松 Unary
   推导不解引用，曾误报）。枚举成员与字面量同值的重复（`case RED` after
-  `case 1`）clang 报、jetic silent —— 无常量折叠，记录缺口。
+  `case 1`）经 `enum_member_values` 折叠，clang 双拼写措辞
+  `duplicate case value: '1' and 'RED' both equal '1'` 原样复刻。
 - label（6.8.1）：goto 目标不存在（6.8.6.1 须指向同函数 label）/ 函数内重复 label → error
 - break/continue 位置（6.8.6.2/6.8.6.3）：循环外 → error（parser 层）
 - 逗号/条件里的 void 等类型约束随项收录
@@ -197,6 +201,10 @@ switch/case —— 见 §2 各条目与 `tests/negative/c_std/README.md` 矩阵�
   三表、`block_alias_names`（block+fn-ptr typedef）、
   `feed_included_headers`（stdlib 函数/绑定双表豁免）、克隆求值深度闸门
   （防 clone 二次报）、binder 提及注册移除（未声明检查的前提）。
+  追随修复：declarator 位 `const`/`volatile` 误读为变量名（声明曾整体
+  丢失）→ star 后/前导位消费 + codegen const 回显 + checker scope 折叠；
+  `case RED` 同值折叠（`enum_member_values`）；assign 值内嵌套调用深
+  遍历（`check_call_family_deep`）。
   全基线回归绿：cargo test --workspace 272/0、test_all 482/493 0 失败
   （39 ARC→MRC 与 Phase 0 完全一致）、multi_tu 16/16、eh_matrix 18/18、
   eh_diff 8/8、strong_metadata 10/10、arc_intern PASS。

@@ -59,7 +59,7 @@
 
 | # | 语句 | clang（默认） | jetic checker | 一致 |
 |---|------|--------------|---------------|------|
-| ① | `cp = &v`（`int *const cp`） | error `cannot assign to variable 'cp' with const-qualified type 'int *const'` | **未判定** — `int *const` declarator 是既有解析/生成缺口（声明整体丢失），见下 | ✗（既有 bug 阻塞） |
+| ① | `cp = &v`（`int *const cp`） | error `cannot assign to variable 'cp' with const-qualified type 'int *const'`，caret 在 `=` | 同文 error（caret 覆盖整句赋值节点） | ✓（措辞/行同） |
 | ② | `p = c`（`int *` ← `char *`） | warn `incompatible pointer types assigning to 'int *' from 'char *'` | 同文 warning | ✓ |
 | ③ | `v = p` | error `…pointer to integer conversion…; dereference with *` | 同文 | ✓ |
 | ④ | `v = &v` | error `…; remove &` | 同文 | ✓ |
@@ -89,7 +89,7 @@ Ternary/下标/成员读不判定（模型塌成 int，指针算术会误报）�
 | ④ | 第二个 `default:` | error `multiple default labels in one switch` | 同文 | ✓ |
 | ⑤ | `default:` 之后的 `case` | silent | silent | ✓ |
 | ⑥ | `switch (dir)`（enum 主体） | silent（穷尽性另行检查） | silent | ✓ |
-| ⑦ | `case RED:`（enum 成员与字面量同值） | error `duplicate case value: '1' and 'RED' both equal '1'` | **silent** — 无常量折叠（enum_members 只存名字不存值） | ✗（记录缺口） |
+| ⑦ | `case RED:`（enum 成员与字面量同值） | error `duplicate case value: '1' and 'RED' both equal '1'`，caret 在 RED | 同文同位（`enum_member_values` 折叠） | ✓ |
 
 `switch (*p)`（`char *p`）：silent —— 解引用链经 `deref_subject_type` 折叠
 （宽松 Unary 推导不解引用，曾误报指针主体）。
@@ -105,14 +105,29 @@ pipeline 经 `Checker::feed_included_headers` 喂给 checker：
   在场即全表生效"——漏报是 passthrough 按设计工作，误报不可接受；
 - 引号 `#include "x.h"` 在场时整个未声明函数检查关闭（不可审计的外部面）。
 
-## 已知缺口（本 tranche 记录，按计划推进）
+## 语法层：`to match this '('/'['/'{'` note（2026-10-18 落地）
 
-1. `int *const cp = 0;` declarator：解析/生成把声明整体丢弃（基线亦然，
-   非 checker 回归），const-赋值 ①因此被阻塞；连带 `const int z = 1;`
-   生成 C 丢 `const`（codegen 不回显 is_const）。
-2. `case RED`（枚举成员与字面量同值）不报重复：需要 enum 成员值表 +
-   常量折叠。
-3. 赋值值内的**嵌套**调用（参数位、cast 操作数内）不进 call family；
-   直接值/目标位的调用已覆盖。
-4. assign 值位调用的 caret 差 1 列（span 含 `;`）。
-5. clang 对 `to match this '('` 的 note（括号栈）仍是 parser 待办。
+mismatched closer 的 consume 失败现在附带 clang 同形 note，指在开括号上
+（`advance()` 括号栈，与 `expr_paren_depth` 同一"speculative 不穿越括号"
+不变式）；note 是 NOTE 级——不计错误、不锁 panic mode；去重全表扫描
+（error-then-note 交替时 repeats_last 会漏，一个未闭合大括号只出一条）。
+EOF 场景（文件尾未闭合 `}`）与 `a[1 = 2;` 场景双侧核对一致。
+
+## 已知缺口（余量，按计划推进）
+
+1. 赋值值位调用的 caret 差 1 列（span 把 `;` 计入）。
+2. 点位级 const 差异（`char *p = constCharPtr`）clang 有
+   `-Wdiscarded-qualifiers` 族——未测量，未实现；顶层 const 读取
+   （`int *q = constPtr`）按 C 静默，已对齐。
+
+已修复的原缺口（2026-10-18）：
+- `int *const cp` / `int const w` declarator：解析器曾把 declarator 位
+  `const` 误读为变量名（上下文关键字表含 Const）导致声明整体丢失；
+  star 后与前导位均消费 `const`/`volatile`（前导 const 走 decl 级标志，
+  codegen convert_decl 折叠进类型串回显；star 后 const 落在指针层，
+  type_str 按 `int * const` 回显）。checker scope 入口折叠 decl 级
+  is_const。
+- `case RED` 同值重复：`enum_member_values` 表（解析器本就为每个成员
+  携带显式/隐增值）折叠枚举成员，clang 双拼写措辞原样复刻。
+- 赋值值内嵌套调用：`check_call_family_deep` 深遍历 target/value 克隆
+  子树（真实子树从不单独走 checker 主链，克隆树每节点恰好一次）。

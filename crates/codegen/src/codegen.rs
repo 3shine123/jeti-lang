@@ -1324,7 +1324,7 @@ pub fn ast_type_to_c_str(t: &AstType) -> String {
         s.push_str(" *");
         // const on the pointer itself goes AFTER the *
         if t.is_const {
-            s.push_str("const ");
+            s.push_str(" const");
         }
         return s;
     }
@@ -3574,6 +3574,16 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
             };
             let var_type = if is_weak && !var_type.contains("__block") {
                 format!("__block {}", var_type)
+            } else {
+                var_type
+            };
+            // Decl-level `const` (`const int z = 1;`) qualifies the declared
+            // object; the statement-level emitter has no is_const column, so
+            // fold it into the spelled type here. Skip when the type already
+            // spells it (`int const w` puts is_const on the type node and the
+            // type speller emitted `const int`).
+            let var_type = if is_const && !var_type.starts_with("const ") {
+                format!("const {}", var_type)
             } else {
                 var_type
             };

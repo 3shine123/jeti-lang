@@ -18,8 +18,12 @@ int main(void) {
     }
     switch (v) {
         case 1: break;
+        case RED: break;        // ⑤ duplicate: '1' and 'RED' both equal 1 → error
+    }
+    switch (v) {
+        case 1: break;
         default: break;
-        case RED: break;        // ⑤ case after default → silent (legal C)
+        case 2: break;          // ⑥ case after default → silent (legal C)
     }
     return 0;
 }

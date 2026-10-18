@@ -16,4 +16,5 @@ path = "src/main.rs"
 jeti-ast = { path = "../ast" }
 jeti-cst = { path = "../cst" }
 jetic = { path = "../jetic" }
+jeti-checker = { path = "../checker" }
 serde_json = "1.0.154"

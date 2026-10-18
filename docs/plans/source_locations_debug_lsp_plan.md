@@ -151,9 +151,10 @@ LSP 不必等待 native debugger：它可直接消费 parser/CST/AST 和同一 `
     照旧放行。
   - 验收：12 个破坏样例 clang/jetic 并排比对，语法层 12/12 同位同消息（唯一"差异"是 clang 在
     `a[1 = 2;` 上先报一条**语义**错 `expression is not assignable`，属 checker 范畴；jetic 的
-    `expected ']'` 与 clang 的第二条完全一致）。clang 的 `to match this '('/'{'` note 未做——需要 parser
-    维护括号栈，属后续。单测断言随新位置更新（`error_recovery.rs`、`crates/lsp` 的两个钉旧 caret 的用例）。
-- 未做（后续阶段）：`to match this '('` 配对 note（需要括号栈）、workspace folders、ARC 专属诊断、
+    `expected ']'` 与 clang 的第二条完全一致）。clang 的 `to match this '('/'{'` note **已做**（2026-10-18）：`advance()` 维护
+    开括号栈（kind+raw line/col），closer consume 失败时对最近同型开括号发 NOTE（不计错、
+    不锁 panic；全表扫描去重，error-then-note 交替时 repeats_last 会漏）。单测断言随新位置更新（`error_recovery.rs`、`crates/lsp` 的两个钉旧 caret 的用例）。
+- 未做（后续阶段）：workspace folders、ARC 专属诊断、
   `-Werror` 之外的设置协商（`workspace/configuration`）。
 - **不做（实测数据定案）**：头文件解析结果缓存——原设想"头文件是大文件的主成本、
   值得缓存"被测量证伪：全量头文件的总成本 ~11ms，占大文件分析 ~5%，绝对成本低于

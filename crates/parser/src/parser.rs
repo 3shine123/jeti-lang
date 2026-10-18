@@ -56,6 +56,13 @@ pub struct Parser<'a> {
     /// awaits inside it never match, and the enclosing message's ban must
     /// still cover arguments that follow a block argument.
     msg_await_stack: Vec<(usize, bool)>,
+    /// Open-bracket stack for the `to match this '('` companion notes
+    /// (clang prints one under every mismatched `)`/`]`/`}`): kind
+    /// (0=`(`, 1=`[`, 2=`{`) plus the opener's raw line/column, recorded in
+    /// `advance()` so every consume path stays balanced — the same invariant
+    /// that keeps `expr_paren_depth` honest (speculative lookaheads never
+    /// cross a bracket token without rewinding).
+    open_brackets: Vec<(u8, usize, usize)>,
 }
 
 impl<'a> Parser<'a> {
@@ -111,6 +118,7 @@ impl<'a> Parser<'a> {
             source_map: None,
             expr_paren_depth: 0,
             msg_await_stack: Vec::new(),
+            open_brackets: Vec::new(),
         }
     }
 
@@ -215,9 +223,26 @@ impl<'a> Parser<'a> {
         match self.current.kind {
             TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
                 self.expr_paren_depth += 1;
+                let kind = match self.current.kind {
+                    TokenKind::LBracket => 1u8,
+                    TokenKind::LBrace => 2u8,
+                    _ => 0u8,
+                };
+                self.open_brackets.push((kind, self.current.line, self.current.column));
             }
             TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
                 self.expr_paren_depth = self.expr_paren_depth.saturating_sub(1);
+                // The matching opener is the nearest same-kind entry below the
+                // top; strays above it belong to error paths that never closed
+                // and stay for their own EOF reporting.
+                let want = match self.current.kind {
+                    TokenKind::RBracket => 1u8,
+                    TokenKind::RBrace => 2u8,
+                    _ => 0u8,
+                };
+                if let Some(pos) = self.open_brackets.iter().rposition(|(k, _, _)| *k == want) {
+                    self.open_brackets.remove(pos);
+                }
                 // Falling below a message's interior depth closes it (its own
                 // `]`, or an enclosing closer on an error-recovery path).
                 while self
@@ -338,6 +363,11 @@ impl<'a> Parser<'a> {
                 _ => "",
             };
             self.error_at_missing(msg, insert);
+            // clang prints a companion note under every mismatched closer,
+            // pointing at the opener: `to match this '('`. The stack holds
+            // the openers seen so far — the nearest same-kind entry is the
+            // one this closer would have matched.
+            self.emit_match_note(kind);
             // Do NOT advance past the offending token. The old behaviour ate it,
             // which for a missing ';' swallowed the *next* declaration's leading
             // token (`int b = 2` lost its `int`, the remnant parsed as a harmless
@@ -345,6 +375,39 @@ impl<'a> Parser<'a> {
             // token in place lets the recovery loop in parse_translation_unit /
             // parse_compound_statement resync from the real position.
         }
+    }
+
+    /// clang's companion note for a failed closer consume: `to match this '('`
+    /// at the opener's own position (probe-measured wording — the note is a
+    /// NOTE, never an error: it must not latch panic mode or count toward the
+    /// error total). Deduped with the same last-entry guard as the error
+    /// paths, so a file ending in two unclosed braces prints one note, not
+    /// one per compound statement.
+    fn emit_match_note(&mut self, closer_kind: TokenKind) {
+        let (want, spelling) = match closer_kind {
+            TokenKind::RParen => (0u8, "'('"),
+            TokenKind::RBracket => (1u8, "'['"),
+            TokenKind::RBrace => (2u8, "'{'"),
+            _ => return,
+        };
+        let Some(&(_, line, col)) = self.open_brackets.iter().rev().find(|(k, _, _)| *k == want)
+        else {
+            return;
+        };
+        let (file, real_line) = self.file_of_line_mapped(line);
+        let msg = format!("to match this {}", spelling);
+        // The note's dedupe cannot use repeats_last alone: a consume failure
+        // pushes error-then-note back to back, and the NEXT failure's note
+        // compares against that error, not the previous note — one unclosed
+        // brace printed its note twice. Scan the whole list: notes are rare
+        // and the list is small.
+        if self.diagnostics.iter().any(|d| {
+            d.severity == Severity::Note && d.file == file && d.line == real_line
+                && d.col == col && d.message == msg
+        }) {
+            return;
+        }
+        self.diagnostics.push(Diagnostic::note(file, real_line, col, &msg));
     }
 
     fn consume_keyword(&mut self, kw: KeywordKind, msg: &str) {
@@ -1189,6 +1252,19 @@ else if self.match_keyword(KeywordKind::Typeof) {
             }
         }
 
+        // C17 6.7.2: a qualifier BETWEEN the base type and the declarator
+        // stars (`int const *p`, `int const w`) qualifies the BASE type —
+        // it never names a variable. `const`/`volatile` are contextual
+        // keywords (legal variable names by the C-superset rule), so they
+        // must be consumed HERE, before the star loop misreads them as the
+        // declarator name and the whole declaration fell out.
+        while {
+            let mut ate = false;
+            if self.match_keyword(KeywordKind::Const) { t.is_const = true; ate = true; }
+            if self.match_keyword(KeywordKind::Volatile) { t.is_volatile = true; ate = true; }
+            ate
+        } {}
+
         // A prefix annotation (`nullable NPString *s`) parsed onto the base by
         // the qualifier loop is lifted off here and re-applied after the star
         // loop. Leaving it on the base would mark the INNER pointer level.
@@ -1222,6 +1298,18 @@ else if self.match_keyword(KeywordKind::Typeof) {
                     t.nulls = n;
                 }
             }
+            // C17 6.7 declarator-position qualifiers: `int *const cp` — a
+            // `const` (or `volatile`) right after a star qualifies THAT
+            // pointer level, not a variable named `const`. Without this
+            // consume the contextual-keyword name rule read the qualifier as
+            // the declarator name and the whole declaration fell out (the
+            // variable ended up undeclared and the C emission lost it).
+            while {
+                let mut ate = false;
+                if self.match_keyword(KeywordKind::Const) { t.is_const = true; ate = true; }
+                if self.match_keyword(KeywordKind::Volatile) { t.is_volatile = true; ate = true; }
+                ate
+            } {}
         }
 
         // A prefix annotation with a SINGLE star lands on that (outermost)
@@ -5093,6 +5181,9 @@ line: pri_line,
                 }
             }
         };
+        // (Declarator-position `const`/`volatile` are consumed inside
+        // parse_type_full — qualifier between base and stars qualifies the
+        // base, and must not be read as the declarator's name.)
         // Mid-declaration attributes between return type and name:
         // `void *__attribute__((warn_unused_result)) f(void);`
         let mid_attrs = self.parse_attributes();
@@ -5175,11 +5266,33 @@ line: pri_line,
                     let mut decl_type = base_type.clone();
                     let mut stars = 0usize;
                     while self.match_token(TokenKind::Star) { stars += 1; }
+                    // Per-declarator const/volatile (`int *const a, *const b;`)
+                    // — qualifier on THIS declarator's pointer level, and must
+                    // not be read as the declarator's name.
+                    let mut decl_const = false;
+                    let mut decl_volatile = false;
+                    while {
+                        let mut ate = false;
+                        if self.match_keyword(KeywordKind::Const) { decl_const = true; ate = true; }
+                        if self.match_keyword(KeywordKind::Volatile) { decl_volatile = true; ate = true; }
+                        ate
+                    } {}
                     for _ in 0..stars {
                         let mut ptr = CstType::new(TypePrim::Named);
                         ptr.is_pointer = true;
+                        ptr.is_const = decl_const;
+                        ptr.is_volatile = decl_volatile;
                         ptr.subtype = Some(Box::new(decl_type.take().unwrap_or_else(|| CstType::new(TypePrim::Int))));
                         decl_type = Some(ptr);
+                    }
+                    // Bare const on a non-pointer declarator (`const int a, b;`
+                    // is normally handled by the leading-qualifier path, but a
+                    // mid-list `T const b` must qualify b's type too).
+                    if (decl_const || decl_volatile) && stars == 0 {
+                        if let Some(dt) = decl_type.as_mut() {
+                            if decl_const { dt.is_const = true; }
+                            if decl_volatile { dt.is_volatile = true; }
+                        }
                     }
                     if self.current.kind != TokenKind::Identifier {
                         // Not another declarator — restore position is not

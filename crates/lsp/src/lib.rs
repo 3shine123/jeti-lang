@@ -748,6 +748,19 @@ impl Server {
                         }
                         None => {}
                     }
+                    // The declaration index only answers for file-level
+                    // symbols. Everything else the editor parks a cursor on —
+                    // a local/parameter/ivar (`sp` in `sp.label = nil`), a
+                    // builtin type keyword (`int`, `SEL`), a Jeti keyword
+                    // (`@interface`), a C17 library function the passthrough
+                    // headers declare (`printf`) — still deserves a card.
+                    if hover.is_null() {
+                        if let Some(markdown) = self.fallback_hover(index, &doc.text, position) {
+                            hover = json!({
+                                "contents": { "kind": "markdown", "value": markdown },
+                            });
+                        }
+                    }
                 }
                 vec![response(id, hover)]
             }
@@ -920,8 +933,45 @@ impl Server {
     }
 
     /// Text of any open document, by path (open buffers shadow disk).
-    fn text_of(&self) -> impl Fn(&str) -> Option<String> + '_ {
-        move |path: &str| {
+    /// Hover answers the declaration index cannot give: locals/params/ivars
+    /// (the scopes the completion machinery already walks), builtin type
+    /// keywords, Jeti keywords, and the C17 library surface the passthrough
+    /// headers declare. Order matters: a real declaration beats a local, a
+    /// local beats a keyword card, a keyword beats the library guess.
+    fn fallback_hover(
+        &self,
+        index: &index::SymbolIndex,
+        text: &str,
+        position: LspPosition,
+    ) -> Option<String> {
+        let word = word_at(text, position)?;
+        if let Some(local) = index.local_at(position, &word) {
+            let mut markdown = format!("**局部变量** `{}` · `{}`", word, local.type_spelling);
+            if let Some(line) = local.decl_line {
+                markdown.push_str(&format!("\n\n_声明于本文件第 {line} 行_"));
+            }
+            return Some(markdown);
+        }
+        if let Some(markdown) = builtin_type_markdown(&word) {
+            return Some(markdown);
+        }
+        if let Some(markdown) = jeti_keyword_markdown(&word) {
+            return Some(markdown);
+        }
+        if let Some(header) = jeti_checker::c_stdlib_function_header(&word) {
+            return Some(format!(
+                "**C 标准库函数** `{word}`\n\n声明于 `<{header}>`（passthrough 头；jetic 不解析 C 头部，签名以头文件为准）"
+            ));
+        }
+        if let Some(header) = jeti_checker::c_stdlib_binding_header(&word) {
+            return Some(format!(
+                "**C 标准库绑定** `{word}`\n\n声明于 `<{header}>`（全局对象或宏常数）"
+            ));
+        }
+        None
+    }
+
+    fn text_of(&self) -> impl Fn(&str) -> Option<String> + '_ {        move |path: &str| {
             self.docs
                 .values()
                 .find(|d| same_file(&d.path, path))
@@ -1050,6 +1100,100 @@ fn namespace_markdown(name: &str) -> String {
         "**namespace** `{name}`\n\n_Contents are indexed; the `@namespace` block itself is flattened \
          by the compiler, so there is no declaration to show._"
     )
+}
+
+/// The identifier (or `@`-keyword) under the cursor. LSP positions are
+/// UTF-16 code units; `SourceFile::lsp_to_offset` does the one conversion
+/// the boundary rules allow, then the scan walks plain bytes.
+fn word_at(text: &str, position: LspPosition) -> Option<String> {
+    let offset = SourceFile::lsp_to_offset(text, position)?;
+    let bytes = text.as_bytes();
+    let mut start = offset.min(bytes.len());
+    // Anchor one-past-the-end cursors to the word before them (same rule
+    // the index's word_bounds uses).
+    if start == bytes.len() || !is_word_byte(bytes[start]) {
+        if start == 0 || !is_word_byte(bytes[start - 1]) {
+            return None;
+        }
+        start -= 1;
+    }
+    let mut end = start + 1;
+    while start > 0 && is_word_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    while end < bytes.len() && is_word_byte(bytes[end]) {
+        end += 1;
+    }
+    // An `@` immediately before the word makes it a Jeti keyword
+    // (`@interface`) — one token for hover purposes. The slice keeps the
+    // word only; the `@` is prepended explicitly (shifting `start` would
+    // double it — the slice would already carry the `@`).
+    let at = start > 0 && bytes[start - 1] == b'@';
+    let word = &text[start..end];
+    Some(if at { format!("@{word}") } else { word.to_string() })
+}
+
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+/// Builtin type keywords — the card clangd shows for `int`, terse and
+/// factual. C17 6.2.5 spells the type system; ObjC adds the object kinds.
+fn builtin_type_markdown(word: &str) -> Option<String> {
+    let (name, desc) = match word {
+        "void" => ("void", "无类型（C17 6.2.5）——无返回值函数与 `void *`"),
+        "int" => ("int", "内置整型（C17 6.2.5p5）"),
+        "char" => ("char", "字符型，1 字节（C17 6.2.5p15）"),
+        "short" => ("short", "短整型（C17 6.2.5p5）"),
+        "long" => ("long", "长整型（LP64 下 64 位）"),
+        "float" => ("float", "单精度浮点（C17 6.2.5p10）"),
+        "double" => ("double", "双精度浮点（C17 6.2.5p10）"),
+        "signed" => ("signed", "有符号限定"),
+        "unsigned" => ("unsigned", "无符号限定"),
+        "const" => ("const", "只读限定（C17 6.7.3）"),
+        "volatile" => ("volatile", "易变限定（C17 6.7.3）"),
+        "struct" => ("struct", "结构体（C17 6.7.2.1）——悬停在成员名上看字段"),
+        "union" => ("union", "联合体（C17 6.7.2.1）"),
+        "enum" => ("enum", "枚举（C17 6.7.2.2）"),
+        "BOOL" => ("BOOL", "ObjC 布尔（4 字节整型；jeti 里即 `_Bool`/`int` 家族）"),
+        "SEL" => ("SEL", "选择器类型——消息名 intern 后的句柄"),
+        "id" => ("id", "对象指针通配——任何对象都可赋给它"),
+        "Class" => ("Class", "类对象指针——`+[… alloc]` 的接收者"),
+        "instancetype" => ("instancetype", "方法所在类的实例类型（比 id 更精确）"),
+        "self" => ("self", "当前接收者：实例方法里是实例，类方法里是类对象"),
+        "super" => ("super", "向父类发消息的编译期指示（仍是 self）"),
+        "nil" => ("nil", "空对象常量（值为 0）"),
+        "NULL" => ("NULL", "空指针常量（值为 0）"),
+        _ => return None,
+    };
+    Some(format!("**`{name}`**\n\n{desc}"))
+}
+
+/// Jeti keyword cards for the `@` family (clangd shows nothing there; the
+/// language server should at least say what the construct is).
+fn jeti_keyword_markdown(word: &str) -> Option<String> {
+    let (name, desc) = match word {
+        "@interface" => ("@interface", "类/协议声明：方法、ivars、属性；成员在 @implementation 里实现"),
+        "@implementation" => ("@implementation", "类实现：方法体在这里；可与 @interface 分文件（owner TU 持有元数据）"),
+        "@property" => ("@property", "声明属性——生成存取方法与 ivar"),
+        "@protocol" => ("@protocol", "协议：方法契约，类用 <P> 遵循"),
+        "@class" => ("@class", "前向声明：只报名字，不带布局"),
+        "@end" => ("@end", "类/协议/实现块结束"),
+        "@try" => ("@try", "异常尝试块；配 @catch / @finally"),
+        "@catch" => ("@catch", "捕获 @throw 抛出的对象"),
+        "@finally" => ("@finally", "无论是否抛出都执行的清理块"),
+        "@throw" => ("@throw", "抛出异常对象"),
+        "@selector" => ("@selector", "把消息名编译成 SEL"),
+        "@autoreleasepool" => ("@autoreleasepool", "自动释放池作用域"),
+        "@synchronized" => ("@synchronized", "互斥锁作用域"),
+        "@namespace" => ("@namespace", "名字空间：内部声明的全名带前缀"),
+        "@using" => ("@using", "把全名引入为短名"),
+        "@public" => ("@public", "ivar 可见性：外部可直接访问"),
+        "@private" => ("@private", "ivar 可见性：仅本类"),
+        "@protected" => ("@protected", "ivar 可见性：本类及子类"),
+        _ => return None,
+    };
+    Some(format!("**`{name}`**\n\n{desc}"))
 }
 
 /// Markdown hover: what the declaration is, its own source text, and where it
@@ -2072,6 +2216,75 @@ void runUse(void) {
     }
 
     #[test]
+    /// Hover answers for everything the declaration index cannot: locals and
+    /// receivers (`sp` in `sp.label = nil`), builtin type keywords, Jeti
+    /// keywords, and the C17 library surface the passthrough headers bring.
+    #[test]
+    fn hover_covers_locals_builtins_keywords_and_c_stdlib() {
+        let src = "\
+#include <stdio.h>
+#include <errno.h>
+
+@interface Runner : jeti_root
+@property int label;
+@end
+
+@implementation Runner
+- (void)run {
+    Runner *sp = self;
+    sp.label = 1;
+    int ticks = 0;
+    printf(\"%d\\n\", ticks + errno);
+}
+@end
+
+int main(void) { return 0; }
+";
+        let analyzed = analyze(src);
+        let hover_at = |needle: &str, extra: usize| {
+            let pos = position(src, needle, extra);
+            let mut server = Server::new(AnalysisOptions::default());
+            let uri = path_to_uri("/tmp/jeti_lsp_unit/hover.jeti");
+            server.handle(&json!({
+                "jsonrpc": "2.0", "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+                }},
+            }));
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 30, "method": "textDocument/hover",
+                "params": { "textDocument": { "uri": uri },
+                            "position": position_json(pos) },
+            }));
+            out[0]["result"]["contents"]["value"].as_str().map(String::from)
+        };
+
+        // The receiver `sp` in `sp.label = nil` — clangd shows the receiver's
+        // type; the index-only hover used to answer nothing.
+        let value = hover_at("sp.label", 0).expect("sp hover");
+        assert!(value.contains("局部变量") && value.contains("Runner"), "{value}");
+
+        // A scalar local: `int ticks`.
+        let value = hover_at("ticks", 0).expect("ticks hover");
+        assert!(value.contains("int"), "{value}");
+
+        // A passthrough C function.
+        let value = hover_at("printf", 0).expect("printf hover");
+        assert!(value.contains("C 标准库函数") && value.contains("stdio.h"), "{value}");
+
+        // A passthrough binding.
+        let value = hover_at("errno", 0).expect("errno hover");
+        assert!(value.contains("C 标准库绑定") && value.contains("errno.h"), "{value}");
+
+        // Builtin type keyword.
+        let value = hover_at("int main", 0).expect("int hover");
+        assert!(value.contains("内置整型"), "{value}");
+
+        // Jeti keyword.
+        let value = hover_at("@interface", 1).expect("keyword hover");
+        assert!(value.contains("@interface"), "{value}");
+    }
+
     fn hover_and_completion_speak_qualified_names() {
         let mut server = Server::new(AnalysisOptions::default());
         let uri = path_to_uri("/tmp/jeti_lsp_unit/namespaces.jeti");
@@ -2864,6 +3077,65 @@ int main(void) {
         let loud = msgs.iter().filter(|m| m.contains("assigning")
             || m.contains("conversion")).count();
         assert_eq!(loud, 6, "silent shapes must not fire: {msgs:?}");
+    }
+
+    #[test]
+    fn const_assign_family_matches_clang_after_declarator_fix() {
+        let msgs = diag_messages("int main(void) {
+    const int z = 1;
+    int const w = 2;
+    int *const cp = 0;
+    int *q = 0;
+    z = 2;        // leading const → error
+    w = 3;        // declarator const → error
+    cp = 0;       // pointer-level const → error 'int *const'
+    q = cp;       // top-level const read → silent (C)
+    return 0;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains(
+            "cannot assign to variable 'z' with const-qualified type 'int'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "cannot assign to variable 'w' with const-qualified type 'int'")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "cannot assign to variable 'cp' with const-qualified type 'int *const'")), "{msgs:?}");
+        assert_eq!(msgs.len(), 3, "reading a const pointer must stay silent: {msgs:?}");
+    }
+
+    #[test]
+    fn enum_member_case_labels_fold_for_duplicates() {
+        let msgs = diag_messages("enum Color { RED = 1, BLUE };
+int main(void) {
+    int v = 1;
+    switch (v) {
+        case 1: break;
+        case RED: break;   // both equal 1 → error
+        case BLUE: break;  // distinct → silent
+    }
+    return 0;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains(
+            "duplicate case value: '1' and 'RED' both equal '1'")), "{msgs:?}");
+        assert_eq!(msgs.len(), 1, "distinct members must stay silent: {msgs:?}");
+    }
+
+    #[test]
+    fn nested_calls_in_assignment_values_reach_the_call_family() {
+        let msgs = diag_messages("int one(int a) { return a; }
+int wrap(int v) { return v; }
+int main(void) {
+    int r = wrap(one(1));    // nested correct → silent
+    r = wrap(one(1, 2));     // nested too-many → error
+    r = wrap(one());         // nested too-few → error
+    return r;
+}
+");
+        assert!(msgs.iter().any(|m| m.contains(
+            "too many arguments to function call, expected single argument 'a', have 2 arguments")), "{msgs:?}");
+        assert!(msgs.iter().any(|m| m.contains(
+            "too few arguments to function call, expected 1, have 0")), "{msgs:?}");
+        assert_eq!(msgs.len(), 2, "{msgs:?}");
     }
 
     #[test]

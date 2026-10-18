@@ -90,7 +90,7 @@ static unsigned loopsum(int n) {
     acc ^= mask;
     acc = acc > 1000u ? acc - 1000u : acc;          // ternary
     char buf[3] = "AB";                              // writable copy:
-    const unsigned char *p = (const unsigned char *)buf;
+    unsigned char *p = (unsigned char *)buf;         // (pointee must stay writable: (*p)++ below)
     unsigned char first = *p;
     unsigned char next  = (*p)++;                    // postfix on deref: (*p)++
     acc += (unsigned)first + (unsigned)next;         // (writing a literal = SIGBUS)

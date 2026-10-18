@@ -157,6 +157,12 @@ pub struct Checker {
     /// when the subject spells the enum type directly; collecting here lets
     /// the checker prove it from the declaration table instead of guessing.
     pub enum_members: HashMap<String, Vec<String>>,
+    /// Enum member name → folded integer value (`RED` → 1). The parser
+    /// carries explicit `= N` values and the implicit `previous + 1`
+    /// increments for every member, so the checker can constant-fold case
+    /// labels spelled as enum members — clang flags `case RED` duplicating
+    /// `case 1` when both equal 1 (probe_switch ⑦ measured).
+    pub enum_member_values: HashMap<String, i64>,
     /// typedef alias → enum tag name (`typedef enum Tag {...} Alias;`), the
     /// same shape as `struct_alias_tags`. The alias spelling is what a
     /// variable's type node carries, so the exhaustiveness check resolves
@@ -179,6 +185,145 @@ pub struct Checker {
     /// checker runs, so no `@throw` statement survives to reconcile; the bare
     /// "must really throw" rule is suspended there.
     pub eh_checked: bool,
+}
+
+/// The C17 library function surface, curated from the library clause (clang
+/// sources are off limits) — one static table, two consumers: the
+/// undeclared-function whitelist gate (header-gated by what the TU included)
+/// and the LSP hover cards ([`c_stdlib_function_header`]).
+static C_STDLIB_FUNCTIONS: &[(&str, &[&str])] = &[
+    ("stdio.h", &[
+        "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
+        "vsprintf", "vsnprintf", "puts", "putchar", "fputs", "fputc",
+        "fgets", "fgetc", "getc", "putc", "getchar", "gets", "ungetc",
+        "fopen", "fclose", "fflush", "fread", "fwrite", "fseek", "ftell",
+        "rewind", "feof", "ferror", "remove", "rename", "tmpfile",
+        "perror", "getline", "sscanf", "fscanf", "scanf",
+        "setvbuf", "setbuf", "fsetpos", "fgetpos", "fileno", "fdopen",
+    ]),
+    ("stdlib.h", &[
+        "malloc", "calloc", "realloc", "free", "abort", "exit", "_Exit",
+        "atexit", "at_quick_exit", "quick_exit", "rand", "srand",
+        "qsort", "bsearch", "abs", "labs", "llabs", "div", "ldiv",
+        "getenv", "setenv", "putenv", "unsetenv", "system", "strtol",
+        "strtoul", "strtoll", "strtoull", "strtod", "strtof", "strtold",
+        "atoi", "atol", "atoll", "strdup", "mkstemp", "mkdtemp", "rand_r",
+    ]),
+    ("string.h", &[
+        "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
+        "strchr", "strrchr", "strstr", "strlen", "memset", "memcmp",
+        "memcpy", "memmove", "memchr", "strtok", "strerror", "strspn",
+        "strcspn", "strpbrk", "strcoll", "strxfrm",
+    ]),
+    ("time.h", &[
+        "time", "clock", "localtime", "gmtime", "mktime", "strftime",
+        "difftime", "nanosleep", "timegm",
+    ]),
+    ("ctype.h", &[
+        "isdigit", "isalpha", "isalnum", "isspace", "isupper", "islower",
+        "ispunct", "isprint", "isgraph", "iscntrl", "isxdigit", "toupper",
+        "tolower", "isblank",
+    ]),
+    ("stdarg.h", &["va_start", "va_arg", "va_end", "va_copy"]),
+    ("math.h", &[
+        "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "exp",
+        "log", "log2", "log10", "pow", "sqrt", "cbrt", "fmod", "ceil",
+        "floor", "fabs", "round", "rint", "trunc", "fmin", "fmax",
+        "hypot", "copysign", "nan", "nearbyint",
+    ]),
+    ("setjmp.h", &["setjmp", "longjmp"]),
+    ("unistd.h", &[
+        "unlink", "getpid", "getppid", "getuid", "getgid", "getopt",
+        "access", "dup", "dup2", "isatty", "ttyname", "fsync", "fork",
+        "execve", "usleep", "getcwd", "chdir", "read", "write", "close",
+    ]),
+    ("signal.h", &[
+        "signal", "raise", "kill", "sigemptyset", "sigaddset",
+        "sigfillset", "sigprocmask", "sigismember", "sigdelset",
+        "sigaction", "sigpending", "sigsuspend",
+    ]),
+    ("dirent.h", &["opendir", "readdir", "closedir"]),
+    ("pthread.h", &[
+        "pthread_create", "pthread_join", "pthread_detach", "pthread_exit",
+        "pthread_mutex_lock", "pthread_mutex_unlock", "pthread_self",
+        "pthread_cancel", "pthread_cond_wait", "pthread_cond_signal",
+        "pthread_attr_init", "pthread_attr_destroy", "pthread_mutex_init",
+        "pthread_mutex_destroy", "pthread_cond_init", "pthread_cond_destroy",
+    ]),
+    ("complex.h", &[
+        "creal", "cimag", "crealf", "cimagf", "cabs", "cabsf", "carg",
+        "cargf", "conj", "conjf",
+    ]),
+];
+
+/// The C17 library *binding* surface (globals and macro constants) — same
+/// two consumers as [`C_STDLIB_FUNCTIONS`].
+static C_STDLIB_BINDINGS: &[(&str, &[&str])] = &[
+    ("errno.h", &[
+        "errno", "EPERM", "ENOENT", "ESRCH", "EINTR", "EIO", "ENXIO", "E2BIG",
+        "ENOEXEC", "EBADF", "ECHILD", "EAGAIN", "ENOMEM", "EACCES", "EFAULT",
+        "EBUSY", "EEXIST", "EXDEV", "ENODEV", "ENOTDIR", "EISDIR", "EINVAL",
+        "ENFILE", "EMFILE", "ENOTTY", "EFBIG", "EPIPE", "EDOM", "ERANGE",
+        "EDEADLK", "ENAMETOOLONG", "ENOLCK", "ENOSYS", "ENOTEMPTY", "ELOOP",
+        "EWOULDBLOCK", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED",
+        "EADDRINUSE", "EINPROGRESS", "EHOSTUNREACH", "ENETUNREACH",
+    ]),
+    ("stdio.h", &[
+        "stdin", "stdout", "stderr", "EOF", "FILE", "BUFSIZ", "SEEK_SET",
+        "SEEK_CUR", "SEEK_END",
+    ]),
+    ("unistd.h", &[
+        "STDIN_FILENO", "STDOUT_FILENO", "STDERR_FILENO", "environ",
+        "optarg", "optind", "opterr", "optopt",
+    ]),
+    ("termios.h", &[
+        "ECHO", "ECHONL", "ECHOE", "ECHOK", "ICANON", "ISIG", "IEXTEN",
+        "OPOST", "ONLCR", "O_NONBLOCK", "VMIN", "VTIME", "TCSANOW",
+        "TCSADRAIN", "TCSAFLUSH", "IGNBRK", "BRKINT", "PARMRK", "ISTRIP",
+        "INLCR", "IGNCR", "ICRNL", "IXON", "IXOFF", "PARENB", "PARODD",
+        "CS7", "CS8", "CSTOPB", "CREAD", "CLOCAL", "TIOCGWINSZ",
+    ]),
+    ("fcntl.h", &[
+        "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND",
+        "O_EXCL", "O_NONBLOCK", "O_SYNC", "F_GETFL", "F_SETFL", "F_GETFD",
+        "F_SETFD",
+    ]),
+    ("signal.h", &[
+        "SIGINT", "SIGTERM", "SIGKILL", "SIGSEGV", "SIGHUP", "SIGPIPE",
+        "SIGABRT", "SIGQUIT", "SIG_DFL", "SIG_IGN", "SIG_ERR",
+    ]),
+    ("limits.h", &[
+        "CHAR_BIT", "SCHAR_MIN", "SCHAR_MAX", "UCHAR_MAX", "CHAR_MIN",
+        "CHAR_MAX", "SHRT_MIN", "SHRT_MAX", "USHRT_MAX", "INT_MIN",
+        "INT_MAX", "UINT_MAX", "LONG_MIN", "LONG_MAX", "ULONG_MAX",
+        "LLONG_MIN", "LLONG_MAX", "ULLONG_MAX", "SIZE_MAX", "SSIZE_MAX",
+        "INT8_MAX", "INT16_MAX", "INT32_MAX", "INT64_MAX", "UINT8_MAX",
+        "UINT16_MAX", "UINT32_MAX", "UINT64_MAX", "INT32_MIN", "INT64_MIN",
+        "PATH_MAX", "NAME_MAX",
+    ]),
+    ("math.h", &[
+        "M_PI", "M_E", "M_LOG2E", "M_SQRT2", "INFINITY", "NAN", "HUGE_VAL",
+        "HUGE_VALF",
+    ]),
+    ("time.h", &["CLOCKS_PER_SEC"]),
+    ("stdlib.h", &["EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX"]),
+];
+
+/// Which C17 header declares this function — the LSP hover card's
+/// provenance line. Header-agnostic on purpose: the caller decides whether
+/// the TU actually pulled the header in.
+pub fn c_stdlib_function_header(name: &str) -> Option<&'static str> {
+    C_STDLIB_FUNCTIONS.iter()
+        .find(|(_, table)| table.contains(&name))
+        .map(|(header, _)| *header)
+}
+
+/// Which C17 header declares this binding (global/macro constant) — same
+/// provenance contract as [`c_stdlib_function_header`].
+pub fn c_stdlib_binding_header(name: &str) -> Option<&'static str> {
+    C_STDLIB_BINDINGS.iter()
+        .find(|(_, table)| table.contains(&name))
+        .map(|(header, _)| *header)
 }
 
 impl Checker {
@@ -215,6 +360,7 @@ impl Checker {
             struct_alias_tags: HashMap::new(),
             typedef_blocks: HashMap::new(),
             enum_members: HashMap::new(),
+            enum_member_values: HashMap::new(),
             enum_alias_tags: HashMap::new(),
             throws_ann: None,
             thrown: Vec::new(),
@@ -726,6 +872,56 @@ impl Checker {
         }
     }
 
+    /// Deep call-family walk for clone-evaluated subtrees. The assignment
+    /// hook evaluates clones of target/value with the post-inner hooks
+    /// suppressed (double-reporting guard), which silently exempted every
+    /// call nested inside an assignment value — `part = va_arg(ap, T)` was
+    /// fine but `r = wrap(one_arg(1))` never saw its arity check. This walk
+    /// fires check_call_family once per FuncCall node in the subtree; it must
+    /// only be called on nodes whose REAL counterparts are never visited
+    /// outside the clone (assignment target/value chains).
+    fn check_call_family_deep(&mut self, e: &AstExpr) {
+        if let AstExprData::FuncCall { .. } = &e.data {
+            self.check_call_family(e);
+        }
+        match &e.data {
+            AstExprData::Unary { operand, .. }
+            | AstExprData::Paren(operand)
+            | AstExprData::Cast { expr: operand, .. } => {
+                self.check_call_family_deep(operand);
+            }
+            AstExprData::Binary { left, right, .. } => {
+                self.check_call_family_deep(left);
+                self.check_call_family_deep(right);
+            }
+            AstExprData::Ternary { cond, then, else_ } => {
+                self.check_call_family_deep(cond);
+                self.check_call_family_deep(then);
+                self.check_call_family_deep(else_);
+            }
+            AstExprData::Comma(exprs) => {
+                for ex in exprs { self.check_call_family_deep(ex); }
+            }
+            AstExprData::Subscript { object, key, .. } => {
+                self.check_call_family_deep(object);
+                self.check_call_family_deep(key);
+            }
+            AstExprData::FuncCall { callee, args, .. } => {
+                if let Some(c) = callee { self.check_call_family_deep(c); }
+                for a in args { self.check_call_family_deep(a); }
+            }
+            AstExprData::MsgSend { receiver, args, .. } => {
+                self.check_call_family_deep(receiver);
+                for a in args { self.check_call_family_deep(a); }
+            }
+            AstExprData::Assign { target, value } => {
+                self.check_call_family_deep(target);
+                self.check_call_family_deep(value);
+            }
+            _ => {}
+        }
+    }
+
     // ─── assignment family (C17 6.5.16) ─────────────────────────────────
     //
     // clang-measured (probe_assign / probe2 / probe_objc.m):
@@ -816,15 +1012,23 @@ impl Checker {
         if Self::is_pointer_like(&tty) && Self::is_pointer_like(&vty) {
             if tty.prim == TypePrim::Void || vty.prim == TypePrim::Void { return; }
             if Self::obj_wildcard(&tty) || Self::obj_wildcard(&vty) { return; }
-            let tn = Self::named_class_of(&tty);
-            let vn = Self::named_class_of(&vty);
+            // Top-level const is a read-side qualifier: `int *q = cp` with
+            // `int *const cp` reads the pointer value, discarding nothing the
+            // standard protects — clang is silent there. Compare spellings
+            // with the top-level const stripped.
+            let mut tty_eff = tty.clone();
+            let mut vty_eff = vty.clone();
+            tty_eff.is_const = false;
+            vty_eff.is_const = false;
+            let tn = Self::named_class_of(&tty_eff);
+            let vn = Self::named_class_of(&vty_eff);
             match (&tn, &vn) {
                 // Same named class: the same spelling joins itself.
                 (Some(t), Some(v)) if t == v => return,
                 // Both primitive pointers with the same spelling (`int *` ←
                 // `int *`): silent. Different spellings fall through to the
                 // warning (char * ← int * — probe_assign ③ measured).
-                (None, None) if Self::type_display(&tty) == Self::type_display(&vty) => return,
+                (None, None) if Self::type_display(&tty_eff) == Self::type_display(&vty_eff) => return,
                 _ => {}
             }
             // Child-class value into parent-class target is the ordinary
@@ -836,7 +1040,7 @@ impl Checker {
             }
             self.check_warning_over(e.line, e.col, e.end_line, e.end_col, &format!(
                 "incompatible pointer types assigning to '{}' from '{}'",
-                Self::type_display(&tty), Self::type_display(&vty)));
+                Self::type_display(&tty_eff), Self::type_display(&vty_eff)));
             return;
         }
         // Pointer-target ← scalar (probe ⑭): zero/nil literals are the
@@ -1010,7 +1214,7 @@ impl Checker {
         // check_switch_exhaustiveness (labels at the switch body's level),
         // evaluating only literal constants — expression-valued cases are
         // not constant-folded here, and enum-member spellings stay out.
-        let mut seen: Vec<i64> = Vec::new();
+        let mut seen: Vec<(i64, String)> = Vec::new();
         let mut default_seen = false;
         self.walk_switch_labels(body, &mut seen, &mut default_seen);
     }
@@ -1019,25 +1223,41 @@ impl Checker {
     /// Nested switches are their own family — descent stops at them; labels
     /// inside an arm's braces DO belong to this switch (C17 6.8.4.2p2),
     /// mirroring clang's duplicate detection.
-    fn walk_switch_labels(&mut self, s: &AstStmt, seen: &mut Vec<i64>, default_seen: &mut bool) {
+    fn walk_switch_labels(&mut self, s: &AstStmt, seen: &mut Vec<(i64, String)>, default_seen: &mut bool) {
         if matches!(&s.data, AstStmtData::Switch { .. }) { return; }
         if Self::family_span_gates(self, s.line, s.end_line, s.end_col) { return; }
         match &s.data {
-            AstStmtData::Case { value, body } => {                match &value.data {
+            AstStmtData::Case { value, body } => {
+                match &value.data {
                     AstExprData::Int(v) => {
-                        if seen.contains(v) {
+                        let spelling = v.to_string();
+                        if seen.iter().any(|(val, _)| val == v) {
                             self.check_error_over(value.line, value.col, value.end_line, value.end_col,
-                                &format!("duplicate case value '{}'", v));
+                                &format!("duplicate case value '{}'", spelling));
                         } else {
-                            seen.push(*v);
+                            seen.push((*v, spelling));
+                        }
+                    }
+                    AstExprData::VarRef { name, .. } => {
+                        // Enum-member case label, folded through the member
+                        // value table: `case RED` duplicates `case 1` when
+                        // both equal 1 (probe_switch ⑦ — clang quotes both
+                        // spellings). Unfoldable spellings stay silent.
+                        if let Some(&v) = self.enum_member_values.get(name) {
+                            if let Some(&(_, ref prev)) = seen.iter().find(|(val, _)| *val == v) {
+                                self.check_error_over(value.line, value.col, value.end_line, value.end_col,
+                                    &format!("duplicate case value: '{}' and '{}' both equal '{}'", prev, name, v));
+                            } else {
+                                seen.push((v, name.clone()));
+                            }
                         }
                     }
                     AstExprData::Float(_) | AstExprData::FloatRaw(_) => {
                         self.check_error_over(value.line, value.col, value.end_line, value.end_col,
                             "integer constant expression must have integer type, not 'double'");
                     }
-                    // Enum members, integer expressions, object literals:
-                    // not judged here (no constant folding in this checker).
+                    // Integer expressions, object literals: not judged here
+                    // (no constant folding in this checker).
                     _ => {}
                 }
                 self.walk_switch_labels(body, seen, default_seen);
@@ -1074,92 +1294,8 @@ impl Checker {
     /// limits). It is a whitelist gate for the undeclared-function check
     /// ONLY; it never invents arity or type information.
     fn c_stdlib_declares(&self, name: &str) -> bool {
-        const STDIO: &[&str] = &[
-            "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
-            "vsprintf", "vsnprintf", "puts", "putchar", "fputs", "fputc",
-            "fgets", "fgetc", "getc", "putc", "getchar", "gets", "ungetc",
-            "fopen", "fclose", "fflush", "fread", "fwrite", "fseek", "ftell",
-            "rewind", "feof", "ferror", "remove", "rename", "tmpfile",
-            "perror", "getline", "sscanf", "fscanf", "scanf",
-            "setvbuf", "setbuf", "fsetpos", "fgetpos",
-        ];
-        const STDLIB: &[&str] = &[
-            "malloc", "calloc", "realloc", "free", "abort", "exit", "_Exit",
-            "atexit", "at_quick_exit", "quick_exit", "rand", "srand",
-            "qsort", "bsearch", "abs", "labs", "llabs", "div", "ldiv",
-            "getenv", "setenv", "putenv", "unsetenv", "system", "strtol",
-            "strtoul", "strtoll", "strtoull", "strtod", "strtof", "strtold",
-            "atoi", "atol", "atoll", "strdup", "mkstemp", "mkdtemp", "rand_r",
-        ];
-        const STRING: &[&str] = &[
-            "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
-            "strchr", "strrchr", "strstr", "strlen", "memset", "memcmp",
-            "memcpy", "memmove", "memchr", "strtok", "strerror", "strspn",
-            "strcspn", "strpbrk", "strcoll", "strxfrm",
-        ];
-        const TIME: &[&str] = &[
-            "time", "clock", "localtime", "gmtime", "mktime", "strftime",
-            "difftime", "nanosleep", "timegm",
-        ];
-        const CTYPE: &[&str] = &[
-            "isdigit", "isalpha", "isalnum", "isspace", "isupper", "islower",
-            "ispunct", "isprint", "isgraph", "iscntrl", "isxdigit", "toupper",
-            "tolower", "isblank",
-        ];
-        const STDARG: &[&str] = &["va_start", "va_arg", "va_end", "va_copy"];
-        const MATH: &[&str] = &[
-            "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "exp",
-            "log", "log2", "log10", "pow", "sqrt", "cbrt", "fmod", "ceil",
-            "floor", "fabs", "round", "rint", "trunc", "fmin", "fmax",
-            "hypot", "copysign", "nan", "nearbyint",
-        ];
-        const SETJMP: &[&str] = &["setjmp", "longjmp"];
-        const UNISTD: &[&str] = &[
-            "unlink", "getpid", "getppid", "getuid", "getgid", "getopt",
-            "access", "dup", "dup2", "isatty", "ttyname", "fsync", "fork",
-            "execve", "usleep", "getcwd", "chdir",
-        ];
-        const SIGNAL: &[&str] = &[
-            "signal", "raise", "kill", "sigemptyset", "sigaddset",
-            "sigfillset", "sigprocmask", "sigismember", "sigdelset",
-            "sigaction", "sigpending", "sigsuspend",
-        ];
-        const DIRENT: &[&str] = &["opendir", "readdir", "closedir"];
-        const STDBOOL: &[&str] = &[];
-        const STDDEF: &[&str] = &[];
-        const STDINT: &[&str] = &[];
-        const PTHREAD: &[&str] = &[
-            "pthread_create", "pthread_join", "pthread_detach", "pthread_exit",
-            "pthread_mutex_lock", "pthread_mutex_unlock", "pthread_self",
-            "pthread_cancel", "pthread_cond_wait", "pthread_cond_signal",
-            "pthread_attr_init", "pthread_attr_destroy", "pthread_mutex_init",
-            "pthread_mutex_destroy", "pthread_cond_init", "pthread_cond_destroy",
-        ];
-        const COMPLEX: &[&str] = &[
-            "creal", "cimag", "crealf", "cimagf", "cabs", "cabsf", "carg",
-            "cargf", "conj", "conjf",
-        ];
         for h in &self.included_c_headers {
-            let table = match h.as_str() {
-                "stdio.h" => STDIO,
-                "stdlib.h" => STDLIB,
-                "string.h" => STRING,
-                "time.h" => TIME,
-                "ctype.h" => CTYPE,
-                "stdarg.h" => STDARG,
-                "math.h" => MATH,
-                "setjmp.h" => SETJMP,
-                "unistd.h" => UNISTD,
-                "signal.h" => SIGNAL,
-                "dirent.h" => DIRENT,
-                "stdbool.h" => STDBOOL,
-                "stddef.h" => STDDEF,
-                "stdint.h" => STDINT,
-                "pthread.h" => PTHREAD,
-                "complex.h" => COMPLEX,
-                _ => continue,
-            };
-            if table.contains(&name) {
+            if c_stdlib_function_header(name) == Some(h.as_str()) {
                 return true;
             }
         }
@@ -1167,74 +1303,23 @@ impl Checker {
     }
 
     /// Same gate, for *bindings*: the globals and macro constants C headers
-    /// declare (`errno`, `stdin`, `STDIN_FILENO`, `ECHO`, `INT_MAX`…). The
+    /// declare (`errno`, `stdin`, `STDIN_FILENO`, `ECHO`, `INT_MAX`...). The
     /// use-of-undeclared-identifier check consults this before firing — a
     /// mention of `stderr` is real C that reaches the compiler through the
     /// passthrough header, never through the AST.
     fn c_stdlib_binds(&self, name: &str) -> bool {
-        const ERRNO: &[&str] = &[
-            "errno", "EPERM", "ENOENT", "ESRCH", "EINTR", "EIO", "ENXIO", "E2BIG",
-            "ENOEXEC", "EBADF", "ECHILD", "EAGAIN", "ENOMEM", "EACCES", "EFAULT",
-            "EBUSY", "EEXIST", "EXDEV", "ENODEV", "ENOTDIR", "EISDIR", "EINVAL",
-            "ENFILE", "EMFILE", "ENOTTY", "EFBIG", "EPIPE", "EDOM", "ERANGE",
-            "EDEADLK", "ENAMETOOLONG", "ENOLCK", "ENOSYS", "ENOTEMPTY", "ELOOP",
-            "EWOULDBLOCK", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED",
-            "EADDRINUSE", "EINPROGRESS", "EHOSTUNREACH", "ENETUNREACH",
-        ];
-        const STDIO: &[&str] = &[
-            "stdin", "stdout", "stderr", "EOF", "FILE", "BUFSIZ", "SEEK_SET",
-            "SEEK_CUR", "SEEK_END",
-        ];
-        const UNISTD: &[&str] = &[
-            "STDIN_FILENO", "STDOUT_FILENO", "STDERR_FILENO", "environ",
-            "optarg", "optind", "opterr", "optopt",
-        ];
-        const TERMIOS: &[&str] = &[
-            "ECHO", "ECHONL", "ECHOE", "ECHOK", "ICANON", "ISIG", "IEXTEN",
-            "OPOST", "ONLCR", "O_NONBLOCK", "VMIN", "VTIME", "TCSANOW",
-            "TCSADRAIN", "TCSAFLUSH", "IGNBRK", "BRKINT", "PARMRK", "ISTRIP",
-            "INLCR", "IGNCR", "ICRNL", "IXON", "IXOFF", "PARENB", "PARODD",
-            "CS7", "CS8", "CSTOPB", "CREAD", "CLOCAL", "TIOCGWINSZ",
-        ];
-        const FCNTL: &[&str] = &[
-            "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND",
-            "O_EXCL", "O_NONBLOCK", "O_SYNC", "F_GETFL", "F_SETFL", "F_GETFD",
-            "F_SETFD",
-        ];
-        const SIGNAL: &[&str] = &[
-            "SIGINT", "SIGTERM", "SIGKILL", "SIGSEGV", "SIGHUP", "SIGPIPE",
-            "SIGABRT", "SIGQUIT", "SIG_DFL", "SIG_IGN", "SIG_ERR",
-        ];
-        const LIMITS: &[&str] = &[
-            "CHAR_BIT", "SCHAR_MIN", "SCHAR_MAX", "UCHAR_MAX", "CHAR_MIN",
-            "CHAR_MAX", "SHRT_MIN", "SHRT_MAX", "USHRT_MAX", "INT_MIN",
-            "INT_MAX", "UINT_MAX", "LONG_MIN", "LONG_MAX", "ULONG_MAX",
-            "LLONG_MIN", "LLONG_MAX", "ULLONG_MAX", "SIZE_MAX", "SSIZE_MAX",
-            "INT8_MAX", "INT16_MAX", "INT32_MAX", "INT64_MAX", "UINT8_MAX",
-            "UINT16_MAX", "UINT32_MAX", "UINT64_MAX", "INT32_MIN", "INT64_MIN",
-            "PATH_MAX", "NAME_MAX",
-        ];
-        const MATH: &[&str] = &[
-            "M_PI", "M_E", "M_LOG2E", "M_SQRT2", "INFINITY", "NAN", "HUGE_VAL",
-            "HUGE_VALF",
-        ];
-        const TIME: &[&str] = &["CLOCKS_PER_SEC"];
-        const STDLIB: &[&str] = &["EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX"];
         // Bindings are a transitive surface: `#import <termios.h>` pulls
         // unistd's STDIN_FILENO, stdio.h pulls EOF, errno.h pulls the E*
         // codes. The gate is therefore "the TU included at least one audited
         // C header", and the whole curated union applies. A missed diagnostic
         // here is the escape hatch working as designed; a false error would
         // not be.
-        const BINDINGS_HEADERS: &[&str] = &[
-            "errno.h", "stdio.h", "unistd.h", "termios.h", "fcntl.h",
-            "signal.h", "limits.h", "stdint.h", "math.h", "time.h", "stdlib.h",
-        ];
-        if !self.included_c_headers.iter().any(|h| BINDINGS_HEADERS.contains(&h.as_str())) {
+        if !self.included_c_headers.iter().any(|h| {
+            C_STDLIB_BINDINGS.iter().any(|(hdr, _)| *hdr == h.as_str())
+        }) {
             return false;
         }
-        const TABLES: &[&[&str]] = &[ERRNO, STDIO, UNISTD, TERMIOS, FCNTL, SIGNAL, LIMITS, MATH, TIME, STDLIB];
-        TABLES.iter().any(|t| t.contains(&name))
+        C_STDLIB_BINDINGS.iter().any(|(_, table)| table.contains(&name))
     }
 
     /// C headers the pipeline already collected (`pre.c_headers`, whole
@@ -1261,7 +1346,6 @@ impl Checker {
             }
         }
     }
-
 
     /// Do any operand references point to a lowering-desugar internal
     /// (`__jeti_*` variables — async task state, eh exception state)? The
@@ -1379,7 +1463,14 @@ impl Checker {
             s.push_str(&format!("<{}>", args));
         }
         if t.is_pointer {
-            s.push_str(" *");
+            // clang spells a const-qualified pointer level `int *const`
+            // (probe_assign ①) — mirror it so the const-assignment message
+            // quotes the type the user wrote.
+            if t.is_const {
+                s.push_str(" *const");
+            } else {
+                s.push_str(" *");
+            }
         }
         s
     }
@@ -2298,17 +2389,13 @@ impl Checker {
                 self.check_expr(&mut tclone);
                 let vt = self.check_expr(&mut vclone);
                 self.in_clone_eval -= 1;
-                // Call family inside assignment values: the clone eval skips
-                // the post-inner hooks, so the value's own call gets its
-                // family check here. Nested calls (inside args, inside the
-                // target chain) are out of this tranche's proof — the
-                // plan's gap list records it.
-                if let AstExprData::FuncCall { .. } = &vclone.data {
-                    self.check_call_family(&vclone);
-                }
-                if let AstExprData::FuncCall { .. } = &tclone.data {
-                    self.check_call_family(&tclone);
-                }
+                // Call family inside assignment values: the clone eval runs
+                // with the post-inner hooks suppressed, so every call in the
+                // value/target subtree gets its family check through the
+                // dedicated deep walk (each clone node fires exactly once —
+                // the real subtree is never visited outside this clone).
+                self.check_call_family_deep(&tclone);
+                self.check_call_family_deep(&vclone);
                 self.check_assign_family(e, &tclone, &vclone, vt.as_ref());
             }
         }
@@ -4035,8 +4122,12 @@ AstExprData::Subscript { object, key, .. } => {
                     self.current_method = old;
                 }
             }
-            AstDeclData::Variable { var_type, init, next, .. } => {
+            AstDeclData::Variable { var_type, init, next, is_const, .. } => {
                 let head_type = var_type.as_ref().map(|b| (**b).clone());
+                // Leading-qualifier const (`const int z`) lives on the DECL,
+                // not the type node — fold it into the scoped type below so
+                // the assignment family's const-target check sees what C sees.
+                let decl_is_const = *is_const;
                 // Type arguments on a class that declares none are silently
                 // erased (no monomorphization, no element type checking).
                 if let Some(ref t) = head_type {
@@ -4058,7 +4149,17 @@ AstExprData::Subscript { object, key, .. } => {
                     }
                     if let Some(scope) = self.scope_vars.last_mut() {
                         if !scope.iter().any(|(n, _)| n == name) {
-                            let t = head_type.clone().unwrap_or_else(|| AstType::new(TypePrim::Int));
+                            let mut t = head_type.clone().unwrap_or_else(|| AstType::new(TypePrim::Int));
+                            // Leading-qualifier const (`const int z`) lives on
+                            // the DECL, not the type node. C17 6.7.2 reading:
+                            // with no pointer it consts the variable itself;
+                            // WITH a pointer (`const char *p`) it consts the
+                            // POINTEE and the variable stays assignable —
+                            // clang errors on `p = x` only for `char *const`
+                            // (probe_assign ①), never for `const char *p`.
+                            if decl_is_const && !t.is_pointer {
+                                t.is_const = true;
+                            }
                             scope.push((name.clone(), t));
                         }
                     }
@@ -4266,9 +4367,18 @@ AstExprData::Subscript { object, key, .. } => {
     /// participates in exhaustiveness.
     fn collect_enums(&mut self, decl: &AstDecl) {
         match &decl.data {
-            AstDeclData::Enum { members, .. } => {
+            AstDeclData::Enum { members, values } => {
                 if let Some(tag) = &decl.name {
                     self.enum_members.insert(tag.clone(), members.clone());
+                }
+                // Fold member values (parser guarantees a value per member —
+                // explicit `= N` or the implicit increment). Only integer
+                // literals fold; expression-valued members stay unmapped and
+                // the duplicate check stays silent for them.
+                for (m, v) in members.iter().zip(values.iter()) {
+                    if let AstExprData::Int(val) = &v.data {
+                        self.enum_member_values.insert(m.clone(), *val);
+                    }
                 }
             }
             AstDeclData::Typedef { aliased_type: Some(at), .. } => {

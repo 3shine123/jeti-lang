@@ -202,16 +202,22 @@ pub struct MemberEntry {
 /// than one string keeps `id<P>` first-class: the protocol is the type, not a
 /// detail of it.
 #[derive(Debug, Clone)]
-struct ScopeLocal {
-    name: String,
+pub struct ScopeLocal {
+    pub name: String,
     /// The declared type's class name, when the type names a class.
-    class: Option<String>,
+    pub class: Option<String>,
     /// Protocols the declared type conforms to, for `id` receivers.
-    protocols: Vec<String>,
+    pub protocols: Vec<String>,
     /// The declared type's concrete generic arguments, when the type instantiates
     /// a generic class (`NPArray<NPString> *a` → `["NPString"]`): what the class's
     /// type parameters are substituted with for a member of this local.
-    type_args: Vec<String>,
+    pub type_args: Vec<String>,
+    /// Full declared-type spelling for the hover card (`const char *`,
+    /// `NPString *`, `struct S`) — completion never reads it; hover does.
+    pub type_spelling: String,
+    /// Source line (1-based, document-local) of the declaration, when the
+    /// declaration sits in this document — the hover card's provenance.
+    pub decl_line: Option<u32>,
 }
 
 /// What is visible at a position: the enclosing method's parameters, `self`, the
@@ -232,6 +238,11 @@ pub struct Scope {
     pub self_type: Option<String>,
     /// Visible names and what their declared types resolve to.
     pub locals: Vec<ScopeLocal>,
+    /// Every visible name with its spelled type — the hover surface. `locals`
+    /// filters to receiver-shaped entries (class/protocols) for completion;
+    /// hover answers for scalars and pointers too, so this list skips the
+    /// filter.
+    pub hover_locals: Vec<ScopeLocal>,
 }
 
 /// What a receiver resolves to at a position: the class whose members answer
@@ -544,6 +555,25 @@ impl SymbolIndex {
         lookup_names(text, position)
             .into_iter()
             .find_map(|candidate| self.resolve_candidate(&candidate, position))
+    }
+
+    /// The local/parameter/ivar spelling visible at `position` under `name`,
+    /// for the hover card. The declaration index only carries file-level
+    /// symbols, so `sp` in `sp.label = nil` answered nothing while `label`
+    /// (a class member) did — this is the missing half. Hover-only:
+    /// references and definition keep the declaration-index semantics.
+    pub fn local_at(&self, position: LspPosition, name: &str) -> Option<ScopeLocal> {
+        for scope in &self.scopes {
+            if let Some(range) = &scope.range {
+                if !(range.start <= position && position <= range.end) {
+                    continue;
+                }
+            }
+            if let Some(local) = scope.hover_locals.iter().find(|l| l.name == name) {
+                return Some(local.clone());
+            }
+        }
+        None
     }
 
     /// The answer for one raw name at one position: `@using` first, a
@@ -992,11 +1022,23 @@ impl SymbolIndex {
                 if class.is_none() && protocols.is_empty() {
                     return None;
                 }
+                let spelling = match &decl.data {
+                    AstDeclData::Variable { var_type, .. } => var_type
+                        .as_deref()
+                        .map(|t| ast_type_spell(t))
+                        .unwrap_or_default(),
+                    _ => String::new(),
+                };
                 return Some(Scope {
                     range: None,
                     owner: "<file>".to_string(),
                     self_type: None,
-                    locals: vec![ScopeLocal { name, class, protocols, type_args }],
+                    locals: vec![ScopeLocal {
+                        name: name.clone(), class, protocols, type_args,
+                        type_spelling: spelling,
+                        decl_line: Some(mapped_line(source_map, decl.line)),
+                    }],
+                    hover_locals: vec![],
                 });
             }
             _ => return None,
@@ -1016,6 +1058,7 @@ impl SymbolIndex {
             owner: decl.name.clone().unwrap_or_default(),
             self_type: self_type.map(str::to_string),
             locals: Vec::new(),
+            hover_locals: Vec::new(),
         };
 
         // Parameters.
@@ -1025,9 +1068,20 @@ impl SymbolIndex {
                 let class = cst_type_name(ty);
                 let protocols = cst_id_protocols(ty);
                 let type_args = cst_type_args(ty);
+                let spelling = cst_type_spell(ty);
                 if class.is_some() || !protocols.is_empty() {
-                    scope.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
+                    scope.locals.push(ScopeLocal {
+                        name: name.clone(), class: class.clone(), protocols: protocols.clone(),
+                        type_args: type_args.clone(),
+                        type_spelling: spelling.clone(),
+                        decl_line: None,
+                    });
                 }
+                scope.hover_locals.push(ScopeLocal {
+                    name: name.clone(), class, protocols, type_args,
+                    type_spelling: spelling,
+                    decl_line: None,
+                });
             }
             param = current.next.as_deref();
         }
@@ -1043,6 +1097,16 @@ impl SymbolIndex {
                             // A member's declared type is recorded by name
                             // alone: no type arguments to carry.
                             type_args: Vec::new(),
+                            type_spelling: format!("{class_name} *"),
+                            decl_line: None,
+                        });
+                        scope.hover_locals.push(ScopeLocal {
+                            name: member.label.clone(),
+                            class: Some(class_name.clone()),
+                            protocols: Vec::new(),
+                            type_args: Vec::new(),
+                            type_spelling: format!("{class_name} *"),
+                            decl_line: None,
                         });
                     }
                 }
@@ -1052,6 +1116,7 @@ impl SymbolIndex {
         if let Some(body) = body {
             let mut walk = BodyWalk {
                 locals: &mut scope.locals,
+                hover_locals: &mut scope.hover_locals,
                 sites: &mut self.sites,
                 calls: &mut self.calls,
                 source_map,
@@ -1569,8 +1634,106 @@ fn decl_path(decl: &AstDecl, source_map: &SourceMap) -> Option<String> {
 /// The class name a type denotes, when it denotes one. Scalars, `void`, `id`
 /// and `instancetype` have no members to complete (protocol members would need
 /// the protocol side of the index, which is not there yet).
-fn ast_type_name(ty: &AstType) -> Option<String> {
+/// Source line (1-based) a raw AST line maps to. Scopes only exist for
+/// same-file declarations, so the provenance is the document's own line.
+fn mapped_line(source_map: &SourceMap, line: usize) -> u32 {
+    let (_, real_line) = source_map.locate(line);
+    real_line as u32
+}
+
+/// Readable type spelling for the hover card: keyword spelling, pointer
+/// stars, struct/union/enum tags, generic arguments, and const/volatile
+/// qualifiers where C puts them. Mirrors clangd's terse rendering — this is
+/// what the editor shows as the type, not what codegen emits.
+fn ast_type_spell(ty: &AstType) -> String {
+    let mut s = String::new();
+    if ty.is_const && !ty.is_pointer { s.push_str("const "); }
     match ty.prim {
+        TypePrim::Named => {
+            let name = ty.name.clone().unwrap_or_default();
+            if ty.is_struct {
+                s.push_str(&format!("{} {}", ty.tag.keyword(), name));
+            } else {
+                s.push_str(&name);
+            }
+            if !ty.type_args.is_empty() {
+                let args = ty.type_args.iter().map(ast_type_spell).collect::<Vec<_>>().join(", ");
+                s.push_str(&format!("<{args}>"));
+            }
+        }
+        TypePrim::Param => s.push_str(ty.name.as_deref().unwrap_or("T")),
+        other => s.push_str(match other {
+            TypePrim::Void => "void",
+            TypePrim::Char => "char",
+            TypePrim::Short => "short",
+            TypePrim::Int => "int",
+            TypePrim::Long => "long",
+            TypePrim::LongLong => "long long",
+            TypePrim::Float => "float",
+            TypePrim::Double => "double",
+            TypePrim::Bool => "BOOL",
+            TypePrim::Signed => "signed",
+            TypePrim::Unsigned => "unsigned",
+            TypePrim::Id => "id",
+            TypePrim::Class => "Class",
+            TypePrim::Sel => "SEL",
+            TypePrim::Instancetype => "instancetype",
+            _ => "int",
+        }),
+    }
+    if ty.is_pointer {
+        s.push_str(" *");
+        if ty.is_const { s.push_str(" const"); }
+    }
+    s
+}
+
+/// Same spelling for a CST type (parameters spell their types in CST).
+fn cst_type_spell(ty: &CstType) -> String {
+    let mut s = String::new();
+    if ty.is_const && !ty.is_pointer { s.push_str("const "); }
+    if ty.is_volatile && !ty.is_pointer { s.push_str("volatile "); }
+    match ty.prim {
+        TypePrim::Named => {
+            let name = ty.name.clone().unwrap_or_default();
+            if ty.is_struct {
+                s.push_str(&format!("{} {}", ty.tag.keyword(), name));
+            } else {
+                s.push_str(&name);
+            }
+            if !ty.type_args.is_empty() {
+                let args = ty.type_args.iter().map(|t| cst_type_spell(t)).collect::<Vec<_>>().join(", ");
+                s.push_str(&format!("<{args}>"));
+            }
+        }
+        TypePrim::Param => s.push_str(ty.name.as_deref().unwrap_or("T")),
+        other => s.push_str(match other {
+            TypePrim::Void => "void",
+            TypePrim::Char => "char",
+            TypePrim::Short => "short",
+            TypePrim::Int => "int",
+            TypePrim::Long => "long",
+            TypePrim::LongLong => "long long",
+            TypePrim::Float => "float",
+            TypePrim::Double => "double",
+            TypePrim::Bool => "BOOL",
+            TypePrim::Signed => "signed",
+            TypePrim::Unsigned => "unsigned",
+            TypePrim::Id => "id",
+            TypePrim::Class => "Class",
+            TypePrim::Sel => "SEL",
+            TypePrim::Instancetype => "instancetype",
+            _ => "int",
+        }),
+    }
+    if ty.is_pointer {
+        s.push_str(" *");
+        if ty.is_const { s.push_str(" const"); }
+    }
+    s
+}
+
+fn ast_type_name(ty: &AstType) -> Option<String> {    match ty.prim {
         TypePrim::Named => ty.name.clone().or_else(|| ty.class_ref.clone()),
         TypePrim::Class => ty.class_ref.clone().or_else(|| ty.name.clone()),
         TypePrim::Void
@@ -1914,6 +2077,9 @@ fn render_type(parts: TypeParts<'_>) -> String {
 /// compiler synthesized has no source origin and is skipped.
 struct BodyWalk<'a> {
     locals: &'a mut Vec<ScopeLocal>,
+    /// The hover surface: every visible name with its spelled type, no
+    /// receiver-shaped filter (a scalar local still deserves a hover card).
+    hover_locals: &'a mut Vec<ScopeLocal>,
     sites: &'a mut Vec<SendSite>,
     calls: &'a mut Vec<CallSite>,
     source_map: &'a SourceMap,
@@ -1945,9 +2111,22 @@ impl BodyWalk<'_> {
                 let class = ast_type_name(ty);
                 let protocols = ast_id_protocols(ty);
                 let type_args = ast_type_args(ty);
+                let spelling = ast_type_spell(ty);
+                let line = Some(mapped_line(self.source_map, declaration.line));
                 if class.is_some() || !protocols.is_empty() {
-                    self.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
+                    self.locals.push(ScopeLocal {
+                        name: name.clone(), class, protocols, type_args,
+                        type_spelling: spelling.clone(), decl_line: line,
+                    });
                 }
+                self.hover_locals.push(ScopeLocal {
+                    name: name.clone(),
+                    class: ast_type_name(ty),
+                    protocols: ast_id_protocols(ty),
+                    type_args: ast_type_args(ty),
+                    type_spelling: spelling,
+                    decl_line: line,
+                });
             }
             if let Some(init) = init {
                 self.expr(init);
@@ -1964,8 +2143,16 @@ impl BodyWalk<'_> {
             let protocols = cst_id_protocols(ty);
             let type_args = cst_type_args(ty);
             if class.is_some() || !protocols.is_empty() {
-                self.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
+                self.locals.push(ScopeLocal {
+                    name: name.clone(), class: class.clone(),
+                    protocols: protocols.clone(), type_args: type_args.clone(),
+                    type_spelling: cst_type_spell(ty), decl_line: None,
+                });
             }
+            self.hover_locals.push(ScopeLocal {
+                name: name.clone(), class, protocols, type_args,
+                type_spelling: cst_type_spell(ty), decl_line: None,
+            });
         }
     }
 
@@ -2163,7 +2350,10 @@ impl BodyWalk<'_> {
                     let protocols = ast_id_protocols(ty);
                     let type_args = ast_type_args(ty);
                     if class.is_some() || !protocols.is_empty() {
-                        self.locals.push(ScopeLocal { name: name.clone(), class, protocols, type_args });
+                        self.locals.push(ScopeLocal {
+                            name: name.clone(), class, protocols, type_args,
+                            type_spelling: String::new(), decl_line: None,
+                        });
                     }
                 }
                 if let Some(body) = body {
