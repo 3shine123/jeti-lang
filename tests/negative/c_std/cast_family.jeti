@@ -1,0 +1,21 @@
+// Cast family — jetic side of the clang/jetic probe (mirrors cast_family.c
+// statement for statement; matrix in README.md). Ordered so every case is
+// exercised at source positions the checker reports directly.
+int f(int v) { return v; }
+int main(void) {
+    int x = 5;
+    // ① int → pointer, from a VARIABLE → warn (clang: int-to-pointer-cast)
+    char *a = (char *)x;
+    // ② int → pointer, from an int literal → silent (literal escape hatch)
+    char *b = (char *)123;
+    // ③ void * → int → warn (clang: void-pointer-to-int-cast)
+    int c = (int)(void *)&x;
+    // ④ int * → int directly → warn (clang: pointer-to-int-cast)
+    int d = (int)&x;
+    // ⑤ same-width long → pointer / pointer → long → silent
+    long e = (long)&x;
+    // ⑥ function designator → fn pointer → silent
+    int (*g)(int) = (int (*)(int))f;
+    (void)a; (void)b; (void)c; (void)d; (void)e; (void)g;
+    return 0;
+}

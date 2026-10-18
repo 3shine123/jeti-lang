@@ -540,7 +540,10 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
     for l in libs {
         clang_args.push(format!("-l{}", l));
     }
-    clang_args.push("-w".to_string());
+    // Backend diagnostics are NOT suppressed by default: `-w` used to hide
+    // codegen-quality noise, but that also hid every C-standard violation
+    // the front end doesn't catch yet. The generated C must be warning-clean
+    // for a clean .jeti — fix codegen at the source instead of silencing cc.
 
     let mut child = match Command::new(program)
         .args(&cc_extra)

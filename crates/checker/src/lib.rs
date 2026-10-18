@@ -512,6 +512,154 @@ impl Checker {
         }
     }
 
+    // ─── C17 cast diagnostics (6.5.4 / 6.3.2.3) ─────────────────────────
+    //
+    // Pointer width is assumed 64 bits (LP64 — hosted ARM64 and bare-metal
+    // ARM64 share this assumption); 32-bit targets would narrow which casts
+    // warn (corpus-phase TODO, same metric as the plan doc).
+
+    /// Pointer-like operands for the cast family: pointer declarators and
+    /// the pointer-flavored ObjC primitives (`id`/`Class`/`SEL` carry their
+    /// star inside the primitive spelling, not `is_pointer`).
+    fn is_pointer_like(t: &AstType) -> bool {
+        t.is_pointer
+            || matches!(t.prim, TypePrim::Id | TypePrim::Class | TypePrim::Sel)
+    }
+
+    /// Integer primaries for the cast family (excludes pointer/block/array/
+    /// struct spellings). `BOOL` is a 4-byte integer here; typedef'd sugar
+    /// spellings keep their names — corpus phase measures clang's rendering.
+    fn is_integral_type(t: &AstType) -> bool {
+        if Self::is_pointer_like(t) || t.is_block || t.is_array || t.is_struct {
+            return false;
+        }
+        matches!(
+            t.prim,
+            TypePrim::Char | TypePrim::Short | TypePrim::Int | TypePrim::Long
+                | TypePrim::LongLong | TypePrim::Bool | TypePrim::Signed
+                | TypePrim::Unsigned
+        )
+    }
+
+    /// Bit width of the integer primaries. `-1` width = not integral here.
+    fn integral_bit_width(t: &AstType) -> i32 {
+        match t.prim {
+            TypePrim::Char => 8,
+            TypePrim::Short => 16,
+            TypePrim::Int | TypePrim::Bool | TypePrim::Signed | TypePrim::Unsigned => 32,
+            TypePrim::Long | TypePrim::LongLong => 64,
+            _ => -1,
+        }
+    }
+
+    /// Spell a type in pointer position the way clang does in this family's
+    /// messages: `void *` always carries its star; `id`/`Class`/`SEL` are
+    /// pointer-spelled primitives; everything else goes through the shared
+    /// type display (which appends ` *` for `is_pointer`).
+    fn cast_pointer_spelling(t: &AstType) -> String {
+        match t.prim {
+            TypePrim::Void => "void *".to_string(),
+            TypePrim::Id => "id".to_string(),
+            TypePrim::Class => "Class".to_string(),
+            TypePrim::Sel => "SEL".to_string(),
+            _ => Self::type_display(t),
+        }
+    }
+
+    /// Integer constants are exempt: clang stays silent on `(char *)123`
+    /// (probe-measured — literals are the deliberate escape hatch for
+    /// sentinel addresses).
+    fn is_int_literal_expr(e: &AstExpr) -> bool {
+        match &e.data {
+            AstExprData::Int(_) | AstExprData::Char(_) | AstExprData::Bool(_)
+            | AstExprData::Float(_) | AstExprData::FloatRaw(_) => true,
+            AstExprData::Paren(inner) => Self::is_int_literal_expr(inner),
+            _ => false,
+        }
+    }
+
+    /// Do any operand references point to a lowering-desugar internal
+    /// (`__jeti_*` variables — async task state, eh exception state)? The
+    /// lowering passes deliberately *keep* origin spans on their synthesized
+    /// casts (caret anchoring), so an `end == 0` guard cannot cover them;
+    /// the authoritative tell is the referenced internals themselves.
+    fn refs_jeti_synth(e: &AstExpr) -> bool {
+        let hit = |n: &str| n.starts_with("__jeti");
+        match &e.data {
+            AstExprData::VarRef { name, .. } => hit(name),
+            AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => {
+                Self::refs_jeti_synth(obj)
+            }
+            AstExprData::Unary { operand, .. } => Self::refs_jeti_synth(operand),
+            AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => {
+                Self::refs_jeti_synth(inner)
+            }
+            AstExprData::FuncCall { name, callee, args, .. } => {
+                hit(name)
+                    || callee.as_deref().map_or(false, Self::refs_jeti_synth)
+                    || args.iter().any(Self::refs_jeti_synth)
+            }
+            _ => false,
+        }
+    }
+
+    /// clang-measured wording/severity (c_standard_diagnostics_plan §G-expr):
+    ///   warn "cast to 'char *' from smaller integer type 'int'"      (int → ptr)
+    ///   warn "cast to smaller integer type 'int' from 'void *'"     (ptr → int)
+    /// Same-width casts stay silent (`long` ↔ pointers are LP64-wide).
+    fn check_cast_types(&mut self, line: &usize, col: &usize, end_line: usize, end_col: usize,
+                        target: &AstType, operand: &AstExpr, src: Option<&AstType>) {
+        let Some(src) = src else { return };
+        // Source-span iron law: synthesized nodes carry `end == 0`
+        // (`docs/plans/source_locations_debug_lsp_plan.md`).
+        if end_line == 0 || end_col == 0 {
+            return;
+        }
+        if self.is_foundation_source(*line) {
+            return;
+        }
+        // Lowering-injected casts (async task state, eh exception state) keep
+        // origin spans — detected through the `__jeti_*` internals they wrap.
+        if Self::refs_jeti_synth(operand) {
+            return;
+        }
+        // A function designator already has its fn-pointer type: casts
+        // *from* it are same-width by construction (clang stays silent on
+        // `(int (*)(int))fs_double_it`); the checker's loose VarRef typing
+        // still calls the designator `int`, so resolve it from the symbol
+        // table instead.
+        if let AstExprData::VarRef { name, .. } = &operand.data {
+            if let Some(sym) = self.symtab.as_ref().and_then(|st| st.lookup(name)) {
+                if sym.kind == SymbolKind::Function {
+                    return;
+                }
+            }
+        }
+        let is_ptr = |t: &AstType| Self::is_pointer_like(t);
+        let width = |t: &AstType| -> i32 {
+            if is_ptr(t) { 64 } else { Self::integral_bit_width(t) }
+        };
+        if Self::is_integral_type(src) && is_ptr(target)
+            && !Self::is_int_literal_expr(operand)
+        {
+            let src_w = width(src);
+            if src_w >= 0 && src_w < 64 {
+                self.check_warning(*line, *col,
+                    &format!("cast to '{}' from smaller integer type '{}'",
+                             Self::cast_pointer_spelling(target),
+                             Self::type_display(src)));
+            }
+        } else if is_ptr(src) && Self::is_integral_type(target) {
+            let dst_w = width(target);
+            if dst_w >= 0 && dst_w < 64 {
+                self.check_warning(*line, *col,
+                    &format!("cast to smaller integer type '{}' from '{}'",
+                             Self::type_display(target),
+                             Self::cast_pointer_spelling(src)));
+            }
+        }
+    }
+
     /// Spell a type the way the source would, for diagnostics. `{:?}` is the
     /// fallback for prims with no C spelling of their own, but plain `int`
     /// must read `int` (not `Int`) — these messages quote the user's code back
@@ -1407,6 +1555,16 @@ impl Checker {
     pub fn check_expr(&mut self, e: &mut AstExpr) -> Option<AstType> {
         let result = self.check_expr_inner(e);
         e.expr_type = result.clone().map(Box::new);
+        // C17 6.5.4 cast family diagnostics (checked against clang's default
+        // severities — see c_standard_diagnostics_plan §G-expr). Runs after
+        // `check_expr_inner` because the match there holds `&mut e.data` and
+        // this pass needs the node's span fields.
+        if let AstExprData::Cast { target_type, expr } = &e.data {
+            let mut src_expr = expr.clone();
+            let src_ty = self.check_expr(&mut src_expr);
+            self.check_cast_types(&e.line, &e.col, e.end_line, e.end_col,
+                                  target_type, &src_expr, src_ty.as_ref());
+        }
         // `a[i]` on an object receiver is not C indexing — C rejects it outright
         // ("operand of type 'NPArray' where arithmetic or pointer type is
         // required"), and the error surfaces in the generated C with no trace
@@ -2490,8 +2648,22 @@ impl Checker {
                     Some(AstType::new(TypePrim::Int))
                 }
             }
-            AstExprData::Unary { operand, .. } => {
-                self.check_expr(&mut *operand.clone())
+            AstExprData::Unary { op, operand, .. } => {
+                let t = self.check_expr(&mut *operand.clone());
+                // `&` yields a pointer to the operand's type (C 6.5.3.2).
+                // The bare-operand type previously flowed through, so
+                // `(void *)&fsi` was inferred as casting `int` — a checker
+                // false-warning source (C cast diagnostics §G-expr).
+                if let Some(mut pt) = t.clone() {
+                    if *op == 4 && !pt.is_pointer && !pt.is_block && !pt.is_array
+                        && !matches!(pt.prim, TypePrim::Id | TypePrim::Class | TypePrim::Sel)
+                        && Self::is_integral_type(&pt)
+                    {
+                        pt.is_pointer = true;
+                        return Some(pt);
+                    }
+                }
+                t
             }
             AstExprData::Assign { target, .. } => {
                 self.check_expr(&mut *target.clone())
