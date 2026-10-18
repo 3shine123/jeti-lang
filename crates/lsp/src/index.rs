@@ -25,7 +25,7 @@
 //! jump from your code into a header) and is filtered out of the outline by
 //! path.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use jeti_ast::ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit, AstUsing};
 use jeti_cst::source_map::{LspPosition, LspRange, SourceMap};
@@ -86,6 +86,26 @@ pub struct Location {
     pub container: Option<String>,
     pub path: String,
     pub range: LspRange,
+}
+
+/// A struct/union field at its declaration site. Fields are not indexed as
+/// symbols (the symbol tree carries aggregates, not their members), so hover
+/// locates the cursor inside the **host aggregate's** extent and answers from
+/// the computed layout keyed by `struct_name`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldRef {
+    /// The aggregate's name as written — the key into [`SymbolIndex::layouts`].
+    pub struct_name: String,
+    pub is_union: bool,
+    pub path: String,
+    /// The host aggregate's extent: what the cursor must sit inside. A field's
+    /// own span is unreliable across declarator shapes (a fn-pointer's
+    /// line/col lands on the trailing token, not the name), so matching is by
+    /// name within the host range instead.
+    pub range: LspRange,
+    /// The field's own declaration line (1-based, document-local), for the
+    /// card's snippet and provenance.
+    pub line: u32,
 }
 
 /// One completion candidate: a name the index knows, with what it is.
@@ -331,6 +351,15 @@ pub struct SymbolIndex {
     /// hover cards read these for clangd-parity size/offset lines.
     pub layouts: HashMap<String, jeti_layout::StructLayout>,
     pub typedef_types: HashMap<String, AstType>,
+    /// Field declaration positions keyed by field name: the hover surface for
+    /// struct/union members, which the symbol tree does not index.
+    pub field_positions: HashMap<String, Vec<FieldRef>>,
+    /// Names the semantic-token scan colors, collected on the same build walk:
+    /// enum names and every enum member (flat — member names are matched
+    /// wherever written), and file-scope variables.
+    pub enum_names: HashSet<String>,
+    pub enum_member_names: HashSet<String>,
+    pub global_vars: HashSet<String>,
     /// Message sends of the document being edited, in source order.
     sites: Vec<SendSite>,
     /// Free-function calls of the document being edited.
@@ -389,6 +418,7 @@ impl SymbolIndex {
         index.layouts = layouts;
         index.typedef_types = typedef_types;
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
+        index.collect_field_positions(&ast.decls, source_map, &mut lookup);
         index.attach_namespaces(ast, source_map, &mut lookup);
         index.read_usings(&ast.usings);
         index.resolve_protocol_inheritance();
@@ -581,6 +611,186 @@ impl SymbolIndex {
             if let Some(local) = scope.hover_locals.iter().find(|l| l.name == name) {
                 return Some(local.clone());
             }
+        }
+        None
+    }
+
+    /// The field whose host aggregate the cursor sits inside, or `None`. The
+    /// narrowest containing range wins, so a field name shared by an inner and
+    /// an outer aggregate answers for the inner one.
+    pub fn field_at(&self, name: &str, position: LspPosition) -> Option<&FieldRef> {
+        self.field_positions
+            .get(name)?
+            .iter()
+            .filter(|f| f.range.start <= position && position <= f.range.end)
+            .min_by_key(|f| {
+                (
+                    f.range.end.line.saturating_sub(f.range.start.line),
+                    f.range.end.character.saturating_sub(f.range.start.character),
+                )
+            })
+    }
+
+    /// A free function's signature, for the hover card's return-type arrow and
+    /// parameter list. Methods answer through `Location.detail` instead.
+    pub fn free_function(&self, name: &str) -> Option<&Signature> {
+        self.functions.get(name)
+    }
+
+    /// The local under the cursor plus its enclosing function — the hover
+    /// card's "In" line. `local_at` answers completion-shaped questions; this
+    /// one carries the scope owner the card spells.
+    pub fn local_hover_at(&self, position: LspPosition, name: &str) -> Option<(ScopeLocal, String)> {
+        for scope in &self.scopes {
+            if let Some(range) = &scope.range {
+                if !(range.start <= position && position <= range.end) {
+                    continue;
+                }
+            }
+            if let Some(local) = scope.hover_locals.iter().find(|l| l.name == name) {
+                return Some((local.clone(), scope.owner.clone()));
+            }
+        }
+        None
+    }
+
+    /// Semantic tokens for the whole document: every identifier scanned, then
+    /// classified through the same index the hover answers from (locals beat
+    /// globals, declarations beat keywords). Grammar keeps the keywords and
+    /// punctuation; this adds what only the compiler knows — types, classes,
+    /// fields, enum members, macros.
+    pub fn semantic_tokens(&self, text: &str) -> Vec<u32> {
+        const T_NAMESPACE: u8 = 0;
+        const T_CLASS: u8 = 1;
+        const T_TYPE: u8 = 2;
+        const T_ENUM: u8 = 3;
+        const T_FUNCTION: u8 = 4;
+        const T_VARIABLE: u8 = 5;
+        const T_PROPERTY: u8 = 6;
+        const T_MACRO: u8 = 7;
+        const T_ENUM_MEMBER: u8 = 8;
+
+        // `#define`d names: the definition site colors as macro, and so does
+        // every later use (clangd does the same from its macro table).
+        let mut macros: HashSet<String> = HashSet::new();
+        let mut tokens: Vec<(u32, u32, u32, u8)> = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let line = line.trim_start();
+            let Some(rest) = line.strip_prefix('#') else { continue };
+            let rest = rest.trim_start();
+            let Some(rest) = rest.strip_prefix("define") else { continue };
+            let Some(rest) = rest.strip_prefix(|c: char| c.is_whitespace()) else { continue };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if name.is_empty() {
+                continue;
+            }
+            let name_len = name.chars().map(|c| c.len_utf16() as u32).sum();
+            macros.insert(name);
+            let char = (line.len() - rest.len()) as u32;
+            tokens.push((i as u32, char, name_len, T_MACRO));
+        }
+
+        // Identifier scan: classify each word at its position. Preprocessor
+        // lines stay out: the grammar colors the whole `#include` path as one
+        // string, and a semantic token for `Foundation` inside it would split
+        // the path into two colors.
+        for (i, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            let bytes = line.as_bytes();
+            let mut start = None;
+            let mut col16 = 0u32;
+            let mut char16 = 0u32;
+            for (col, ch) in line.char_indices() {
+                if is_ident_byte(bytes.get(col).copied().unwrap_or(b' ')) {
+                    if start.is_none() {
+                        start = Some(col);
+                        char16 = col16;
+                    }
+                } else if let Some(from) = start.take() {
+                    let word = &line[from..col];
+                    let pos = LspPosition { line: i as u32, character: char16 };
+                    if let Some(t) = self.classify_token(word, pos, &macros) {
+                        let len = word.chars().map(|c| c.len_utf16() as u32).sum();
+                        tokens.push((i as u32, char16, len, t));
+                    }
+                }
+                col16 += ch.len_utf16() as u32;
+            }
+            if let Some(from) = start {
+                let word = &line[from..];
+                let pos = LspPosition { line: i as u32, character: char16 };
+                if let Some(t) = self.classify_token(word, pos, &macros) {
+                    let len = word.chars().map(|c| c.len_utf16() as u32).sum();
+                    tokens.push((i as u32, char16, len, t));
+                }
+            }
+        }
+
+        tokens.sort_by_key(|&(line, char, _, _)| (line, char));
+        // LSP delta encoding.
+        let mut out = Vec::with_capacity(tokens.len() * 5);
+        let mut prev_line = 0u32;
+        let mut prev_char = 0u32;
+        for (line, char, len, t) in tokens {
+            let (dline, dchar) = if line == prev_line {
+                (0, char - prev_char)
+            } else {
+                (line - prev_line, char)
+            };
+            out.extend([dline, dchar, len, t as u32, 0]);
+            prev_line = line;
+            prev_char = char;
+        }
+        out
+    }
+
+    fn classify_token(&self, word: &str, pos: LspPosition, macros: &HashSet<String>) -> Option<u8> {
+        if BUILTIN_AND_KEYWORDS.contains(&word) {
+            return None;
+        }
+        if macros.contains(word) {
+            return Some(7);
+        }
+        // Innermost scope wins: a local shadows anything global.
+        if self.local_at(pos, word).is_some() {
+            return Some(5);
+        }
+        if self.functions.contains_key(word) {
+            return Some(4);
+        }
+        if self.classes.contains_key(word) {
+            return Some(1);
+        }
+        for info in self.classes.values() {
+            if let Some(member) = info.members.iter().find(|m| m.label == word) {
+                return Some(if member.kind == kind::METHOD { 4 } else { 6 });
+            }
+        }
+        if self.enum_member_names.contains(word) {
+            return Some(8);
+        }
+        if self.enum_names.contains(word) {
+            return Some(3);
+        }
+        if self.protocols.contains_key(word)
+            || self.layouts.contains_key(word)
+            || self.typedef_types.contains_key(word)
+        {
+            return Some(2);
+        }
+        if self.global_vars.contains(word) {
+            return Some(5);
+        }
+        if self.namespaces.contains(word) {
+            return Some(0);
+        }
+        if self.field_at(word, pos).is_some() {
+            return Some(6);
         }
         None
     }
@@ -926,6 +1136,12 @@ impl SymbolIndex {
                     }
                 }
             }
+            if let (Some(name), AstDeclData::Enum { members, .. }) = (&decl.name, &decl.data) {
+                self.enum_names.insert(name.clone());
+                for member in members {
+                    self.enum_member_names.insert(member.clone());
+                }
+            }
             if let (Some(name), AstDeclData::Function { return_type, params, has_variadic, .. }) =
                 (&decl.name, &decl.data)
             {
@@ -961,12 +1177,92 @@ impl SymbolIndex {
                 Some(mut symbol) => {
                     symbol.children = children;
                     self.record(&symbol);
+                    if symbol.kind == kind::VARIABLE {
+                        self.global_vars.insert(symbol.lookup.clone());
+                    }
                     out.push(symbol);
                 }
                 None => out.extend(children),
             }
         }
         out
+    }
+
+    /// Record every aggregate field's declaration position, mirroring the
+    /// layout engine's walk (same aggregates, same synthesized class
+    /// aggregate) so the field hover and the struct card agree on what exists.
+    fn collect_field_positions(
+        &mut self,
+        decls: &[AstDecl],
+        source_map: &SourceMap,
+        lookup: &mut impl FnMut(&str) -> Option<String>,
+    ) {
+        for decl in decls {
+            match &decl.data {
+                AstDeclData::Aggregate { fields, is_union } => {
+                    if let Some(name) = &decl.name {
+                        self.record_fields(fields.iter(), name, *is_union, decl, source_map, lookup);
+                    }
+                    self.collect_field_positions(fields, source_map, lookup);
+                }
+                AstDeclData::Typedef { struct_fields, .. } => {
+                    self.collect_field_positions(struct_fields, source_map, lookup);
+                }
+                AstDeclData::Class { methods, ivars, impl_vars, .. } => {
+                    // The layout engine keys a class's implicit ivar aggregate
+                    // by the class name; mirror that so ivar hover works too.
+                    if let Some(name) = &decl.name {
+                        let ivars = ivars.iter().chain(impl_vars.iter());
+                        self.record_fields(ivars, name, false, decl, source_map, lookup);
+                    }
+                    self.collect_field_positions(methods, source_map, lookup);
+                }
+                AstDeclData::Namespace(inner) => {
+                    self.collect_field_positions(inner, source_map, lookup);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Record `fields` against `owner`'s extent: the cursor must sit inside
+    /// the aggregate's body, and the field is found by name — a field's own
+    /// span is unreliable across declarator shapes (fn-pointers, arrays,
+    /// bit-fields land their line/col on a trailing token, not the name).
+    fn record_fields<'a>(
+        &mut self,
+        fields: impl Iterator<Item = &'a AstDecl>,
+        struct_name: &str,
+        is_union: bool,
+        owner: &AstDecl,
+        source_map: &SourceMap,
+        lookup: &mut impl FnMut(&str) -> Option<String>,
+    ) {
+        let span = source_map.span_from_node(
+            (owner.line as u32, owner.col as u32),
+            (owner.end_line as u32, owner.end_col as u32),
+        );
+        if span.is_synthetic() {
+            return;
+        }
+        let path = source_map.registry().path_of(span.file).to_string();
+        let Some(text) = lookup(&path) else { return };
+        let range = span.to_lsp_range(&text);
+        for field in fields {
+            let (Some(name), AstDeclData::Ivar { .. }) = (&field.name, &field.data) else {
+                continue;
+            };
+            self.field_positions
+                .entry(name.clone())
+                .or_default()
+                .push(FieldRef {
+                    struct_name: struct_name.to_string(),
+                    is_union,
+                    path: path.clone(),
+                    range,
+                    line: mapped_line(source_map, field.line),
+                });
+        }
     }
 
     /// Record a class's members and ancestor, from any file (a local's type is
@@ -1671,24 +1967,32 @@ fn ast_type_spell(ty: &AstType) -> String {
             }
         }
         TypePrim::Param => s.push_str(ty.name.as_deref().unwrap_or("T")),
-        other => s.push_str(match other {
-            TypePrim::Void => "void",
-            TypePrim::Char => "char",
-            TypePrim::Short => "short",
-            TypePrim::Int => "int",
-            TypePrim::Long => "long",
-            TypePrim::LongLong => "long long",
-            TypePrim::Float => "float",
-            TypePrim::Double => "double",
-            TypePrim::Bool => "BOOL",
-            TypePrim::Signed => "signed",
-            TypePrim::Unsigned => "unsigned",
-            TypePrim::Id => "id",
-            TypePrim::Class => "Class",
-            TypePrim::Sel => "SEL",
-            TypePrim::Instancetype => "instancetype",
-            _ => "int",
-        }),
+        other => {
+            // `unsigned int`, `unsigned char`, … — the qualifier rides on the
+            // integer base as `is_unsigned`, not on a prim of its own; spell
+            // it out (clangd shows `unsigned int`, never a bare `int`).
+            if ty.is_unsigned && !matches!(other, TypePrim::Unsigned | TypePrim::Signed) {
+                s.push_str("unsigned ");
+            }
+            s.push_str(match other {
+                TypePrim::Void => "void",
+                TypePrim::Char => "char",
+                TypePrim::Short => "short",
+                TypePrim::Int => "int",
+                TypePrim::Long => "long",
+                TypePrim::LongLong => "long long",
+                TypePrim::Float => "float",
+                TypePrim::Double => "double",
+                TypePrim::Bool => "BOOL",
+                TypePrim::Signed => "signed",
+                TypePrim::Unsigned => "unsigned",
+                TypePrim::Id => "id",
+                TypePrim::Class => "Class",
+                TypePrim::Sel => "SEL",
+                TypePrim::Instancetype => "instancetype",
+                _ => "int",
+            });
+        }
     }
     if ty.is_pointer {
         s.push_str(" *");
@@ -2940,6 +3244,17 @@ fn send_identifier_runs(bytes: &[u8], open: usize) -> Vec<(usize, usize, bool)> 
     }
     runs
 }
+
+/// Words the semantic-token scan never colors: the grammar already spells
+/// keywords and builtin types, and semantic tokens would override its colors.
+const BUILTIN_AND_KEYWORDS: &[&str] = &[
+    "asm", "auto", "bool", "BOOL", "break", "case", "char", "Class", "const", "continue",
+    "default", "do", "double", "else", "enum", "extern", "float", "for", "goto", "id",
+    "if", "inline", "instancetype", "int", "long", "nil", "NO", "register", "restrict",
+    "return", "self", "SEL", "short", "signed", "sizeof", "static", "struct", "super",
+    "switch", "typedef", "union", "unsigned", "void", "volatile", "while", "YES", "_Bool",
+    "__attribute__", "_Nullable", "_Nonnull", "_Complex",
+];
 
 /// Identifier *continuation* byte (digits included, digits only start a number).
 fn is_ident_byte(byte: u8) -> bool {

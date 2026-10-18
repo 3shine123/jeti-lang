@@ -177,6 +177,30 @@ class JetiLanguageClient {
     return this.request('textDocument/signatureHelp', { textDocument: { uri }, position });
   }
 
+  /**
+   * `textDocument/semanticTokens/full` → the compiler's own coloring for the
+   * whole document: delta-encoded `[line, char, length, type, modifiers]`
+   * quintuplets (the server's legend), or an empty `data` when it has nothing.
+   *
+   * @param {string} uri
+   * @returns {Promise<{data: number[]}>}
+   */
+  semanticTokensFull(uri) {
+    return this.request('textDocument/semanticTokens/full', { textDocument: { uri } });
+  }
+
+  /**
+   * `textDocument/documentLink` → the include paths as links: `{ range,
+   * target }`, `target` omitted when the search path resolves nothing (a
+   * system C header the C compiler handles).
+   *
+   * @param {string} uri
+   * @returns {Promise<object[]>}
+   */
+  documentLinks(uri) {
+    return this.request('textDocument/documentLink', { textDocument: { uri } }).then((links) => links || []);
+  }
+
   /** `shutdown` + `exit`, then resolve with the server's exit code. */
   async stop({ timeoutMs = 10000 } = {}) {
     const proc = this.process;

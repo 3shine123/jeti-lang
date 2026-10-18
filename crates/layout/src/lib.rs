@@ -31,6 +31,9 @@ pub struct FieldLayout {
     pub offset: u64,
     /// In-memory size: bits for bit-fields, bytes otherwise.
     pub size: u64,
+    /// The field's own alignment in bytes (0 when the type was unresolved) —
+    /// the field hover card spells it next to the size, clangd-style.
+    pub alignment: u64,
     /// Bit-field width (`unsigned flags : 3` → 3). `None` = plain field.
     pub bit_width: Option<u64>,
     /// Total size of the field's type in bits — for a bit-field this is the
@@ -306,6 +309,7 @@ pub fn layout_of(decl: &AstDecl, structs: &HashMap<String, StructLayout>, typede
                     type_spelling: spelling,
                     offset,
                     size: 0,
+                    alignment: tl.alignment,
                     bit_width: Some(0),
                     storage_bits: Some(storage_bits),
                 });
@@ -324,6 +328,7 @@ pub fn layout_of(decl: &AstDecl, structs: &HashMap<String, StructLayout>, typede
                 type_spelling: spelling,
                 offset: field_offset,
                 size: bits,
+                alignment: tl.alignment,
                 bit_width: Some(bits),
                 storage_bits: Some(storage_bits),
             });
@@ -346,6 +351,7 @@ pub fn layout_of(decl: &AstDecl, structs: &HashMap<String, StructLayout>, typede
                 type_spelling: spelling,
                 offset: 0,
                 size: 0,
+                alignment: 0,
                 bit_width: None,
                 storage_bits: None,
             });
@@ -358,6 +364,7 @@ pub fn layout_of(decl: &AstDecl, structs: &HashMap<String, StructLayout>, typede
                 type_spelling: spelling,
                 offset: 0,
                 size: tl.size,
+                alignment: falign,
                 bit_width: None,
                 storage_bits: None,
             });
@@ -370,6 +377,7 @@ pub fn layout_of(decl: &AstDecl, structs: &HashMap<String, StructLayout>, typede
                 type_spelling: spelling,
                 offset,
                 size: tl.size,
+                alignment: falign,
                 bit_width: None,
                 storage_bits: None,
             });
@@ -467,6 +475,22 @@ fn collect_into(decls: &[AstDecl], structs: &mut HashMap<String, StructLayout>, 
     }
 }
 
+/// The size cell of a field row: "4 bytes", or for a bit-field clang's
+/// "3 bits (+29 bits padding)" wording.
+pub fn field_size_text(f: &FieldLayout) -> String {
+    match f.bit_width {
+        Some(bits) => {
+            let pad = f.storage_bits.unwrap_or(0).saturating_sub(bits);
+            if pad > 0 {
+                format!("{bits} bits (+{pad} bits padding)")
+            } else {
+                format!("{bits} bits")
+            }
+        }
+        None => format!("{} bytes", f.size),
+    }
+}
+
 /// The clangd-style hover body for a struct: "Size: N bytes, alignment M
 /// bytes" plus the field offset lines (one per field, "offset size name —
 /// type"), all ASCII/English (the cards the editor shows must match clangd's
@@ -479,29 +503,19 @@ pub fn hover_body(l: &StructLayout) -> String {
     }
     s.push_str(&format!("\n\n{kind} {name} {{ ... }}", name = l.name));
     if !l.fields.is_empty() {
-        s.push_str("\n\n");
+        // The offset table must live in a code block: the editor's markdown
+        // renderer collapses single newlines, and a plain multi-line table
+        // arrives as one unreadable line.
+        s.push_str("\n\n```text\n");
         let mut lines: Vec<String> = Vec::new();
         for f in &l.fields {
-            if let Some(bits) = f.bit_width {
-                let storage = f.storage_bits.unwrap_or(0);
-                let pad = storage.saturating_sub(bits);
-                let size_txt = if pad > 0 {
-                    format!("{bits} bits (+{pad} bits padding)")
-                } else {
-                    format!("{bits} bits")
-                };
-                lines.push(format!(
-                    "{:>4}  {:<28} {} : {}",
-                    f.offset, size_txt, if f.name.is_empty() { "<anon>" } else { &f.name }, f.type_spelling
-                ));
-            } else {
-                lines.push(format!(
-                    "{:>4}  {:<28} {} : {}",
-                    f.offset, format!("{} bytes", f.size), if f.name.is_empty() { "<anon>" } else { &f.name }, f.type_spelling
-                ));
-            }
+            lines.push(format!(
+                "{:>4}  {:<28} {} : {}",
+                f.offset, field_size_text(f), if f.name.is_empty() { "<anon>" } else { &f.name }, f.type_spelling
+            ));
         }
         s.push_str(&lines.join("\n"));
+        s.push_str("\n```");
     }
     s
 }

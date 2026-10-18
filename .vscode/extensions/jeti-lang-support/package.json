@@ -38,6 +38,22 @@
         "path": "./syntaxes/jeti.tmLanguage.json"
       }
     ],
+    "semanticTokenScopes": [
+      {
+        "language": "jeti",
+        "scopes": {
+          "namespace": ["entity.name.namespace"],
+          "class": ["entity.name.class"],
+          "type": ["entity.name.type", "entity.name.struct"],
+          "enum": ["entity.name.enum"],
+          "enumMember": ["constant.other.enummember", "entity.name.constant"],
+          "function": ["entity.name.function"],
+          "variable": ["variable.other"],
+          "property": ["variable.other.property", "entity.name.field"],
+          "macro": ["entity.name.function.preprocessor"]
+        }
+      }
+    ],
     "configuration": {
       "title": "Jeti",
       "properties": {

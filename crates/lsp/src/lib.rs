@@ -583,6 +583,23 @@ impl Server {
                         "referencesProvider": true,
                         "renameProvider": true,
                         "hoverProvider": true,
+                        "documentLinkProvider": true,
+                        // clangd-parity coloring: the server classifies what
+                        // only the compiler knows (types, classes, fields,
+                        // enum members, macros); the extension maps these
+                        // types onto standard TextMate scopes via
+                        // `semanticTokenScopes` so the theme's own
+                        // bold/yellow rules apply unchanged.
+                        "semanticTokensProvider": {
+                            "legend": {
+                                "tokenTypes": [
+                                    "namespace", "class", "type", "enum",
+                                    "function", "variable", "property", "macro", "enumMember",
+                                ],
+                                "tokenModifiers": [],
+                            },
+                            "full": true,
+                        },
                         // No `resolveProvider`: everything a completion item
                         // needs (label, kind, detail) is in the same answer.
                         "completionProvider": { "resolveProvider": false },
@@ -722,6 +739,32 @@ impl Server {
                 let uri = request_uri(message);
                 let mut hover = Value::Null;
                 if let (Some(doc), Some(index)) = (self.docs.get(uri), self.indexes.get(uri)) {
+                    let text_of = self.text_of();
+                    let resolve = |path: &str| text_or_disk(&text_of, path);
+                    // An include path under the cursor: not a symbol and not a
+                    // field — the header card is the only answer.
+                    if let Some(markdown) = header_hover_markdown(&doc.text, position) {
+                        hover = json!({
+                            "contents": { "kind": "markdown", "value": markdown },
+                        });
+                    }
+                    // A struct/union (or class ivar) field under the cursor is
+                    // not a symbol, so the declaration index has no entry for
+                    // it — answer from the computed layout. It beats a
+                    // same-named top-level declaration: inner scope wins, as
+                    // in clangd.
+                    if let Some(word) = word_at(&doc.text, position) {
+                        if let Some(fref) = index.field_at(&word, position) {
+                            if let Some(markdown) =
+                                field_hover_markdown(index, fref, &word, &resolve)
+                            {
+                                hover = json!({
+                                    "contents": { "kind": "markdown", "value": markdown },
+                                });
+                            }
+                        }
+                    }
+                    if hover.is_null() {
                     match index.resolve_at(&doc.text, position) {
                         // A namespace is known by what it holds: there is no
                         // declaration of it to quote (see `namespace_markdown`).
@@ -736,8 +779,6 @@ impl Server {
                         Some(Resolved::Symbol(name)) => {
                             let locations = index.definitions(&name);
                             if let Some(first) = locations.first() {
-                                let text_of = self.text_of();
-                                let resolve = |path: &str| text_or_disk(&text_of, path);
                                 // A struct/union/typedef declaration gets the
                                 // clangd-parity layout card (Size/alignment +
                                 // per-field offsets) in place of the generic
@@ -757,16 +798,20 @@ impl Server {
                                         },
                                     });
                                 } else {
+                                    let signature = index
+                                        .free_function(&name)
+                                        .or_else(|| index.free_function(first.name.as_str()));
                                     hover = json!({
                                         "contents": {
                                             "kind": "markdown",
-                                            "value": hover_markdown(first, locations.len(), &resolve),
+                                            "value": hover_markdown(first, locations.len(), signature, &resolve),
                                         },
                                     });
                                 }
                             }
                         }
                         None => {}
+                    }
                     }
                     // The declaration index only answers for file-level
                     // symbols. Everything else the editor parks a cursor on —
@@ -783,6 +828,27 @@ impl Server {
                     }
                 }
                 vec![response(id, hover)]
+            }
+            // Include paths become links: clangd-parity underline, a whole-path
+            // hover highlight, and cmd+click to the resolved file.
+            "textDocument/documentLink" => {
+                let uri = request_uri(message);
+                let links = self
+                    .docs
+                    .get(uri)
+                    .map(|doc| self.document_links(uri, &doc.text))
+                    .unwrap_or_default();
+                vec![response(id, Value::Array(links))]
+            }
+            // The compiler's own coloring: identifiers classified through the
+            // same run of analysis every other request answered from.
+            "textDocument/semanticTokens/full" => {
+                let uri = request_uri(message);
+                let result = match (self.docs.get(uri), self.indexes.get(uri)) {
+                    (Some(doc), Some(index)) => json!({ "data": index.semantic_tokens(&doc.text) }),
+                    _ => json!({ "data": [] }),
+                };
+                vec![response(id, result)]
             }
             // Names the index knows, filtered by what has been typed.
             "textDocument/completion" => {
@@ -965,9 +1031,19 @@ impl Server {
         position: LspPosition,
     ) -> Option<String> {
         let word = word_at(text, position)?;
-        if let Some(local) = index.local_at(position, &word) {
-            let mut markdown = format!("**local variable** `{}` · `{}`", word, local.type_spelling);
+        if let Some((local, owner)) = index.local_hover_at(position, &word) {
+            let mut markdown = format!("**local variable** `{}`", word);
+            markdown.push_str(&format!("\n\nType: {}", local.type_spelling));
+            if !owner.is_empty() && owner != "<file>" {
+                markdown.push_str(&format!("\nin `{owner}`"));
+            }
             if let Some(line) = local.decl_line {
+                if let Some(decl) = text.lines().nth(line as usize - 1) {
+                    let decl = decl.trim();
+                    if !decl.is_empty() {
+                        markdown.push_str(&format!("\n\n```jeti\n{decl}\n```"));
+                    }
+                }
                 markdown.push_str(&format!("\n\n_Declared in this file, line {line}_"));
             }
             return Some(markdown);
@@ -1027,6 +1103,54 @@ impl Server {
                 })
             })
             .collect()
+    }
+
+    /// `#include <...>` / `#import "..."` lines become links: the whole
+    /// bracketed path is the range (clangd highlights the brackets too), and
+    /// the target is the resolved file when the search path — project dirs,
+    /// then the C driver's system dirs — finds one. A path nothing resolves
+    /// still gets its range, without a target.
+    fn document_links(&self, uri: &str, text: &str) -> Vec<Value> {
+        let doc_dir = self
+            .docs
+            .get(uri)
+            .and_then(|d| std::path::Path::new(&d.path).parent().map(|p| p.to_string_lossy().to_string()));
+        let mut links = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let Some((open, end, raw)) = include_span(line) else {
+                continue;
+            };
+            let mut link = json!({
+                "range": range_json(LspRange {
+                    start: LspPosition { line: i as u32, character: open as u32 },
+                    end: LspPosition { line: i as u32, character: end as u32 },
+                }),
+            });
+            if let Some(path) = self.resolve_header(&raw, doc_dir.as_deref()) {
+                link["target"] = json!(file_uri(&path));
+            }
+            links.push(link);
+        }
+        links
+    }
+
+    /// First existing `dir / raw` across the document's own directory, the
+    /// configured `--include` search path, and the C driver's system
+    /// directories — project paths shadow system paths, clangd's precedence.
+    fn resolve_header(&self, raw: &str, doc_dir: Option<&str>) -> Option<String> {
+        let mut dirs: Vec<String> = Vec::new();
+        if let Some(d) = doc_dir {
+            dirs.push(d.to_string());
+        }
+        dirs.extend(self.options.search_dirs.iter().cloned());
+        dirs.extend(system_include_dirs().iter().cloned());
+        for dir in &dirs {
+            let candidate = std::path::Path::new(dir).join(raw);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+        None
     }
 
     fn references(&self, uri: &str, position: LspPosition) -> Vec<Value> {
@@ -1222,6 +1346,7 @@ fn jeti_keyword_markdown(word: &str) -> Option<String> {
 fn hover_markdown(
     location: &Location,
     declarations: usize,
+    signature: Option<&index::Signature>,
     resolve: &dyn Fn(&str) -> Option<String>,
 ) -> String {
     let mut markdown = format!("**{}** `{}`", kind_name(location.kind), location.name);
@@ -1229,6 +1354,25 @@ fn hover_markdown(
         markdown.push_str(&format!(" · {}", location.detail));
     }
     markdown.push('\n');
+    // clangd spells the free function's return type and parameters out; the
+    // signature already carries both (label `ret name(p1, p2)`).
+    if let Some(sig) = signature {
+        if let Some(ret) = sig
+            .label
+            .find(&format!(" {}(", location.name))
+            .map(|i| sig.label[..i].trim())
+            .filter(|ret| !ret.is_empty())
+        {
+            markdown.push_str(&format!("\n→ {ret}\n"));
+        }
+        if !sig.parameters.is_empty() {
+            markdown.push_str("\nParameters:");
+            for param in &sig.parameters {
+                markdown.push_str(&format!("\n• `{param}`"));
+            }
+            markdown.push('\n');
+        }
+    }
     if let Some(container) = &location.container {
         markdown.push_str(&format!("in `{container}`\n"));
     }
@@ -1246,6 +1390,134 @@ fn hover_markdown(
         markdown.push_str(&format!(" · _{declarations} declarations_"));
     }
     markdown
+}
+
+/// The directory lines between cc's `#include <...>` banner and its end
+/// marker; the `(framework directory)` annotation is stripped (the directory
+/// is real, the suffix is cc's prose).
+fn parse_cc_search_list(text: &str) -> Vec<String> {
+    let mut dirs = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if line.starts_with("#include <...> search starts here:") {
+            inside = true;
+            continue;
+        }
+        if line.starts_with("End of search list.") {
+            break;
+        }
+        if inside {
+            let dir = line.trim();
+            let dir = dir.strip_suffix(" (framework directory)").unwrap_or(dir);
+            if !dir.is_empty() {
+                dirs.push(dir.to_string());
+            }
+        }
+    }
+    dirs
+}
+
+/// The C driver's system include directories, probed once per process —
+/// clangd's own trick for knowing where `stdio.h` lives. Display-layer only:
+/// documentLink and the header hover resolve C headers through these, while
+/// the analysis never parses passthrough C headers, so nothing here enters
+/// the pipeline's search path.
+fn system_include_dirs() -> &'static [String] {
+    static DIRS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    DIRS.get_or_init(|| {
+        let Ok(output) = std::process::Command::new("cc")
+            .args(["-E", "-xc", "-", "-v"])
+            .stdin(std::process::Stdio::null())
+            .output()
+        else {
+            return Vec::new();
+        };
+        parse_cc_search_list(&String::from_utf8_lossy(&output.stderr))
+    })
+}
+
+/// The `<...>` / `"..."` span of an `#include`/`#import` line: byte offsets of
+/// the opening bracket and one past the closer, plus the raw path. Include
+/// lines are ASCII, so the offsets double as UTF-16 columns.
+fn include_span(line: &str) -> Option<(usize, usize, String)> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with('#') {
+        return None;
+    }
+    let after_hash = trimmed[1..].trim_start();
+    let keyword: String = after_hash.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+    if keyword != "include" && keyword != "import" {
+        return None;
+    }
+    let kw_start = line.len() - after_hash.len();
+    let after_kw = &line[kw_start + keyword.len()..];
+    let open_rel = after_kw.find(|c| c == '<' || c == '"')?;
+    let open = kw_start + keyword.len() + open_rel;
+    let close = open + 1 + line[open + 1..].find(|c| c == '>' || c == '"')?;
+    Some((open, close + 1, line[open + 1..close].to_string()))
+}
+
+/// clangd-parity card for an `#include`/`#import` path: what kind of header it
+/// is and how the build treats it. Nothing else answers on a preprocessor
+/// line — the path is not a symbol — so hovering `stdio.h` used to say nothing.
+fn header_hover_markdown(text: &str, position: LspPosition) -> Option<String> {
+    let line = text.lines().nth(position.line as usize)?;
+    let (open, end, path) = include_span(line)?;
+    // The cursor may sit on the path or either bracket.
+    let col = position.character as usize;
+    if col < open || col >= end {
+        return None;
+    }
+    if path.is_empty() {
+        return None;
+    }
+    let kind_word = if path.ends_with(".hje") || path.ends_with(".jeti") {
+        "Jeti header — inlined by the preprocessor from the `#import` search path"
+    } else {
+        "C header — passed through to the C compiler; jetic does not parse C headers"
+    };
+    let mut markdown = format!("**header** `{path}`\n\n{kind_word}");
+    markdown.push_str(&format!("\n\n```jeti\n{}\n```", line.trim()));
+    Some(markdown)
+}
+
+/// clangd-parity card for a struct/union (or class ivar) field under the
+/// cursor: what it is, its type and computed size/alignment, and its own
+/// declaration line. All English, matching the other hover cards.
+fn field_hover_markdown(
+    index: &index::SymbolIndex,
+    fref: &index::FieldRef,
+    name: &str,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let layout = index.layouts.get(&fref.struct_name)?;
+    let field = layout.fields.iter().find(|f| f.name == name)?;
+    let kind_word = if fref.is_union { "union" } else { "struct" };
+    let mut markdown = format!("**field** `{name}` · in `{kind_word} {}`", fref.struct_name);
+    markdown.push_str(&format!("\n\nType: {}", field.type_spelling));
+    if field.size > 0 {
+        let mut line = format!("Size: {}", jeti_layout::field_size_text(field));
+        if field.bit_width.is_none() && field.alignment > 0 {
+            line.push_str(&format!(", alignment {} bytes", field.alignment));
+        }
+        markdown.push_str(&format!("\n{line}"));
+    }
+    if let Some(text) = resolve(&fref.path) {
+        if let Some(decl) = text
+            .lines()
+            .nth(fref.line.saturating_sub(1) as usize)
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+        {
+            markdown.push_str(&format!("\n\n```jeti\n{decl}\n```"));
+        }
+    }
+    markdown.push_str(&format!(
+        "\n\n_Declared in {}:{}_\n",
+        display_path(&fref.path),
+        fref.line
+    ));
+    Some(markdown)
 }
 
 /// clangd-parity layout card for a struct/union/typedef symbol: title line,
@@ -2325,8 +2597,10 @@ int main(void) { return 0; }
         let value = hover_at("printf", 0).expect("printf hover");
         assert!(value.contains("C library function") && value.contains("stdio.h"), "{value}");
 
-        // A passthrough binding.
-        let value = hover_at("errno", 0).expect("errno hover");
+        // A passthrough binding — the *use* in `ticks + errno`, not the
+        // `#include <errno.h>` line: hovering the include path now answers
+        // with the header card, so the binding test must not park there.
+        let value = hover_at("+ errno", 2).expect("errno hover");
         assert!(value.contains("C library binding") && value.contains("errno.h"), "{value}");
 
         // Builtin type keyword.
@@ -2336,6 +2610,258 @@ int main(void) { return 0; }
         // Jeti keyword.
         let value = hover_at("@interface", 1).expect("keyword hover");
         assert!(value.contains("@interface"), "{value}");
+    }
+
+    #[test]
+    /// A cursor parked on a field name inside a struct/union body (or a class
+    /// ivar) answers from the computed layout: kind, host aggregate, type and
+    /// size/alignment — the card clangd shows, which used to be nothing.
+    fn hover_answers_for_struct_union_and_ivar_fields() {
+        let src = "\
+struct FsWidget { int wid; float ratio; };
+union FsMix { int i; float f; char bytes[4]; };
+@interface Runner : NPObject
+{
+  int laps;
+}
+@end
+int main(void) { return 0; }
+";
+        let hover_at = |needle: &str, extra: usize| {
+            let pos = position(src, needle, extra);
+            let mut server = Server::new(AnalysisOptions::default());
+            let uri = path_to_uri("/tmp/jeti_lsp_unit/fields.jeti");
+            server.handle(&json!({
+                "jsonrpc": "2.0", "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+                }},
+            }));
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 40, "method": "textDocument/hover",
+                "params": { "textDocument": { "uri": uri },
+                            "position": position_json(pos) },
+            }));
+            out[0]["result"]["contents"]["value"].as_str().map(str::to_string)
+        };
+
+        // A union member: clangd spells kind, host, type, size+alignment.
+        let value = hover_at("int i", 4).expect("union field hover");
+        assert!(value.contains("**field** `i`"), "{value}");
+        assert!(value.contains("in `union FsMix`"), "{value}");
+        assert!(value.contains("Type: int"), "{value}");
+        assert!(value.contains("Size: 4 bytes, alignment 4 bytes"), "{value}");
+
+        // A struct member after padding: same shape, host struct named.
+        let value = hover_at("float ratio", 6).expect("struct field hover");
+        assert!(value.contains("**field** `ratio`"), "{value}");
+        assert!(value.contains("in `struct FsWidget`"), "{value}");
+
+        // A class ivar: the layout engine's synthesized aggregate backs it.
+        let value = hover_at("int laps", 4).expect("ivar hover");
+        assert!(value.contains("**field** `laps`"), "{value}");
+        assert!(value.contains("Runner"), "{value}");
+    }
+
+    #[test]
+    /// Free-function cards spell the clangd shape (return-type arrow plus a
+    /// parameter list), and local-variable cards carry the type, the enclosing
+    /// function, and the declaration line instead of a bare spelling.
+    fn hover_enriches_function_and_local_cards() {
+        let src = "\
+static int fs_double_it(int v) { return v * 2; }
+int main(void) {
+  unsigned int ali = 4;
+  return fs_double_it(ali);
+}
+";
+        let hover_at = |needle: &str, extra: usize| {
+            let pos = position(src, needle, extra);
+            let mut server = Server::new(AnalysisOptions::default());
+            let uri = path_to_uri("/tmp/jeti_lsp_unit/enriched.jeti");
+            server.handle(&json!({
+                "jsonrpc": "2.0", "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+                }},
+            }));
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 40, "method": "textDocument/hover",
+                "params": { "textDocument": { "uri": uri },
+                            "position": position_json(pos) },
+            }));
+            out[0]["result"]["contents"]["value"].as_str().map(str::to_string)
+        };
+
+        let value = hover_at("int fs_double_it", 12).expect("function hover");
+        assert!(value.contains("**function** `fs_double_it`"), "{value}");
+        assert!(value.contains("→ int"), "{value}");
+        assert!(value.contains("Parameters:"), "{value}");
+        assert!(value.contains("• `int v`"), "{value}");
+
+        let value = hover_at("unsigned int ali", 16).expect("local hover");
+        assert!(value.contains("**local variable** `ali`"), "{value}");
+        assert!(value.contains("Type: unsigned int"), "{value}");
+        assert!(value.contains("in `main`"), "{value}");
+        assert!(value.contains("unsigned int ali = 4"), "{value}");
+    }
+
+    #[test]
+    /// Every declarator shape answers, not just the plain ones: a fn-pointer,
+    /// a multi-dim array, and a bit-field field all used to hover as nothing
+    /// because their own spans land on a trailing token — matching now goes by
+    /// name inside the host aggregate's extent.
+    fn hover_covers_fnptr_array_and_bitfield_fields() {
+        let src = "\
+struct FsWidget {
+    int wid;
+    int (*cb)(int);
+    int cells[2][3];
+    unsigned flags : 3;
+    int in;
+};
+int main(void) { return 0; }
+";
+        let hover_at = |needle: &str, extra: usize| {
+            let pos = position(src, needle, extra);
+            let mut server = Server::new(AnalysisOptions::default());
+            let uri = path_to_uri("/tmp/jeti_lsp_unit/shapes.jeti");
+            server.handle(&json!({
+                "jsonrpc": "2.0", "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+                }},
+            }));
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 40, "method": "textDocument/hover",
+                "params": { "textDocument": { "uri": uri },
+                            "position": position_json(pos) },
+            }));
+            out[0]["result"]["contents"]["value"].as_str().map(str::to_string)
+        };
+
+        let value = hover_at("int (*cb)", 7).expect("fn-ptr field hover");
+        assert!(value.contains("**field** `cb`"), "{value}");
+        assert!(value.contains("Type: int (*cb)(int)"), "{value}");
+        assert!(value.contains("Size: 8 bytes, alignment 8 bytes"), "{value}");
+
+        let value = hover_at("int cells", 4).expect("array field hover");
+        assert!(value.contains("**field** `cells`"), "{value}");
+        assert!(value.contains("Type: int[2][3]"), "{value}");
+        assert!(value.contains("Size: 24 bytes"), "{value}");
+
+        let value = hover_at("unsigned flags", 9).expect("bit-field hover");
+        assert!(value.contains("**field** `flags`"), "{value}");
+        assert!(value.contains("3 bits (+29 bits padding)"), "{value}");
+
+        let value = hover_at("int wid", 4).expect("plain field hover");
+        assert!(value.contains("**field** `wid`"), "{value}");
+    }
+
+    #[test]
+    /// Hovering an include path answers with a header card — the C-passthrough
+    /// kind for C headers, the inlined kind for `.hje` — instead of nothing.
+    fn hover_answers_on_include_paths() {
+        let src = "\
+#include <stdio.h>
+#import <Foundation/Foundation.hje>
+int main(void) { return 0; }
+";
+        let hover_at = |line: u32, character: u32| {
+            let mut server = Server::new(AnalysisOptions::default());
+            let uri = path_to_uri("/tmp/jeti_lsp_unit/headers.jeti");
+            server.handle(&json!({
+                "jsonrpc": "2.0", "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+                }},
+            }));
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 40, "method": "textDocument/hover",
+                "params": { "textDocument": { "uri": uri },
+                            "position": position_json(LspPosition { line, character }) },
+            }));
+            out[0]["result"]["contents"]["value"].as_str().map(str::to_string)
+        };
+
+        // On the path, and on either bracket.
+        let value = hover_at(0, 12).expect("C header hover");
+        assert!(value.contains("**header** `stdio.h`"), "{value}");
+        assert!(value.contains("C header"), "{value}");
+        let value = hover_at(0, 9).expect("opening bracket hover");
+        assert!(value.contains("**header** `stdio.h`"), "{value}");
+        let value = hover_at(1, 12).expect("jeti header hover");
+        assert!(value.contains("**header** `Foundation/Foundation.hje`"), "{value}");
+        assert!(value.contains("Jeti header"), "{value}");
+        // Off the path: no card, the line's keyword stays grammar-only. (The
+        // document's `#import` cannot resolve in the unit harness — no include
+        // search path — so later lines have no analysis to hover with; the
+        // `#include` keyword itself needs none.)
+        let value = hover_at(0, 3);
+        assert!(!value.as_deref().is_some_and(|v| v.contains("**header**")), "{value:?}");
+    }
+
+    #[test]
+    /// Include paths come back as links over the whole bracketed span: a path
+    /// the search directory resolves carries a file target, a system header
+    /// nothing resolves keeps its range without one.
+    fn include_paths_link_to_resolved_files() {
+        let dir = std::env::temp_dir().join("jeti_lsp_unit_links");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("helper.hje"), "// helper\n").unwrap();
+        let src = "#import <helper.hje>\n#include <jeti_no_such_header_xyz.h>\n";
+        let mut server = Server::new(AnalysisOptions {
+            search_dirs: vec![dir.to_string_lossy().to_string()],
+            ..AnalysisOptions::default()
+        });
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/links.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+            }},
+        }));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 50, "method": "textDocument/documentLink",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        let links = out[0]["result"].as_array().expect("links array");
+        assert_eq!(links.len(), 2, "{links:?}");
+
+        // The whole `<helper.hje>` — brackets included — is one link range
+        // (end is exclusive, so it stops one past the `>`).
+        let resolved = &links[0];
+        assert_eq!(resolved["range"]["start"]["character"], 8, "{resolved:?}");
+        assert_eq!(resolved["range"]["end"]["character"], 20, "{resolved:?}");
+        let target = resolved["target"].as_str().expect("resolved target");
+        assert!(target.ends_with("helper.hje"), "{target}");
+
+        // A header no search dir and no system dir has: range, no target.
+        // (stdio.h *does* resolve once the cc probe lists the SDK — that is
+        // the clangd-parity behavior — so the miss case needs a real miss.)
+        let unresolved = &links[1];
+        assert!(unresolved.get("target").is_none(), "{unresolved:?}");
+    }
+
+    #[test]
+    /// The cc probe parser reads the driver's search-list block and nothing
+    /// else — framework annotations stripped, prose after the list ignored.
+    fn cc_search_list_parses_to_directories() {
+        let text = "\
+#include <...> search starts here:
+ /usr/local/include
+ /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include
+ /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks (framework directory)
+End of search list.
+noise after the list
+";
+        let dirs = parse_cc_search_list(text);
+        assert_eq!(dirs.len(), 3, "{dirs:?}");
+        assert!(dirs[0].ends_with("/usr/local/include"), "{dirs:?}");
+        assert!(
+            !dirs[2].ends_with("(framework directory)"),
+            "annotation must be stripped: {dirs:?}"
+        );
     }
 
     fn hover_and_completion_speak_qualified_names() {

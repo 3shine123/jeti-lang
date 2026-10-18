@@ -51,7 +51,7 @@ function log(message) {
  */
 function ensureStatus() {
   if (status) return status;
-  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   status.name = 'jeti-lsp';
   status.tooltip = 'jeti-lsp language server';
   status.command = 'jeti.showServerLog';
@@ -334,6 +334,17 @@ function restart() {
       },
       ':',
     ),
+    // Include paths as links: underline, whole-path hover highlight, cmd+click
+    // to the resolved file (clangd parity). Links without a target (nothing
+    // resolved) render as plain text.
+    vscode.languages.registerDocumentLinkProvider(LANGUAGE_ID, {
+      provideDocumentLinks: async (document) => {
+        if (!client) return [];
+        return (await client.documentLinks(document.uri.toString()))
+          .filter((link) => link?.target)
+          .map((link) => new vscode.DocumentLink(toRange(link.range), vscode.Uri.parse(link.target)));
+      },
+    }),
     vscode.workspace.onDidOpenTextDocument((document) => {
       if (client && isJetiDocument(document)) {
         client.openDocument(document.uri.toString(), document.getText());
@@ -358,6 +369,33 @@ function restart() {
       collection?.delete(document.uri);
     }),
   );
+
+  // The compiler's own coloring, on top of the grammar: the server knows
+  // types, classes, fields, enum members and macros; the grammar keeps
+  // keywords and punctuation. Legend order must match the server's. Kept out
+  // of the registration block above on purpose — if this API call ever fails,
+  // it must not take the document-event handlers (the LSP's lifeline) down
+  // with it; coloring degrades to the grammar instead.
+  try {
+    context.subscriptions.push(
+      vscode.languages.registerSemanticTokensProvider(
+        LANGUAGE_ID,
+        {
+          provideSemanticTokens: async (document) => {
+            if (!client) return new vscode.SemanticTokens(new Uint32Array());
+            const result = await client.semanticTokensFull(document.uri.toString());
+            return new vscode.SemanticTokens(new Uint32Array(result?.data ?? []));
+          },
+        },
+        new vscode.SemanticTokensLegend(
+          ['namespace', 'class', 'type', 'enum', 'function', 'variable', 'property', 'macro', 'enumMember'],
+          [],
+        ),
+      ),
+    );
+  } catch (error) {
+    output?.appendLine(`semantic tokens unavailable: ${error?.message ?? error}`);
+  }
 
   // Status bar + tab tracking. The active-editor hook fires on tab switch,
   // so switching to a .jeti/.hje tab shows the file the analysis belongs to

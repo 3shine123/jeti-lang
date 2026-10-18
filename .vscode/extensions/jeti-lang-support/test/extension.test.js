@@ -37,6 +37,10 @@ const providers = new Map();
 
 const vscode = {
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  // Semantic-tokens plumbing: the provider wraps the server's quintuplets in
+  // these; the mock only needs the constructors to exist.
+  SemanticTokens: class { constructor(data) { this.data = data; } },
+  SemanticTokensLegend: class { constructor(tokenTypes, tokenModifiers) { this.tokenTypes = tokenTypes; this.tokenModifiers = tokenModifiers; } },
   // The status bar API is top-level in VS Code (vscode.StatusBarAlignment),
   // which is how extension.js reads it.
   StatusBarAlignment: { Left: 1, Right: 2 },
@@ -148,6 +152,8 @@ const vscode = {
     registerHoverProvider: (selector, provider) => registerProvider('hover', provider),
     registerCompletionItemProvider: (selector, provider) => registerProvider('completion', provider),
     registerSignatureHelpProvider: (selector, provider) => registerProvider('signatureHelp', provider),
+    registerSemanticTokensProvider: (selector, provider) => registerProvider('semanticTokens', provider),
+    registerDocumentLinkProvider: (selector, provider) => registerProvider('documentLink', provider),
   },
   commands: {
     registerCommand: (id, _handler) => ({ id, dispose: () => {} }),
@@ -339,7 +345,7 @@ async function main() {
     assert.strictEqual(diagnostics.length, 1);
     assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
     assert.strictEqual(diagnostics[0].source, 'jeti');
-    assert.deepStrictEqual(diagnostics[0].range.start, { line: 0, character: 24 });
+    assert.deepStrictEqual(diagnostics[0].range.start, { line: 0, character: 25 });
     assert.match(diagnostics[0].message, /expected ';'/);
     console.log(`ok  didOpen → collection has ${diagnostics.length} diagnostic: ${diagnostics[0].message}`);
 

@@ -61,10 +61,12 @@
       "patterns": [
         {
           "name": "meta.preprocessor.include.jeti",
-          "match": "^\\s*(#\\s*(?:import|include))\\s+[<\"]([^>\"]*)[>\"]",
+          "match": "^\\s*(#\\s*(?:import|include))\\s+([<\"])([^>\"]*)([>\"])",
           "captures": {
             "1": { "name": "keyword.control.import.include" },
-            "2": { "name": "string.quoted.other.lt" }
+            "2": { "name": "string.quoted.other.lt-gt.include" },
+            "3": { "name": "string.quoted.other.lt-gt.include string.include.identifier" },
+            "4": { "name": "string.quoted.other.lt-gt.include" }
           }
         },
         {
@@ -487,7 +489,7 @@
       "patterns": [
         {
           "name": "keyword.control",
-          "match": "\\b(?:return|if|else|switch|case|default|while|do|for|in|break|continue|goto)\\b"
+          "match": "\\b(?:return|if|else|switch|case|default|while|do|for|break|continue|goto)\\b"
         }
       ]
     },

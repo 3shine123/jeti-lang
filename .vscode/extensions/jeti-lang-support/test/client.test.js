@@ -96,12 +96,13 @@ async function main() {
     assert.strictEqual(init.serverInfo.name, 'jeti-lsp');
     console.log('ok  initialize handshake');
 
-    // didOpen → publishDiagnostics with the syntax error at line 0, char 24.
+    // didOpen → publishDiagnostics with the syntax error at line 0, char 25:
+    // clang's insertion-point caret sits where the `;` belongs, before the `}`.
     client.openDocument(uri, broken);
     const reported = await feed.waitFor(uri, (diagnostics) => diagnostics.length > 0);
     const first = reported[0];
     assert.strictEqual(first.severity, 1, `expected an error, got ${JSON.stringify(first)}`);
-    assert.deepStrictEqual(first.range.start, { line: 0, character: 24 });
+    assert.deepStrictEqual(first.range.start, { line: 0, character: 25 });
     assert.match(first.message, /expected ';'/);
     assert.strictEqual(first.source, 'jeti');
     console.log(`ok  didOpen → ${reported.length} diagnostic(s): ${first.message}`);
@@ -111,6 +112,13 @@ async function main() {
     client.changeDocument(uri, [{ text: 'int main(void) { return 0; }\n' }]);
     await feed.waitFor(uri, (diagnostics) => diagnostics.length === 0);
     console.log('ok  didChange (whole buffer) → diagnostics cleared');
+
+    // semanticTokens → the compiler's coloring: `main` classifies as a
+    // function (type 4 in the legend), keywords stay grammar-colored.
+    const tokens = await client.semanticTokensFull(uri);
+    assert.ok(Array.isArray(tokens?.data) && tokens.data.length >= 5, 'expected semantic tokens');
+    assert.strictEqual(tokens.data[3], 4, `expected main as function, got ${JSON.stringify(tokens.data)}`);
+    console.log(`ok  semanticTokens → ${tokens.data.length / 5} token(s), main = function`);
 
     // didClose clears the entry as well and must not resurrect it.
     client.closeDocument(uri);
