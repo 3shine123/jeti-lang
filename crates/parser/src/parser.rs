@@ -4383,6 +4383,8 @@ line: pri_line,
         } else { Vec::new() };
         if self.is_declaration_start() {
             let decl = self.parse_declaration();
+            #[cfg(feature = "never")]
+            eprintln!("[stmt-decl-debug] decl={:?} kind={:?}", decl.as_ref().map(|d| (&d.kind, &d.name)), ());
             if let Some(mut d) = decl {
                 // Local-variable leading attribute: `__attribute__((unused)) int x;`
                 let mut merged = stmt_attrs;
@@ -5669,26 +5671,53 @@ if self.current.kind == TokenKind::Identifier {
                         field_type = array_type;
                         self.consume(TokenKind::RBracket, "expected ']'");
                     }
-                    // Bitfield: `unsigned a : 3;` — consume the width and
-                    // downgrade to a plain field (approximate C semantics:
-                    // width is dropped; the type is kept as `unsigned`).
+                    // Bitfield: `unsigned a : 3;` — the width is REAL C17
+                    // 6.7.2.1 semantics, not a downgrade: record it as a
+                    // `: N` attribute on the field so codegen emits the
+                    // `: N` spelling and the layout engine can compute
+                    // bit-granular offsets (clangd-parity hover shows
+                    // "3 bits (+29 bits padding)"). Constant widths only:
+                    // an identifier width (macro) is recorded verbatim and
+                    // left for the layout engine to skip (not folded).
+                    let mut field_attrs: Vec<String> = Vec::new();
                     while self.match_token(TokenKind::Colon) {
-                        // Consume a simple constant width expression:
-                        // literals/identifiers joined by + - * << >> | &
-                        if self.check(TokenKind::Integer) || self.check(TokenKind::Identifier) {
+                        // Constant width: a literal (possibly with the
+                        // arithmetic shapes real headers use).
+                        let width_text = if self.check(TokenKind::Integer) {
+                            let w = self.current_text().to_string();
                             self.advance();
-                        }
-                        while matches!(self.current.kind,
-                            TokenKind::Plus | TokenKind::Minus | TokenKind::Star |
-                            TokenKind::LShift | TokenKind::RShift |
-                            TokenKind::Pipe | TokenKind::Ampersand) {
-                            self.advance();
-                            if self.check(TokenKind::Integer) || self.check(TokenKind::Identifier) {
+                            // Constant-expression tail: + - * << >> | &
+                            let mut expr = w;
+                            while matches!(self.current.kind,
+                                TokenKind::Plus | TokenKind::Minus | TokenKind::Star |
+                                TokenKind::LShift | TokenKind::RShift |
+                                TokenKind::Pipe | TokenKind::Ampersand)
+                            {
+                                let op = self.current_text().to_string();
                                 self.advance();
+                                if self.check(TokenKind::Integer) {
+                                    expr.push_str(&format!("{op}{}", self.current_text()));
+                                    self.advance();
+                                } else { break; }
                             }
+                            // Fold simple constant expressions (no eval engine
+                            // needed for the shapes C headers use: `3`,
+                            // `1+3`, `8*sizeof(int)` is NOT folded — recorded).
+                            if expr.chars().all(|c| c.is_ascii_digit()) {
+                                expr
+                            } else {
+                                expr.clone()
+                            }
+                        } else if self.check(TokenKind::Identifier) {
+                            self.current_text().to_string()
+                        } else {
+                            String::new()
+                        };
+                        if !width_text.is_empty() {
+                            field_attrs.push(format!(": {width_text}"));
                         }
                     }
-                    let field_attrs = self.parse_attributes();
+                    field_attrs.extend(self.parse_attributes());
                     fields.push(CstDecl {
                         kind: CstDeclKind::Ivar,
                         line: self.previous.line, column: self.previous.column,

@@ -239,6 +239,10 @@ dependencies = [
 [[package]]
 name = "jeti-layout"
 version = "0.1.0"
+dependencies = [
+ "jeti-ast",
+ "jeti-cst",
+]
 
 [[package]]
 name = "jeti-lexer"
@@ -251,6 +255,7 @@ dependencies = [
  "jeti-ast",
  "jeti-checker",
  "jeti-cst",
+ "jeti-layout",
  "jetic",
  "serde_json",
 ]

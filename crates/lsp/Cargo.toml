@@ -17,4 +17,5 @@ jeti-ast = { path = "../ast" }
 jeti-cst = { path = "../cst" }
 jetic = { path = "../jetic" }
 jeti-checker = { path = "../checker" }
+jeti-layout = { path = "../layout" }
 serde_json = "1.0.154"

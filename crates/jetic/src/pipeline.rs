@@ -746,6 +746,12 @@ impl Pipeline {
 
     fn validate_decl_attrs(&mut self, decl: &AstDecl) {
         for attr in &decl.attributes {
+            // A `: N` attribute is the C17 6.7.2.1 bit-field width the parser
+            // records on a field — not a `__attribute__`. Nothing to validate;
+            // codegen emits it as the declarator's `: N` suffix.
+            if attr.trim_start().starts_with(':') {
+                continue;
+            }
             let name = attr.split('(').next().unwrap_or(attr).trim();
             match disposition(name, self.backend) {
                 AttrDisposition::Error => {

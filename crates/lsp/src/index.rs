@@ -325,6 +325,12 @@ pub struct SymbolIndex {
     protocol_parents: HashMap<String, Vec<String>>,
     /// Scopes of the document being edited.
     scopes: Vec<Scope>,
+    /// Aggregates' computed layout (C17 6.7.2.1) keyed by the name as
+    /// written, and the typedef alias → aliased-type map. Built during
+    /// `build()` from the same AST every other answer derives from; the
+    /// hover cards read these for clangd-parity size/offset lines.
+    pub layouts: HashMap<String, jeti_layout::StructLayout>,
+    pub typedef_types: HashMap<String, AstType>,
     /// Message sends of the document being edited, in source order.
     sites: Vec<SendSite>,
     /// Free-function calls of the document being edited.
@@ -379,6 +385,9 @@ impl SymbolIndex {
         };
         let mut index = SymbolIndex::default();
         index.document = document.to_string();
+        let (layouts, typedef_types) = jeti_layout::collect_layouts(&ast.decls);
+        index.layouts = layouts;
+        index.typedef_types = typedef_types;
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
         index.attach_namespaces(ast, source_map, &mut lookup);
         index.read_usings(&ast.usings);

@@ -20,7 +20,7 @@ clang /tmp/fsf.o /tmp/fsfrt.o tests/stress/baremetal/helpers.c -o /tmp/fsf -D_FO
 | 类/继承/多态 | `@interface Derived : Base`，基类链任意深，`[super msg]` 经父类 vtable 实例分派 |
 | 自管 alloc/init | 每条根链自己声明 `+ (id)alloc { return jeti_alloc(self); }`、`- (id)init { return self; }`（bump allocator 由 runtime_freestanding.c 提供） |
 | @namespace | 全名前缀 + `Class<T>` 实例化拼写 |
-| 泛型（构造侧） | `Box<int> *b = [[Box<int>] alloc] initWithValue:…]`，类型参数哨兵进 vtable |
+| 泛型（真单态化） | `Box<int> *b = [[Box<int>] alloc] initWithValue:…]`；每个实例化有独立 struct/vtable/克隆函数，`T` 按位替换。**值类型 T 的读取**（`[box value]` 返回 `int`）经直呼克隆函数（sentinel 门控：模板返回类型带 `/*T*/` 且自身实现才直呼，其余走统一 vtable 保持继承语义） |
 | blocks | 字面量、byref 捕获（`__block`） |
 | @defer | LIFO 退出（早期 return 也执行） |
 | @autoreleasepool / @synchronized | runtime_freestanding.c 提供池与锁 |
@@ -37,7 +37,6 @@ clang /tmp/fsf.o /tmp/fsfrt.o tests/stress/baremetal/helpers.c -o /tmp/fsf -D_FO
 |------|------|
 | Foundation 类（NPString/NPArray/NPLog/@"" 字面量对象化…） | freestanding 不链 Foundation 库；`@""` 退化为 C 字符串 |
 | `[super init]`（根链顶端） | `jeti_root` 无 init vtable 槽——所有 freestanding 代码手写 `- (id)init { return self; }` |
-| 泛型 T 的**值读取**（`[box value]`，T=int） | vtable 槽签名擦除为 `NPObject *`；hosted 模式靠 monomorphization 哨兵标记补 cast，freestanding 同样受此边界约束（记录，未阻塞构造/传参路径） |
 | 方法体内 **struct 定义** / **typedef 定义** | codegen 丢弃函数体内的 `struct X {…};` / `typedef …;`（生成的 C 只剩使用点）——记录缺口，定义移文件级可绕开 |
 | `struct X {…} p;` 定义+声明一条语句 | parser 不接受该组合（声明落在 `}` 后即断）——记录缺口 |
 

@@ -738,12 +738,32 @@ impl Server {
                             if let Some(first) = locations.first() {
                                 let text_of = self.text_of();
                                 let resolve = |path: &str| text_or_disk(&text_of, path);
-                                hover = json!({
-                                    "contents": {
-                                        "kind": "markdown",
-                                        "value": hover_markdown(first, locations.len(), &resolve),
-                                    },
-                                });
+                                // A struct/union/typedef declaration gets the
+                                // clangd-parity layout card (Size/alignment +
+                                // per-field offsets) in place of the generic
+                                // declaration card.
+                                let is_aggregate = first.kind == index::kind::STRUCT
+                                    || first.detail == "typedef";
+                                if is_aggregate {
+                                    let layout = index.layouts.get(&name)
+                                        .or_else(|| index.layouts.get(first.name.as_str()));
+                                    let aliased = index.typedef_types.get(&name)
+                                        .or_else(|| index.typedef_types.get(first.name.as_str()))
+                                        .and_then(|t| t.name.clone());
+                                    hover = json!({
+                                        "contents": {
+                                            "kind": "markdown",
+                                            "value": hover_markdown_with_layout(first, layout, aliased.as_ref(), &resolve),
+                                        },
+                                    });
+                                } else {
+                                    hover = json!({
+                                        "contents": {
+                                            "kind": "markdown",
+                                            "value": hover_markdown(first, locations.len(), &resolve),
+                                        },
+                                    });
+                                }
                             }
                         }
                         None => {}
@@ -946,9 +966,9 @@ impl Server {
     ) -> Option<String> {
         let word = word_at(text, position)?;
         if let Some(local) = index.local_at(position, &word) {
-            let mut markdown = format!("**局部变量** `{}` · `{}`", word, local.type_spelling);
+            let mut markdown = format!("**local variable** `{}` · `{}`", word, local.type_spelling);
             if let Some(line) = local.decl_line {
-                markdown.push_str(&format!("\n\n_声明于本文件第 {line} 行_"));
+                markdown.push_str(&format!("\n\n_Declared in this file, line {line}_"));
             }
             return Some(markdown);
         }
@@ -960,12 +980,12 @@ impl Server {
         }
         if let Some(header) = jeti_checker::c_stdlib_function_header(&word) {
             return Some(format!(
-                "**C 标准库函数** `{word}`\n\n声明于 `<{header}>`（passthrough 头；jetic 不解析 C 头部，签名以头文件为准）"
+                "**C library function** `{word}`\n\nDeclared in `<{header}>` (passthrough header; jetic does not parse C headers — see the header for the signature)"
             ));
         }
         if let Some(header) = jeti_checker::c_stdlib_binding_header(&word) {
             return Some(format!(
-                "**C 标准库绑定** `{word}`\n\n声明于 `<{header}>`（全局对象或宏常数）"
+                "**C library binding** `{word}`\n\nDeclared in `<{header}>` (global object or macro constant)"
             ));
         }
         None
@@ -1141,29 +1161,29 @@ fn is_word_byte(b: u8) -> bool {
 /// factual. C17 6.2.5 spells the type system; ObjC adds the object kinds.
 fn builtin_type_markdown(word: &str) -> Option<String> {
     let (name, desc) = match word {
-        "void" => ("void", "无类型（C17 6.2.5）——无返回值函数与 `void *`"),
-        "int" => ("int", "内置整型（C17 6.2.5p5）"),
-        "char" => ("char", "字符型，1 字节（C17 6.2.5p15）"),
-        "short" => ("short", "短整型（C17 6.2.5p5）"),
-        "long" => ("long", "长整型（LP64 下 64 位）"),
-        "float" => ("float", "单精度浮点（C17 6.2.5p10）"),
-        "double" => ("double", "双精度浮点（C17 6.2.5p10）"),
-        "signed" => ("signed", "有符号限定"),
-        "unsigned" => ("unsigned", "无符号限定"),
-        "const" => ("const", "只读限定（C17 6.7.3）"),
-        "volatile" => ("volatile", "易变限定（C17 6.7.3）"),
-        "struct" => ("struct", "结构体（C17 6.7.2.1）——悬停在成员名上看字段"),
-        "union" => ("union", "联合体（C17 6.7.2.1）"),
-        "enum" => ("enum", "枚举（C17 6.7.2.2）"),
-        "BOOL" => ("BOOL", "ObjC 布尔（4 字节整型；jeti 里即 `_Bool`/`int` 家族）"),
-        "SEL" => ("SEL", "选择器类型——消息名 intern 后的句柄"),
-        "id" => ("id", "对象指针通配——任何对象都可赋给它"),
-        "Class" => ("Class", "类对象指针——`+[… alloc]` 的接收者"),
-        "instancetype" => ("instancetype", "方法所在类的实例类型（比 id 更精确）"),
-        "self" => ("self", "当前接收者：实例方法里是实例，类方法里是类对象"),
-        "super" => ("super", "向父类发消息的编译期指示（仍是 self）"),
-        "nil" => ("nil", "空对象常量（值为 0）"),
-        "NULL" => ("NULL", "空指针常量（值为 0）"),
+        "void" => ("void", "no type (C17 6.2.5) — void-returning functions and `void *`"),
+        "int" => ("int", "builtin integer type (C17 6.2.5p5)"),
+        "char" => ("char", "character type, 1 byte (C17 6.2.5p15)"),
+        "short" => ("short", "short integer (C17 6.2.5p5)"),
+        "long" => ("long", "long integer (64 bits under LP64)"),
+        "float" => ("float", "single-precision float (C17 6.2.5p10)"),
+        "double" => ("double", "double-precision float (C17 6.2.5p10)"),
+        "signed" => ("signed", "signed qualifier"),
+        "unsigned" => ("unsigned", "unsigned qualifier"),
+        "const" => ("const", "read-only qualifier (C17 6.7.3)"),
+        "volatile" => ("volatile", "volatile qualifier (C17 6.7.3)"),
+        "struct" => ("struct", "structure (C17 6.7.2.1) — hover a member name to see fields"),
+        "union" => ("union", "union (C17 6.7.2.1)"),
+        "enum" => ("enum", "enumeration (C17 6.7.2.2)"),
+        "BOOL" => ("BOOL", "ObjC boolean (4-byte integer)"),
+        "SEL" => ("SEL", "selector — the interned handle of a message name"),
+        "id" => ("id", "object pointer wildcard — any object assigns to it"),
+        "Class" => ("Class", "class-object pointer — the receiver of `+[… alloc]`"),
+        "instancetype" => ("instancetype", "the instance type of the method's class (more precise than id)"),
+        "self" => ("self", "the current receiver: the instance in an instance method, the class object in a class method"),
+        "super" => ("super", "compile-time directive to message the superclass (still self)"),
+        "nil" => ("nil", "the nil object constant (value 0)"),
+        "NULL" => ("NULL", "the null pointer constant (value 0)"),
         _ => return None,
     };
     Some(format!("**`{name}`**\n\n{desc}"))
@@ -1173,24 +1193,24 @@ fn builtin_type_markdown(word: &str) -> Option<String> {
 /// language server should at least say what the construct is).
 fn jeti_keyword_markdown(word: &str) -> Option<String> {
     let (name, desc) = match word {
-        "@interface" => ("@interface", "类/协议声明：方法、ivars、属性；成员在 @implementation 里实现"),
-        "@implementation" => ("@implementation", "类实现：方法体在这里；可与 @interface 分文件（owner TU 持有元数据）"),
-        "@property" => ("@property", "声明属性——生成存取方法与 ivar"),
-        "@protocol" => ("@protocol", "协议：方法契约，类用 <P> 遵循"),
-        "@class" => ("@class", "前向声明：只报名字，不带布局"),
-        "@end" => ("@end", "类/协议/实现块结束"),
-        "@try" => ("@try", "异常尝试块；配 @catch / @finally"),
-        "@catch" => ("@catch", "捕获 @throw 抛出的对象"),
-        "@finally" => ("@finally", "无论是否抛出都执行的清理块"),
-        "@throw" => ("@throw", "抛出异常对象"),
-        "@selector" => ("@selector", "把消息名编译成 SEL"),
-        "@autoreleasepool" => ("@autoreleasepool", "自动释放池作用域"),
-        "@synchronized" => ("@synchronized", "互斥锁作用域"),
-        "@namespace" => ("@namespace", "名字空间：内部声明的全名带前缀"),
-        "@using" => ("@using", "把全名引入为短名"),
-        "@public" => ("@public", "ivar 可见性：外部可直接访问"),
-        "@private" => ("@private", "ivar 可见性：仅本类"),
-        "@protected" => ("@protected", "ivar 可见性：本类及子类"),
+        "@interface" => ("@interface", "class/protocol declaration: methods, ivars, properties; members are implemented in @implementation"),
+        "@implementation" => ("@implementation", "class implementation: method bodies live here; may be split from @interface across files (the owner TU holds the metadata)"),
+        "@property" => ("@property", "declares a property — generates accessors and an ivar"),
+        "@protocol" => ("@protocol", "protocol: a method contract; classes conform with <P>"),
+        "@class" => ("@class", "forward declaration: names only, no layout"),
+        "@end" => ("@end", "closes a class/protocol/implementation block"),
+        "@try" => ("@try", "exception try block; pairs with @catch / @finally"),
+        "@catch" => ("@catch", "catches an object thrown with @throw"),
+        "@finally" => ("@finally", "cleanup that runs whether or not an exception was thrown"),
+        "@throw" => ("@throw", "throws an exception object"),
+        "@selector" => ("@selector", "compiles a message name into a SEL"),
+        "@autoreleasepool" => ("@autoreleasepool", "autoreleasepool scope"),
+        "@synchronized" => ("@synchronized", "mutex scope"),
+        "@namespace" => ("@namespace", "namespace: declarations inside get a qualified prefix"),
+        "@using" => ("@using", "imports a fully-qualified name under a short name"),
+        "@public" => ("@public", "ivar visibility: accessible from anywhere"),
+        "@private" => ("@private", "ivar visibility: this class only"),
+        "@protected" => ("@protected", "ivar visibility: this class and subclasses"),
         _ => return None,
     };
     Some(format!("**`{name}`**\n\n{desc}"))
@@ -1225,6 +1245,38 @@ fn hover_markdown(
     if declarations > 1 {
         markdown.push_str(&format!(" · _{declarations} declarations_"));
     }
+    markdown
+}
+
+/// clangd-parity layout card for a struct/union/typedef symbol: title line,
+/// then "Size: N bytes, alignment M bytes" and the per-field offset table —
+/// all English (the cards must read like clangd's, not carry prose). The
+/// declaration snippet stays, because it is what makes the card recognizable.
+fn hover_markdown_with_layout(
+    location: &Location,
+    layout: Option<&jeti_layout::StructLayout>,
+    aliased: Option<&String>,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    let kind_word = if location.detail == "union" { "union" } else { "struct" };
+    let mut markdown = format!("**{kind_word}** `{}`", location.name);
+    markdown.push_str("\n\n");
+    if let Some(l) = layout {
+        markdown.push_str(&jeti_layout::hover_body(l));
+        markdown.push_str("\n\n");
+    } else if let Some(target) = aliased {
+        markdown.push_str(&format!("typedef — aliases `{target}`\n\n"));
+    }
+    if let Some(text) = resolve(&location.path) {
+        if let Some(snippet) = declaration_text(&text, location.range) {
+            markdown.push_str(&format!("```jeti\n{snippet}\n```\n"));
+        }
+    }
+    markdown.push_str(&format!(
+        "\n_Declared in {}:{}_",
+        display_path(&location.path),
+        location.range.start.line + 1
+    ));
     markdown
 }
 
@@ -2263,7 +2315,7 @@ int main(void) { return 0; }
         // The receiver `sp` in `sp.label = nil` — clangd shows the receiver's
         // type; the index-only hover used to answer nothing.
         let value = hover_at("sp.label", 0).expect("sp hover");
-        assert!(value.contains("局部变量") && value.contains("Runner"), "{value}");
+        assert!(value.contains("local variable") && value.contains("Runner"), "{value}");
 
         // A scalar local: `int ticks`.
         let value = hover_at("ticks", 0).expect("ticks hover");
@@ -2271,15 +2323,15 @@ int main(void) { return 0; }
 
         // A passthrough C function.
         let value = hover_at("printf", 0).expect("printf hover");
-        assert!(value.contains("C 标准库函数") && value.contains("stdio.h"), "{value}");
+        assert!(value.contains("C library function") && value.contains("stdio.h"), "{value}");
 
         // A passthrough binding.
         let value = hover_at("errno", 0).expect("errno hover");
-        assert!(value.contains("C 标准库绑定") && value.contains("errno.h"), "{value}");
+        assert!(value.contains("C library binding") && value.contains("errno.h"), "{value}");
 
         // Builtin type keyword.
         let value = hover_at("int main", 0).expect("int hover");
-        assert!(value.contains("内置整型"), "{value}");
+        assert!(value.contains("builtin integer type"), "{value}");
 
         // Jeti keyword.
         let value = hover_at("@interface", 1).expect("keyword hover");

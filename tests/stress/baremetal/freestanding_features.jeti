@@ -148,10 +148,8 @@ int main(void) {
     Freestanding::Box<int> *box = [[Freestanding::Box<int> alloc] initWithValue:11];
     Cell *c = [[Cell alloc] initWithN:twice(5)];
     [c exerciceAll];
-    // (generic T-value read is erased at the vtable boundary in
-    // freestanding — the doc records this; read it through a typed
-    // instance variable access instead)
-    kputs("box-ok/");
+    kputdec([box value]);
+    kputs("/");
     kputdec([c n]);
     kputdec([c n]);
     kputs("/");

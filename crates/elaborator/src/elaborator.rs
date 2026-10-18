@@ -102,10 +102,19 @@ impl Elaborator {
                 }
             }
         }
-        if name.contains("::") || self.ns_prefix.is_empty() {
-            name.to_string()
+        // A generic instantiation spelling (`Box<int>`) splits at the `<`:
+        // the BASE resolves through the namespace walk and the type-arg list
+        // rides along (`Freestanding::Box<int>`). Symbol-table lookups use
+        // the base; the returned spelling names the instantiation — which
+        // codegen keys the monomorphized clone by.
+        let (name_base, name_args) = match name.find('<') {
+            Some(lt) => (&name[..lt], &name[lt..]),
+            None => (name, ""),
+        };
+        if name_base.contains("::") || self.ns_prefix.is_empty() {
+            format!("{}{}", name_base, name_args)
         } else {
-            format!("{}{}", self.ns_prefix, name)
+            format!("{}{}{}", self.ns_prefix, name_base, name_args)
         }
     }
 
@@ -146,8 +155,41 @@ impl Elaborator {
         }
     }
 
-    fn convert_type(&mut self, ct: &CstType) -> Option<AstType> {
-        let mut at = AstType::new(ct.prim);
+    /// Render one type argument the way codegen's mangled spellings write
+    /// them (`int`, `NPString *`, `Box<int> *`) — enough to rebuild the
+    /// `Class<Args>` instantiation name for class_ref.
+    fn ast_type_render_args(t: &AstType) -> String {
+        let base = t.name.clone().unwrap_or_else(|| match t.prim {
+            TypePrim::Void => "void".into(),
+            TypePrim::Char => "char".into(),
+            TypePrim::Short => "short".into(),
+            TypePrim::Int => "int".into(),
+            TypePrim::Long => "long".into(),
+            TypePrim::LongLong => "long long".into(),
+            TypePrim::Float => "float".into(),
+            TypePrim::Double => "double".into(),
+            TypePrim::Bool => "BOOL".into(),
+            TypePrim::Unsigned => "unsigned".into(),
+            TypePrim::Id => "id".into(),
+            TypePrim::Class => "Class".into(),
+            TypePrim::Sel => "SEL".into(),
+            TypePrim::Instancetype => "instancetype".into(),
+            _ => "int".into(),
+        });
+        let inner_args = if t.type_args.is_empty() {
+            String::new()
+        } else {
+            let rendered = t.type_args.iter()
+                .map(Self::ast_type_render_args)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("<{}>", rendered)
+        };
+        let stars = if t.is_pointer { " *" } else { "" };
+        format!("{}{}{}", base, inner_args, stars)
+    }
+
+    fn convert_type(&mut self, ct: &CstType) -> Option<AstType> {        let mut at = AstType::new(ct.prim);
         at.is_pointer = ct.is_pointer; at.is_const = ct.is_const; at.is_block = ct.is_block;
         at.is_fn_ptr = ct.is_fn_ptr;
         at.is_unsigned = ct.is_unsigned;
@@ -167,7 +209,8 @@ impl Elaborator {
         at.nulls = ct.nulls;
         // Resolve class/protocol refs from symbol table (like C's convert_type_node)
         if let Some(ref st) = self.symtab {
-            if let Some(ref name) = at.name {
+            let raw_name = at.name.clone();
+            if let Some(ref name) = raw_name {
                 if at.prim == TypePrim::Named {
                     // Check if this name is a @using alias with type info
                     // (e.g. `SecTunnel` → `Network::Security::QuantumPacket<...>*`)
@@ -187,8 +230,39 @@ impl Elaborator {
                         }
                     } else {
                         let fqn = self.ns_fqn(name);
-                        if let Some(cls) = st.find_class(&fqn).or_else(|| st.find_class(name)) {
-                            at.class_ref = Some(cls.name.clone());
+                        // True monomorphization: a receiver typed
+                        // `Box<int> *` must carry the INSTANTIATION spelling
+                        // (`Box<int>`) in class_ref, because codegen keys the
+                        // monomorphized clone by exactly that mangled flat
+                        // name (`Box_int`). The parser keeps name and
+                        // type_args in SEPARATE fields (`Box` + [int]), so
+                        // the mangled spelling is rebuilt here from type_args
+                        // rather than parsed out of the name.
+                        let args_suffix = if at.type_args.is_empty() {
+                            String::new()
+                        } else {
+                            let rendered = at.type_args.iter()
+                                .map(|a| Self::ast_type_render_args(a))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("<{}>", rendered)
+                        };
+                        if !args_suffix.is_empty() {
+                            let found = st.find_class(&fqn).or_else(|| st.find_class(name));
+                            if let Some(cls) = found {
+                                // class_ref carries the INSTANTIATION spelling
+                                // (`NPBox<Thing>`) — codegen keys the
+                                // monomorphized clone by it. `name` stays the
+                                // bare base: the checker's substitution and
+                                // every consumer reading `.name` pair it with
+                                // `.type_args` themselves.
+                                at.class_ref = Some(format!("{}{}", cls.name.clone(), args_suffix));
+                            }
+                        }
+                        if at.class_ref.is_none() {
+                            if let Some(cls) = st.find_class(&fqn).or_else(|| st.find_class(name)) {
+                                at.class_ref = Some(cls.name.clone());
+                            }
                         }
                         if let Some(proto) = st.find_protocol(&fqn).or_else(|| st.find_protocol(name)) {
                             at.protocol_ref = Some(proto.name.clone());

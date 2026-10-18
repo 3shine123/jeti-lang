@@ -516,6 +516,12 @@ pub enum CgExprData {
         is_class_method: bool, is_super: bool,
         sel_const_name: Option<String>,
         method_index: Option<usize>,
+        /// True when the receiver's STATIC type is a generic instantiation
+        /// (`Box<int> *`): the call goes straight to the monomorphized
+        /// clone's function — the base template's vtable slot carries the
+        /// erased `NPObject *` ABI, which cannot carry a value-type `T`.
+        /// C++-template semantics: static type decides, no runtime lookup.
+        direct_specialized: bool,
     },
     Comma(Vec<CgExpr>),
     /// `(expr)` — user-written grouping, re-emitted verbatim (see AstExprData::Paren).
@@ -776,7 +782,7 @@ fn build_weak_write(
             name: name.into(), args,
             vtable_class: None, alt_vtable_classes: vec![],
             is_class_method: false, is_super: false,
-            sel_const_name: None, method_index: None,
+            sel_const_name: None, method_index: None, direct_specialized: false,
         },
     };
     CgExpr {
@@ -1473,7 +1479,7 @@ fn expand_nplog_format(fmt: &str, args: &[AstExpr], class_infos: &std::collectio
                                 alt_vtable_classes: vec![],
                                 is_class_method: false, is_super: false,
                                 sel_const_name: Some(desc_sel),
-                                method_index: None,
+                                method_index: None, direct_specialized: false,
                             },
                         };
                         let utf8_call = CgExpr {
@@ -1485,7 +1491,7 @@ fn expand_nplog_format(fmt: &str, args: &[AstExpr], class_infos: &std::collectio
                                 alt_vtable_classes: vec![],
                                 is_class_method: false, is_super: false,
                                 sel_const_name: Some(utf8_sel),
-                                method_index: None,
+                                method_index: None, direct_specialized: false,
                             },
                         };
                         let null_str = CgExpr { kind: CgExprKind::String, type_str: None, line, col, data: CgExprData::String("(null)".into()) };
@@ -1536,7 +1542,7 @@ fn expand_nplog_format(fmt: &str, args: &[AstExpr], class_infos: &std::collectio
         data: CgExprData::Call {
             name: "NPLog".into(), args: all_args,
             vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-            sel_const_name: None, method_index: None,
+            sel_const_name: None, method_index: None, direct_specialized: false,
         },
     }
 }
@@ -1556,7 +1562,7 @@ fn nplog_format_arg(fmt: String, has_npstring: bool, line: usize, col: usize) ->
                         name: "jeti_stringFromCstr".into(),
                         args: vec![CgExpr { kind: CgExprKind::String, type_str: None, line, col, data: CgExprData::String(fmt) }],
                         vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }),
             },
@@ -1610,7 +1616,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                         args: vec![CgExpr { kind: CgExprKind::String, type_str: None, line, col, data: CgExprData::String(s.clone()) }],
                         vtable_class: None, alt_vtable_classes: vec![],
                         is_class_method: false, is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }
             } else {
@@ -1741,7 +1747,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                                 is_class_method: false,
                                 is_super: false,
                                 sel_const_name: None,
-                                method_index: None,
+                                method_index: None, direct_specialized: false,
                             },
                         };
                     } else {
@@ -1794,14 +1800,14 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                                 is_class_method: false,
                                 is_super: false,
                                 sel_const_name: None,
-                                method_index: None,
+                                method_index: None, direct_specialized: false,
                             },
                         };
                     }
                 }
             }
             // Both arms below assign before reading, so there is no useful seed.
-            let mut vtable_class: Option<String>;
+            let mut vtable_class: Option<String> = None;
             let mut alt_vtable_classes: Vec<String> = Vec::new();
             if *is_super {
                 // For super calls, start with the direct superclass name.
@@ -1871,7 +1877,47 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
             } else {
                 // Try to resolve vtable class from the receiver's type first.
                 let sel = sanitize_sel_name(selector);
-                vtable_class = receiver.expr_type.as_ref()
+                // True monomorphization: a class_ref that NAMES an
+                // instantiation (`Box<int>`) resolves to the mangled clone's
+                // class (`Box_int`), whose substituted signatures are the
+                // ABI-correct ones. Only when that spelling does not exist
+                // (or lacks the method) does the walk fall back to the
+                // erased base template.
+                if let Some(cr) = receiver.expr_type.as_ref().and_then(|t| t.class_ref.clone()) {
+                    if cr.contains('<') {
+                        // The clone itself is not in class_infos yet (clones
+                        // are inserted after expression conversion), so
+                        // resolve the method against the BASE template — and
+                        // go direct ONLY for the one shape the uniform vtable
+                        // cannot carry: a VALUE-type `T` return. The template's
+                        // return-type metadata marks the T position with the
+                        // `/*T*/` sentinel; when the return spells it, the
+                        // erased `NPObject *` slot would truncate the clone's
+                        // value — the clone's substituted signature is the only
+                        // ABI-correct call. Pointer-shaped returns (the
+                        // wildcard-join family) stay on the uniform vtable,
+                        // which also resolves inherited methods correctly.
+                        let base = cr.split('<').next().unwrap_or(&cr);
+                        if let Some(info) = class_infos.get(&name_flat(base)) {
+                            if let Some(idx) = info.method_names.iter().position(|n| n == &sel) {
+                                if !info.is_class_methods[idx] {
+                                    let ret = info.method_return_types.get(idx)
+                                        .map(|r| r.as_str())
+                                        .unwrap_or("");
+                                    let ret_has_t = ret.contains("/*T*/")
+                                        || ret.contains("/*K*/") || ret.contains("/*V*/");
+                                    let self_implements = info.method_bodies.get(idx)
+                                        .map_or(false, |b| b.is_some());
+                                    if ret_has_t && self_implements {
+                                        vtable_class = Some(cr);
+                                        effective_is_class = info.is_class_methods[idx];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                vtable_class = vtable_class.or_else(|| receiver.expr_type.as_ref()
                     .and_then(|t| t.class_ref.as_ref())
                     .and_then(|cr| {
                         let flat = name_flat(cr);
@@ -1898,7 +1944,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                                 None
                             }
                         })
-                    });
+                    }));
                 // If the receiver is a concrete class variable, use its type.
                 if vtable_class.is_none() {
                     if let AstExprData::VarRef { name, .. } = &receiver.data {
@@ -2039,6 +2085,26 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
 
             let sel_const = sel_const_name(selector);
 
+            // True monomorphization (C++-template semantics): when the
+            // receiver's STATIC type is a generic instantiation (`Box<int> *`),
+            // the call goes straight to the monomorphized clone's function —
+            // the base template's vtable slot carries the erased
+            // `NPObject * /*T*/` ABI, which cannot carry a value-type `T`.
+            // The clone is emitted with the substituted signature
+            // (`Freestanding__Box_int_value` → `int`), so the static call is
+            // both type-correct and ABI-correct. Static dispatch means the
+            // runtime never looks at isa here — exactly what "真泛型" buys.
+            //
+            // The flag mirrors the resolve chain above: vtable_class carrying
+            // the MANGLED spelling (`FsBox<NPMutableString *>`) is the marker
+            // that the resolve chose the clone — and only because the
+            // template itself implements the method there. Class-name
+            // receivers with a literal specialization
+            // (`[Box<int> defaultValue]`) keep their own direct path via the
+            // class-method arm.
+            let direct_specialized = !*is_super
+                && vtable_class.as_deref().map_or(false, |vc| vc.contains('<'));
+
             CgExpr {
                 kind: CgExprKind::Call, type_str, line, col,
                 data: CgExprData::Call {
@@ -2048,7 +2114,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     alt_vtable_classes,
                     is_class_method: effective_is_class,
                     is_super: *is_super,
-                    sel_const_name: Some(sel_const), method_index: None,
+                    sel_const_name: Some(sel_const), method_index: None, direct_specialized,
                 },
             }
         }
@@ -2077,7 +2143,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                             data: CgExprData::Call {
                                 name: "NPLog".into(), args: cg_args,
                                 vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                                sel_const_name: None, method_index: None,
+                                sel_const_name: None, method_index: None, direct_specialized: false,
                             },
                         };
                     }
@@ -2140,7 +2206,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                         data: CgExprData::Call {
                             name: call_name, args: cg_args,
                             vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                            sel_const_name: None, method_index: None,
+                            sel_const_name: None, method_index: None, direct_specialized: false,
                         },
                     };
                 }
@@ -2162,7 +2228,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                         data: CgExprData::Call {
                             name: invoke_name, args: cg_args,
                             vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                            sel_const_name: None, method_index: None,
+                            sel_const_name: None, method_index: None, direct_specialized: false,
                         },
                     };
                 }
@@ -2210,7 +2276,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                         is_class_method: auto_is_class,
                         is_super: false,
                         sel_const_name: Some(sel),
-                        method_index: None,
+                        method_index: None, direct_specialized: false,
                     },
                 }
             } else {
@@ -2219,7 +2285,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     data: CgExprData::Call {
                         name: call_name, args: cg_args,
                         vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }
             }
@@ -2266,7 +2332,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                                 alt_vtable_classes: vec![],
                                 is_class_method: false,
                                 is_super: false,
-                                sel_const_name: Some(sel_const), method_index: None,
+                                sel_const_name: Some(sel_const), method_index: None, direct_specialized: false,
                             }
                         }
                     } else {
@@ -2438,7 +2504,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     data: CgExprData::Call {
                         name: "jeti_array_create".into(), args: cg_args,
                         vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }
             } else {
@@ -2462,7 +2528,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     data: CgExprData::Call {
                         name: "jeti_dictionary_create".into(), args: cg_args,
                         vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }
             } else {
@@ -2496,7 +2562,7 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                     data: CgExprData::Call {
                         name: sel, args: vec![recv_cg],
                         vtable_class, alt_vtable_classes: vec![], is_class_method: false, is_super: false,
-                        sel_const_name: Some(sel_const), method_index: None,
+                        sel_const_name: Some(sel_const), method_index: None, direct_specialized: false,
                     },
                 }
             } else {
@@ -2909,7 +2975,7 @@ fn convert_stmt(as_: &AstStmt, class_infos: &std::collections::BTreeMap<String, 
                             }],
                             vtable_class: None, alt_vtable_classes: vec![],
                             is_class_method: false, is_super: false,
-                            sel_const_name: None, method_index: None,
+                            sel_const_name: None, method_index: None, direct_specialized: false,
                         },
                     })),
                     array_suffix: None, is_static: false, is_weak: false, is_block: false,
@@ -3084,7 +3150,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                                     ],
                                     vtable_class: None, alt_vtable_classes: vec![],
                                     is_class_method: false, is_super: false,
-                                    sel_const_name: None, method_index: None,
+                                    sel_const_name: None, method_index: None, direct_specialized: false,
                                 },
                             })
                         });
@@ -3189,7 +3255,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                         alt_vtable_classes: vec![],
                         is_class_method: false,
                         is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }),
             });
@@ -3230,7 +3296,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                                         data: CgExprData::Ident("__jeti_exception_buf".into()),
                                     }],
                                     vtable_class: None, alt_vtable_classes: vec![],
-                                    is_class_method: false, is_super: false, sel_const_name: None, method_index: None,
+                                    is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false,
                                 },
                             }),
                             right: Box::new(CgExpr {
@@ -3298,7 +3364,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                             CgExpr { kind: CgExprKind::Sizeof, type_str: None, line, col, data: CgExprData::Sizeof { type_str: "jmp_buf".into(), is_alignof: false } },
                         ],
                         vtable_class: None, alt_vtable_classes: vec![],
-                        is_class_method: false, is_super: false, sel_const_name: None, method_index: None,
+                        is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }),
             });
@@ -3319,7 +3385,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                             CgExpr { kind: CgExprKind::Sizeof, type_str: None, line, col, data: CgExprData::Sizeof { type_str: "jmp_buf".into(), is_alignof: false } },
                         ],
                         vtable_class: None, alt_vtable_classes: vec![],
-                        is_class_method: false, is_super: false, sel_const_name: None, method_index: None,
+                        is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }),
             });
@@ -3366,7 +3432,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                                     CgExpr { kind: CgExprKind::Int, type_str: None, line, col, data: CgExprData::Int(1) },
                                 ],
                                 vtable_class: None, alt_vtable_classes: vec![],
-                                is_class_method: false, is_super: false, sel_const_name: None, method_index: None,
+                                is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false,
                             },
                         }),
                     }),
@@ -3418,7 +3484,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
                         alt_vtable_classes: vec![],
                         is_class_method: false,
                         is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }),
             });
@@ -3449,7 +3515,7 @@ let mut catch_body: Vec<CgStmt> = Vec::new();
         // arm is currently unreachable. It stays as a net so a newly added variant
         // degrades to a marked stub rather than a non-exhaustive-match build error.
         #[allow(unreachable_patterns)]
-        _ => CgStmt { kind: CgStmtKind::Expr, line, col, data: CgStmtData::Expr(CgExpr { kind: CgExprKind::Call, type_str: None, line, col, data: CgExprData::Call { name: "/* stub */".into(), args: Vec::new(), vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false, sel_const_name: None, method_index: None } }) },
+        _ => CgStmt { kind: CgStmtKind::Expr, line, col, data: CgStmtData::Expr(CgExpr { kind: CgExprKind::Call, type_str: None, line, col, data: CgExprData::Call { name: "/* stub */".into(), args: Vec::new(), vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false } }) },
     }
 }
 
@@ -3493,7 +3559,7 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
                         alt_vtable_classes: vec![],
                         is_class_method: false,
                         is_super: false,
-                        sel_const_name: None, method_index: None,
+                        sel_const_name: None, method_index: None, direct_specialized: false,
                     },
                 }),
             });
@@ -3890,7 +3956,17 @@ fn emit_struct_field(ft: &str, fn_: &str, fattrs: &[String], out: &mut String) {
         out.push_str(suffix);
     }
     for a in fattrs {
-        let _ = write!(out, " __attribute__(({}))", a);
+        // A `: N` attribute is NOT a `__attribute__`: it is the C17 6.7.2.1
+        // bit-field width the parser records on the field. Emit it as the
+        // declarator's `: N` suffix (clangd-parity: the hover shows the
+        // width, and the generated C keeps the real bit-field semantics —
+        // the old path silently dropped the width and emitted a plain
+        // `unsigned flags`).
+        if a.trim_start().starts_with(':') {
+            let _ = write!(out, " {}", a.trim());
+        } else {
+            let _ = write!(out, " __attribute__(({}))", a);
+        }
     }
     out.push_str(";\n");
 }
@@ -5078,7 +5154,7 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                                 data: CgExprData::Call {
                                                     name: "jeti_weakUnregister".into(),
                                                     args: vec![cast_addr.clone()],
-                                                    vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false, sel_const_name: None, method_index: None,
+                                                    vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false,
                                                 },
                                             })},
                                             CgStmt { kind: CgStmtKind::Expr, line: 0, col: 0, data: CgStmtData::Expr(assign_expr.clone()) },
@@ -5087,7 +5163,7 @@ pub fn ast_to_cg_unit_with_slots_ext(
                                                 data: CgExprData::Call {
                                                     name: "jeti_weakRegister".into(),
                                                     args: vec![cast_addr.clone(), cast_value],
-                                                    vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false, sel_const_name: None, method_index: None,
+                                                    vtable_class: None, alt_vtable_classes: vec![], is_class_method: false, is_super: false, sel_const_name: None, method_index: None, direct_specialized: false,
                                                 },
                                             })},
                                         ]),
@@ -6187,7 +6263,7 @@ fn build_weak_assign_stmts(name: &str, value: Box<CgExpr>, line: usize, col: usi
                 name: fname.into(), args,
                 vtable_class: None, alt_vtable_classes: vec![],
                 is_class_method: false, is_super: false,
-                sel_const_name: None, method_index: None,
+                sel_const_name: None, method_index: None, direct_specialized: false,
             },
         }),
     };
@@ -6419,7 +6495,60 @@ fn emit_expr(e: &CgExpr, out: &mut String) {
             let _ = write!(out, "({})", target_type);
             emit_expr(expr, out);
         }
-        CgExprData::Call { name, args, vtable_class, alt_vtable_classes: _, is_class_method, is_super, sel_const_name, method_index: _ } => {
+        CgExprData::Call { name, args, vtable_class, alt_vtable_classes: _, is_class_method, is_super, sel_const_name, method_index: _, direct_specialized } => {
+            // True monomorphization: the receiver's STATIC type named a
+            // generic instantiation whose clone carries the substituted
+            // signature. Call the clone's function directly — no vtable
+            // lookup, no erased `NPObject *` slot in the path. The receiver
+            // still passes as the first argument (the clone's `_self` is the
+            // substituted class pointer). The nil guard mirrors the instance
+            // send so `[nil value]` stays a safe no-op; the cast spelling
+            // matches the instance arm ((NPObject *) around the receiver).
+            if *direct_specialized {
+                if let Some(vc) = vtable_class {
+                    let flat = name_flat(vc);
+                    let tid = next_temp_id();
+                    let _ = write!(out, "({{ NPObject *__jeti_tmp_{} = ((NPObject *)(", tid);
+                    if !args.is_empty() {
+                        emit_expr(&args[0], out);
+                    } else {
+                        out.push_str("0");
+                    }
+                    let _ = write!(out, ")); __jeti_tmp_{} ? ", tid);
+                    let _ = write!(out, "{}_{}(__jeti_tmp_{}", flat, name, tid);
+                    let _ = write!(out, ", {}", sel_const_name.as_deref().unwrap_or("0"));
+                    for (ai, arg) in args[1..].iter().enumerate() {
+                        out.push_str(", ");
+                        // The clone's substituted parameter types are the
+                        // ABI-correct spellings — cast plain `NPObject *`
+                        // temps (and other joins) exactly like the instance
+                        // arm does for the uniform vtable.
+                        let param_idx = ai + 2;
+                        if let Some(pt) = get_vtable_param_type_for_class(&flat, name, param_idx) {
+                            if pt.ends_with('*') && !pt.trim_start().starts_with("const char") && !pt.trim_start().starts_with("char ") {
+                                let _ = write!(out, "({})(", pt);
+                                emit_expr(arg, out);
+                                out.push(')');
+                                continue;
+                            }
+                        }
+                        emit_expr(arg, out);
+                    }
+                    out.push(')');
+                    // Statement-expression shape mirrors the instance arm:
+                    // the `;` inside the braces and `})` closing are what make
+                    // `({...})` a valid GNU statement expression. The nil
+                    // fallback types from the CLONE's substituted return (the
+                    // ABI-correct spelling) — the checker's erased/int view
+                    // of a same-selector collision must not truncate the
+                    // object pointer the clone actually returns.
+                    let fb = nil_msg_fallback(
+                        vtable_return_type(&flat, name).or_else(|| e.type_str.clone()).as_deref(),
+                    );
+                    let _ = write!(out, " : {}; }})", fb);
+                    return;
+                }
+            }
             if *is_super {
                 let sel = sel_const_name.as_deref().unwrap_or("0");
                 let cls_flat = vtable_class.as_deref().map(|c| name_flat(c)).unwrap_or_else(|| "NPObject".to_string());

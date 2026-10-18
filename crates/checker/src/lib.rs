@@ -1684,7 +1684,13 @@ impl Checker {
 
     /// The class a pointer type names (`NPError *` -> `NPError`).
     fn class_name_of(t: &AstType) -> Option<String> {
-        t.class_ref.clone().or_else(|| t.name.clone())
+        // Symbol-table lookups key the BASE class: class_ref may carry the
+        // instantiation spelling (`NPMutableArray<NPString *>`) for codegen's
+        // monomorphized-clone dispatch, and the registry has no entry under
+        // that mangled name. Codegen reads class_ref raw; this helper is the
+        // symtab-facing spelling.
+        let raw = t.class_ref.clone().or_else(|| t.name.clone())?;
+        Some(raw.split('<').next().unwrap_or(&raw).to_string())
     }
 
     /// Is a `@throw` of `actual` covered by a declared `throws(declared)`?
@@ -2259,6 +2265,9 @@ impl Checker {
     /// and flagging those would flood Foundation's own code with false
     /// positives.
     fn init_ptr_scalar_mismatch(&self, vt: &AstType, it: &AstType, init: &AstExpr) -> Option<String> {
+        if std::env::var("JETI_DEBUG_INIT").is_ok() {
+            eprintln!("[init-debug] vt={:?}/{:?} it={:?}/{:?}", vt.name, vt.prim, it.name, it.prim);
+        }
         let v_ptr = Self::is_object_type(vt) || vt.is_pointer;
         let i_ptr = Self::is_object_type(it) || it.is_pointer;
         if v_ptr == i_ptr {
@@ -2267,6 +2276,10 @@ impl Checker {
             // objectAtIndex:0]` is the generic-mismatch bug this catches).
             if v_ptr && vt.prim == TypePrim::Named && it.prim == TypePrim::Named {
                 if !self.named_types_compatible(vt, it) {
+                    if std::env::var("JETI_DEBUG_INIT").is_ok() {
+                        eprintln!("[init-debug2] MISMATCH vt={:?} ptr={} args={} | it={:?} ptr={} args={}",
+                            vt.name, vt.is_pointer, vt.type_args.len(), it.name, it.is_pointer, it.type_args.len());
+                    }
                     return Some(format!(
                         "initializing '{}' from expression of incompatible object type '{}'",
                         Self::type_display(vt), Self::type_display(it)));
