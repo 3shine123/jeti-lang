@@ -36,9 +36,57 @@ let client = null;
 let collection = null;
 /** @type {vscode.OutputChannel | null} */
 let output = null;
+/** @type {vscode.StatusBarItem | null} */
+let status = null;
 
 function log(message) {
   output?.appendLine(message);
+}
+
+/**
+ * The status bar item clangd's extension shows ("clangd: idle") — for jeti:
+ * which server state the editor is in and which file the analysis belongs to.
+ * Never an error indicator: diagnostics live in the Problems panel; this only
+ * answers "is the language server alive and watching this file".
+ */
+function ensureStatus() {
+  if (status) return status;
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  status.name = 'jeti-lsp';
+  status.tooltip = 'jeti-lsp language server';
+  status.command = 'jeti.showServerLog';
+  status.hide();
+  return status;
+}
+
+function setServerStatus(phase, detail) {
+  const bar = ensureStatus();
+  bar.text = detail
+    ? `$(sync~spinner) jeti-lsp: ${phase} · ${detail}`
+    : `$(sync~spinner) jeti-lsp: ${phase}`;
+  bar.show();
+}
+
+function hideStatusIfNoJetiTab() {
+  const active = vscode.window.activeTextEditor;
+  if (active && isJetiDocument(active.document)) return;
+  status?.hide();
+}
+
+function refreshStatusForActiveTab() {
+  const active = vscode.window.activeTextEditor;
+  if (!active || !isJetiDocument(active.document)) return;
+  if (!client) {
+    setServerStatus('stopped');
+    return;
+  }
+  // The name is the baseneame of the file under the cursor, mirroring
+  // clangd's per-file phase text.
+  setServerStatus('idle', baseName(active.document.uri.fsPath));
+}
+
+function baseName(p) {
+  return p.split('/').pop().split('\\').pop();
 }
 
 function isJetiDocument(document) {
@@ -183,15 +231,18 @@ async function start() {
   if (!arc) args.push('-fno-jeti-arc');
   const rootUri = root ? vscode.Uri.file(root).toString() : null;
 
+  setServerStatus('starting');
   client = new JetiLanguageClient({ command, args, cwd: root, onDiagnostics: publish, onLog: log });
   try {
     const result = await client.start({ rootUri });
     const info = result?.serverInfo || {};
     log(`jeti-lsp started: ${command} ${args.join(' ')} (${info.name || 'jeti-lsp'} ${info.version || ''})`);
+    refreshStatusForActiveTab();
     return true;
   } catch (error) {
     client.kill();
     client = null;
+    setServerStatus('stopped');
     log(`jeti-lsp failed to start: ${error.message}`);
     vscode.window.showWarningMessage(
       `Jeti: language server failed to start (${error.message}). Build it with "cargo build -p jeti-lsp" or set "jeti.serverPath".`,
@@ -205,6 +256,9 @@ async function stop() {
   client = null;
   if (!running) return;
   await running.stop().catch(() => running.kill());
+  if (status && vscode.window.activeTextEditor && isJetiDocument(vscode.window.activeTextEditor.document)) {
+    setServerStatus('stopped');
+  }
 }
 
 /**
@@ -220,6 +274,7 @@ function restart() {
       await stop();
       collection?.clear();
       await start();
+      refreshStatusForActiveTab();
     })
     .catch((error) => log(`jeti restart failed: ${error.message}`));
   return pendingRestart;
@@ -282,6 +337,7 @@ function restart() {
     vscode.workspace.onDidOpenTextDocument((document) => {
       if (client && isJetiDocument(document)) {
         client.openDocument(document.uri.toString(), document.getText());
+        refreshStatusForActiveTab();
       }
     }),
     // Full sync (the server advertises `textDocumentSync: 1`): always send the
@@ -303,6 +359,20 @@ function restart() {
     }),
   );
 
+  // Status bar + tab tracking. The active-editor hook fires on tab switch,
+  // so switching to a .jeti/.hje tab shows the file the analysis belongs to
+  // and switching away hides the item — the same behavior clangd's
+  // "clangd: idle" item has for C files.
+  const bar = ensureStatus();
+  context.subscriptions.push(bar);
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      if (!client) return;
+      refreshStatusForActiveTab();
+    }),
+    vscode.commands.registerCommand('jeti.showServerLog', () => output?.show()),
+  );
+
   const started = await start();
 
   // Registered after the first start so it can never interleave with it — but
@@ -316,6 +386,7 @@ function restart() {
     }),
   );
 
+  if (started) refreshStatusForActiveTab();
   if (!started) return;
 
   // Documents already open when the extension activated.

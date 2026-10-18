@@ -427,13 +427,15 @@ impl<'a> Parser<'a> {
     /// underline the offending token. `insert` keeps the clang-style fix-it
     /// that shows the missing character under the caret.
     fn error_at_missing(&mut self, msg: &str, insert: &str) {
-        let at_line_end = self.current.kind == TokenKind::Eof
-            || self.current.line != self.previous.line;
-        let (line, col) = if at_line_end {
-            (self.previous.line, self.previous.column + self.previous.length.max(1))
-        } else {
-            (self.current.line, self.current.column)
-        };
+        // clang's `expected` family points the caret at the INSERTION POINT —
+        // previous's end — for every missing token, whether or not an
+        // unexpected token fills the slot: `f(1;` carets the `;` (insertion
+        // point == offending token), `return 0 }` carets the space before
+        // `}` (insertion point < offending token; measured against clang:
+        // `1:26` with the fix-it anchored there). The caret is the fix-it's
+        // home, which is why the two never diverge in clang's output.
+        let line = self.previous.line;
+        let col = self.previous.column + self.previous.length.max(1);
         if self.panic_mode { return; }
         let (file, real_line) = self.file_of_line_mapped(line);
         // Same dedupe key as [`Self::error_at`]: the *recorded* (remapped)

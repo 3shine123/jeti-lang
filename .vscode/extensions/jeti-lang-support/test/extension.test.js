@@ -29,12 +29,17 @@ const SERVER = process.env.JETI_LSP || path.join(REPO_ROOT, 'target', 'debug', '
 
 const warnings = [];
 const outputLines = [];
+/** Status bar items the fake `vscode.window` handed out, for assertions. */
+const statusItems = [];
 const collections = new Map();
 const listeners = new Map();
 const providers = new Map();
 
 const vscode = {
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  // The status bar API is top-level in VS Code (vscode.StatusBarAlignment),
+  // which is how extension.js reads it.
+  StatusBarAlignment: { Left: 1, Right: 2 },
   // LSP CompletionItemKind: Method 2, Function 3, Field 5, Variable 6, Class 7,
   // Interface 8, Module 9, Property 10, Enum 13, Struct 22, Text 1.
   CompletionItemKind: { Text: 1, Method: 2, Function: 3, Field: 5, Variable: 6, Class: 7, Interface: 8, Module: 9, Property: 10, Enum: 13, Struct: 22 },
@@ -144,6 +149,9 @@ const vscode = {
     registerCompletionItemProvider: (selector, provider) => registerProvider('completion', provider),
     registerSignatureHelpProvider: (selector, provider) => registerProvider('signatureHelp', provider),
   },
+  commands: {
+    registerCommand: (id, _handler) => ({ id, dispose: () => {} }),
+  },
   window: {
     createOutputChannel: (name) => ({
       append: (text) => outputLines.push(text),
@@ -151,6 +159,26 @@ const vscode = {
       dispose: () => {},
     }),
     showWarningMessage: (message) => warnings.push(message),
+    // Status bar: tests read `statusItems` to assert the server phases.
+    createStatusBarItem: (alignment, priority) => {
+      const item = { text: '', name: '', tooltip: undefined, command: undefined, shown: false };
+      statusItems.push(item);
+      return {
+        get text() { return item.text; },
+        set text(v) { item.text = v; },
+        get name() { return item.name; },
+        set name(v) { item.name = v; },
+        set tooltip(v) { item.tooltip = v; },
+        get command() { return item.command; },
+        set command(v) { item.command = v; },
+        show: () => { item.shown = true; },
+        hide: () => { item.shown = false; },
+        dispose: () => {},
+      };
+    },
+    activeTextEditor: null,
+    onDidChangeActiveTextEditor: (listener) => subscribe('activeEditor', listener),
+    registerCommand: (id, _handler) => ({ id, dispose: () => {} }),
   },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: REPO_ROOT, toString: () => pathToFileURL(REPO_ROOT).toString() } }],
@@ -533,7 +561,7 @@ async function main() {
     console.log('ok  settings change → server revived and reporting again');
   } catch (error) {
     process.exitCode = 1;
-    console.error(`FAIL: ${error.message}`);
+    console.error(`FAIL: ${error.stack || error.message}`);
     if (outputLines.length) console.error(`extension log:\n${outputLines.join('\n')}`);
   } finally {
     await extension.deactivate();

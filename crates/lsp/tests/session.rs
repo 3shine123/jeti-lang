@@ -366,9 +366,10 @@ fn server_answers_editors_requests_end_to_end() {
     let diagnostics = published["params"]["diagnostics"].as_array().expect("diagnostics").clone();
     assert!(!diagnostics.is_empty(), "expected a syntax diagnostic: {published}");
     assert_eq!(diagnostics[0]["severity"], 1);
-    // The missing `;` points at the hole — at the `}` that now follows `0`
-    // directly (character 26), clang's placement for `expected ';'`.
-    assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 26}));
+    // The missing `;` points at the insertion point (previous's end,
+    // character 25) — clang's placement for `expected ';'`, measured:
+    // `return 0 }` carets the spot the fix-it inserts at, not the `}`.
+    assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 25}));
 
     // didChange → the real program. The edit publishes nothing of its own;
     // the next message runs the deferred analysis, so the clearing
