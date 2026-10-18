@@ -13,6 +13,11 @@ mkdir -p "$BUILD"
 echo "== transpile (-ffreestanding) =="
 "$JETIC" -rewrite-jeti -ffreestanding -o "$BUILD/baremetal_test.c" baremetal_test.jeti
 
+# Feature-matrix companion: every language feature without Foundation/libc.
+# See FREESTANDING.md for the verdict table.
+echo "== transpile (freestanding_features) =="
+"$JETIC" -rewrite-jeti -ffreestanding -o "$BUILD/freestanding_features.c" freestanding_features.jeti
+
 echo "== compile generated C (golden/25 host methodology) =="
 # The generated file has `#define __JETI_FREESTANDING 1` + #include
 # <jeti/runtime.h>: runtime.h is DUAL-MODE (no separate bare-metal header).
@@ -41,4 +46,12 @@ clang "$BUILD/bm.o" "$BUILD/helpers.o" "$BUILD/bare_rt.o" "$BUILD/asm.o" \
 
 echo "== run =="
 "$BUILD/baremetal_test"
+
+echo "== compile freestanding_features (feature matrix, no asm) =="
+clang -I../../../include -include jeti/runtime.h \
+    -D_FORTIFY_SOURCE=0 -Wno-unused-variable \
+    -c "$BUILD/freestanding_features.c" -o "$BUILD/fsf.o"
+clang "$BUILD/fsf.o" "$BUILD/helpers.o" "$BUILD/bare_rt.o" \
+    -o "$BUILD/freestanding_features"
+"$BUILD/freestanding_features"
 echo "exit=$?"

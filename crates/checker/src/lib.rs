@@ -4260,6 +4260,24 @@ AstExprData::Subscript { object, key, .. } => {
                     // its OWN declared type, not the first declarer's.
                     self.scope_vars.push(Vec::new());
                     self.add_params_to_scope(params);
+                    // `self` enters the frame with its REAL type so the
+                    // assignment family sees `self = [super init]` as an
+                    // object join, not an int ← pointer conversion (the
+                    // implied-list fallback answers `int` — the TOMLEditor
+                    // regression). Instance methods: instancetype; class
+                    // methods: the class object itself.
+                    if let Some(scope) = self.scope_vars.last_mut() {
+                        if !scope.iter().any(|(n, _)| n == "self") {
+                            let self_ty = if *is_class_method {
+                                let mut t = AstType::new(TypePrim::Named);
+                                t.name = self.current_class.clone();
+                                t
+                            } else {
+                                AstType::new(TypePrim::Instancetype)
+                            };
+                            scope.push(("self".to_string(), self_ty));
+                        }
+                    }
                     if params.is_some() {
                         let mut p = params.as_ref().map(|b| &**b);
                         while let Some(param) = p {
