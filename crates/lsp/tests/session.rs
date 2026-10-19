@@ -53,7 +53,15 @@ fn read_frame(reader: &mut BufReader<ChildStdout>) -> Value {
     }
     let mut body = vec![0u8; length.expect("Content-Length present")];
     std::io::Read::read_exact(reader, &mut body).expect("read body");
-    serde_json::from_slice(&body).expect("json body")
+    let message: Value = serde_json::from_slice(&body).expect("json body");
+    // Every analysis flush also asks the client to re-fetch its semantic
+    // tokens (`workspace/semanticTokens/refresh`). Tests assert on diagnostics
+    // and on their own request answers, never on that request, so skip it
+    // here rather than at every call site.
+    if message["method"] == "workspace/semanticTokens/refresh" {
+        return read_frame(reader);
+    }
+    message
 }
 
 /// The (0-based line, UTF-16 character) an editor would report for the first

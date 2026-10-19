@@ -36,6 +36,9 @@ let client = null;
 let collection = null;
 /** @type {vscode.OutputChannel | null} */
 let output = null;
+// The semantic-tokens change event the provider registration consumes; built
+// in activate() where `vscode` is live.
+let semanticTokensChanged = null;
 /** @type {vscode.StatusBarItem | null} */
 let status = null;
 
@@ -232,7 +235,13 @@ async function start() {
   const rootUri = root ? vscode.Uri.file(root).toString() : null;
 
   setServerStatus('starting');
-  client = new JetiLanguageClient({ command, args, cwd: root, onDiagnostics: publish, onLog: log });
+  client = new JetiLanguageClient({
+    command, args, cwd: root, onDiagnostics: publish, onLog: log,
+    // The server asks for a re-pull after every analysis flush: a fetch that
+    // raced the first analysis cached empty tokens, and only this makes the
+    // editor fetch again.
+    onSemanticTokensRefresh: () => semanticTokensChanged?.fire(),
+  });
   try {
     const result = await client.start({ rootUri });
     const info = result?.serverInfo || {};
@@ -281,7 +290,10 @@ function restart() {
 }async function activate(context) {
   output = vscode.window.createOutputChannel('Jeti');
   collection = vscode.languages.createDiagnosticCollection('jeti');
-  context.subscriptions.push(output, collection, { dispose: () => client?.kill() });
+  // Fired when the server asks for a semantic-tokens re-pull; handed to the
+  // provider registration below as its change event.
+  semanticTokensChanged = new vscode.EventEmitter();
+  context.subscriptions.push(output, collection, semanticTokensChanged, { dispose: () => client?.kill() });
 
   // Registered before the first start so the handlers exist no matter how the
   // start goes; every one of them is a no-op while `client` is null.
@@ -320,7 +332,12 @@ function restart() {
         });
         return toCompletionItems(items);
       },
-    }),
+    // Trigger characters: without them VS Code only fires the provider on
+    // word characters — a `-` (method prefix) or `:` (selector part) pops
+    // the editor's built-in file/word suggestions instead of the server's
+    // list. `(` and `,` keep signature help flowing through an argument
+    // list (clangd registers the same pair).
+    }, ':', '(', ',', '-'),
     vscode.languages.registerSignatureHelpProvider(
       LANGUAGE_ID,
       {
@@ -332,7 +349,7 @@ function restart() {
           }));
         },
       },
-      ':',
+      ':', '(', ',', '-',
     ),
     // Include paths as links: underline, whole-path hover highlight, cmd+click
     // to the resolved file (clangd parity). Links without a target (nothing
@@ -376,21 +393,30 @@ function restart() {
   // of the registration block above on purpose — if this API call ever fails,
   // it must not take the document-event handlers (the LSP's lifeline) down
   // with it; coloring degrades to the grammar instead.
+  // `registerDocumentSemanticTokensProvider` is the real API name (and
+  // `provideDocumentSemanticTokens` the real provider method) — a misspelled
+  // name throws here and the catch would silently leave the editor grammar-
+  // only, which is exactly the "everything is white" failure mode.
   try {
     context.subscriptions.push(
-      vscode.languages.registerSemanticTokensProvider(
+      vscode.languages.registerDocumentSemanticTokensProvider(
         LANGUAGE_ID,
         {
-          provideSemanticTokens: async (document) => {
+          provideDocumentSemanticTokens: async (document) => {
             if (!client) return new vscode.SemanticTokens(new Uint32Array());
             const result = await client.semanticTokensFull(document.uri.toString());
             return new vscode.SemanticTokens(new Uint32Array(result?.data ?? []));
           },
         },
         new vscode.SemanticTokensLegend(
-          ['namespace', 'class', 'type', 'enum', 'function', 'variable', 'property', 'macro', 'enumMember'],
+          // Must match the server legend exactly (lib.rs capabilities) — a
+          // type index past this array makes VS Code drop the token.
+          ['namespace', 'class', 'type', 'enum', 'function', 'variable', 'property', 'macro', 'enumMember', 'keyword'],
           [],
         ),
+        // The server-pushed refresh request fires this, making VS Code
+        // re-invoke provideDocumentSemanticTokens for every visible editor.
+        semanticTokensChanged.event,
       ),
     );
   } catch (error) {

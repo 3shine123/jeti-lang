@@ -654,6 +654,35 @@ impl SymbolIndex {
         None
     }
 
+    /// The `#include <...>` headers a document pulls in — the system surface
+    /// the toolchain probe (`cc -E`) extracts symbols from. Quoted includes
+    /// name project files and never belong to this table.
+    pub fn system_headers_in(text: &str) -> Vec<String> {
+        let mut headers = Vec::new();
+        for line in text.lines() {
+            let rest = line.trim_start();
+            let Some(rest) = rest.strip_prefix('#') else {
+                continue;
+            };
+            let rest = rest.trim_start();
+            let Some(rest) = rest.strip_prefix("include") else {
+                continue;
+            };
+            let rest = rest.trim_start();
+            if !rest.starts_with('<') {
+                continue;
+            }
+            let Some(end) = rest.find('>') else {
+                continue;
+            };
+            let name = rest[1..end].to_string();
+            if !name.is_empty() && !headers.contains(&name) {
+                headers.push(name);
+            }
+        }
+        headers
+    }
+
     /// Semantic tokens for the whole document: every identifier scanned, then
     /// classified through the same index the hover answers from (locals beat
     /// globals, declarations beat keywords). Grammar keeps the keywords and
@@ -693,40 +722,79 @@ impl SymbolIndex {
             tokens.push((i as u32, char, name_len, T_MACRO));
         }
 
-        // Identifier scan: classify each word at its position. Preprocessor
-        // lines stay out: the grammar colors the whole `#include` path as one
-        // string, and a semantic token for `Foundation` inside it would split
-        // the path into two colors.
+        // Identifier scan: classify each word that is actually code —
+        // `code_mask` blanks comments, string/char literals, and preprocessor
+        // lines (the same mask find-references scans through), so a keyword
+        // mentioned inside a comment keeps the comment's single color.
+        let mask = code_mask(text);
+        // The passthrough C surface comes from the real toolchain for exactly
+        // the system headers this document includes.
+        let c_table = crate::cheader::signatures_for(&Self::system_headers_in(text));
+        // Byte offset of each line's start in the full text, so line-local
+        // `char_indices` can index the global mask (works for LF and CRLF).
+        let line_starts: Vec<usize> = std::iter::once(0usize)
+            .chain(
+                text.bytes()
+                    .enumerate()
+                    .filter(|(_, b)| *b == b'\n')
+                    .map(|(i, _)| i + 1),
+            )
+            .collect();
         for (i, line) in text.lines().enumerate() {
-            if line.trim_start().starts_with('#') {
-                continue;
-            }
             let bytes = line.as_bytes();
             let mut start = None;
+            let mut start16 = 0u32;
             let mut col16 = 0u32;
-            let mut char16 = 0u32;
+            // The previous word ended right before a `.`/`->` whose tail this
+            // word follows: an access, so the word colors as a property (or a
+            // dispatching method), never as a scope-shadowed variable.
+            let mut access_tail = false;
             for (col, ch) in line.char_indices() {
+                let at = line_starts[i] + col;
                 if is_ident_byte(bytes.get(col).copied().unwrap_or(b' ')) {
-                    if start.is_none() {
-                        start = Some(col);
-                        char16 = col16;
+                    if mask.get(at).copied().unwrap_or(true) {
+                        if start.is_none() {
+                            start = Some(col);
+                            start16 = col16;
+                        }
+                    } else if start.take().is_some() {
+                        // A comment cut the word: what came before is not a
+                        // token; what follows is not an access tail either.
+                        access_tail = false;
                     }
                 } else if let Some(from) = start.take() {
                     let word = &line[from..col];
-                    let pos = LspPosition { line: i as u32, character: char16 };
-                    if let Some(t) = self.classify_token(word, pos, &macros) {
+                    let pos = LspPosition { line: i as u32, character: start16 };
+                    let rest = &text[line_starts[i] + col..];
+                    if let Some(t) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
                         let len = word.chars().map(|c| c.len_utf16() as u32).sum();
-                        tokens.push((i as u32, char16, len, t));
+                        tokens.push((i as u32, start16, len, t));
                     }
+                    // `.` or `->` between words: what follows is a member.
+                    // The `>` of `->` must keep the tail alive, not reset it.
+                    access_tail = match ch {
+                        '.' => true,
+                        '-' => line.as_bytes().get(col + 1) == Some(&b'>'),
+                        '>' => access_tail,
+                        _ => false,
+                    };
+                } else {
+                    access_tail = match ch {
+                        '.' => true,
+                        '-' => line.as_bytes().get(col + 1) == Some(&b'>'),
+                        '>' => access_tail,
+                        _ => false,
+                    };
                 }
                 col16 += ch.len_utf16() as u32;
             }
             if let Some(from) = start {
                 let word = &line[from..];
-                let pos = LspPosition { line: i as u32, character: char16 };
-                if let Some(t) = self.classify_token(word, pos, &macros) {
+                let pos = LspPosition { line: i as u32, character: start16 };
+                let rest = &text[line_starts[i] + line.len()..];
+                if let Some(t) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
                     let len = word.chars().map(|c| c.len_utf16() as u32).sum();
-                    tokens.push((i as u32, char16, len, t));
+                    tokens.push((i as u32, start16, len, t));
                 }
             }
         }
@@ -749,12 +817,41 @@ impl SymbolIndex {
         out
     }
 
-    fn classify_token(&self, word: &str, pos: LspPosition, macros: &HashSet<String>) -> Option<u8> {
+    fn classify_token(
+        &self,
+        word: &str,
+        pos: LspPosition,
+        macros: &HashSet<String>,
+        c_table: &crate::cheader::CSignatures,
+        rest: &str,
+        access: bool,
+    ) -> Option<u8> {
         if BUILTIN_AND_KEYWORDS.contains(&word) {
+            return None;
+        }
+        // A soft keyword in keyword position colors as a keyword; the same
+        // spelling in identifier position falls through to the usual rules.
+        if let Some(t) = soft_keyword_token(word, rest) {
+            return Some(t);
+        }
+        // Numbers never take a semantic color (`1.5` would otherwise make the
+        // `5` a "member" — the digit-start guard is what keeps floats whole).
+        if word.starts_with(|c: char| c.is_ascii_digit()) {
             return None;
         }
         if macros.contains(word) {
             return Some(7);
+        }
+        // `obj.member` / `ptr->member`: a class method dispatches (function
+        // color, clangd's method-call yellow), anything else reads as a
+        // property — known field or not, it sits left of `=`.
+        if access {
+            for info in self.classes.values() {
+                if let Some(member) = info.members.iter().find(|m| m.label == word) {
+                    return Some(if member.kind == kind::METHOD { 4 } else { 6 });
+                }
+            }
+            return Some(6);
         }
         // Innermost scope wins: a local shadows anything global.
         if self.local_at(pos, word).is_some() {
@@ -762,9 +859,6 @@ impl SymbolIndex {
         }
         if self.functions.contains_key(word) {
             return Some(4);
-        }
-        if self.classes.contains_key(word) {
-            return Some(1);
         }
         for info in self.classes.values() {
             if let Some(member) = info.members.iter().find(|m| m.label == word) {
@@ -782,6 +876,26 @@ impl SymbolIndex {
             || self.typedef_types.contains_key(word)
         {
             return Some(2);
+        }
+        if self.classes.contains_key(word) {
+            return Some(1);
+        }
+        // Passthrough C surface, extracted from the real toolchain for the
+        // headers this document includes — no name tables in the source.
+        // User declarations above already had their chance, so a project
+        // function named `printf` wins over the library's. A real prototype
+        // also beats a macro *spelling*: macOS fortify defines `memset(...)`
+        // as a macro, but the use in code still reads as the declared call.
+        match c_table.decl(word) {
+            Some((crate::cheader::DeclKind::Function, _)) => return Some(4),
+            Some((crate::cheader::DeclKind::Variable, _)) => return Some(5),
+            Some((crate::cheader::DeclKind::Typedef, _)) => return Some(2),
+            None => {}
+        }
+        // The toolchain's macro-only surface (`EOF`, `NULL`, `errno` on
+        // macOS) colors as a macro wherever it appears.
+        if c_table.macro_name(word).is_some() {
+            return Some(7);
         }
         if self.global_vars.contains(word) {
             return Some(5);
@@ -3247,6 +3361,57 @@ fn send_identifier_runs(bytes: &[u8], open: usize) -> Vec<(usize, usize, bool)> 
 
 /// Words the semantic-token scan never colors: the grammar already spells
 /// keywords and builtin types, and semantic tokens would override its colors.
+/// The soft keywords `async`/`await` color as keywords only where the parser
+/// reads them as keywords — the same raw-source judgment, mirrored from
+/// `Parser::at_async_modifier` / `at_await_operator`, so a user identifier
+/// spelled `async` anywhere else keeps its identifier color (C superset iron
+/// law). `rest` is the source right after the word.
+fn soft_keyword_token(word: &str, rest: &str) -> Option<u8> {
+    let after = rest.trim_start();
+    match word {
+        "async" => {
+            let c = after.chars().next()?;
+            // `async ^…` block literal, or `async` + a type start.
+            if c == '^' {
+                return Some(9);
+            }
+            for kw in [
+                "void", "int", "char", "float", "double", "long", "short",
+                "signed", "unsigned", "bool", "struct", "union", "enum",
+                "const", "volatile", "id", "instancetype",
+            ] {
+                if after.starts_with(kw) {
+                    let after_kw = &after[kw.len()..];
+                    if !after_kw
+                        .chars()
+                        .next()
+                        .map_or(false, |a| a.is_alphanumeric() || a == '_')
+                    {
+                        return Some(9);
+                    }
+                }
+            }
+            // Typename identifier: `async Result *f(void)`.
+            (c.is_alphabetic() || c == '_').then_some(9)
+        }
+        "await" => {
+            let c = after.chars().next()?;
+            // Expression-prefix suspension operator: any unary-expression
+            // start EXCEPT the bare `+ - * &` operators (`await + 1` keeps
+            // `await` an identifier; `++`/`--` are in the start set).
+            let ok = match c {
+                '(' | '[' | '^' | '!' | '~' | '@' | '"' | '\'' => true,
+                '0'..='9' => true,
+                '+' => after[1..].starts_with('+'),
+                '-' => after[1..].starts_with('-'),
+                c => c.is_alphabetic() || c == '_',
+            };
+            ok.then_some(9)
+        }
+        _ => None,
+    }
+}
+
 const BUILTIN_AND_KEYWORDS: &[&str] = &[
     "asm", "auto", "bool", "BOOL", "break", "case", "char", "Class", "const", "continue",
     "default", "do", "double", "else", "enum", "extern", "float", "for", "goto", "id",

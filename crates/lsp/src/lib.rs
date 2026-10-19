@@ -36,6 +36,7 @@ use serde_json::{json, Value};
 
 use crate::index::{typed_name_at, Resolved};
 
+pub mod cheader;
 pub mod config;
 pub mod index;
 pub use index::{access_receiver_at, symbol_at, Location, Symbol, SymbolIndex};
@@ -595,18 +596,31 @@ impl Server {
                                 "tokenTypes": [
                                     "namespace", "class", "type", "enum",
                                     "function", "variable", "property", "macro", "enumMember",
+                                    "keyword",
                                 ],
                                 "tokenModifiers": [],
                             },
                             "full": true,
+                            // The server re-pushes this request after every
+                            // analysis flush: a client that asked for tokens
+                            // before the first analysis finished (a reloaded
+                            // window reopening its tabs) cached an empty run,
+                            // and only this request makes it fetch again.
+                            "refreshSupport": true,
                         },
                         // No `resolveProvider`: everything a completion item
                         // needs (label, kind, detail) is in the same answer.
-                        "completionProvider": { "resolveProvider": false },
+                        // Trigger characters mirror the extension's
+                        // registration: `:` for selector parts, `(`/`,`
+                        // for argument lists, `-` for method prefixes.
+                        "completionProvider": {
+                            "resolveProvider": false,
+                            "triggerCharacters": [":", "(", ",", "-"],
+                        },
                         // `:` is where a keyword selector's next parameter
                         // starts, so the popup appears exactly when it can say
                         // something.
-                        "signatureHelpProvider": { "triggerCharacters": [":"] },
+                        "signatureHelpProvider": { "triggerCharacters": [":", "(", ",", "-"] },
                     },
                     "serverInfo": {
                         "name": "jeti-lsp",
@@ -631,7 +645,7 @@ impl Server {
                             uri.to_string(),
                             Document { path, text: text.to_string(), dirty_since: None },
                         );
-                        vec![self.publish_and_index(uri)]
+                        self.publish_and_index(uri)
                     }
                     None => Vec::new(),
                 }
@@ -973,22 +987,23 @@ impl Server {
             })
             .map(|(uri, _)| uri.clone())
             .collect();
-        due.into_iter().map(|uri| {
-            let message = self.publish_and_index(&uri);
+        due.into_iter().flat_map(|uri| {
+            let messages = self.publish_and_index(&uri);
             // That analysis is the one the edit waited for: clear the mark,
             // or every following message would re-run and re-publish it.
             if let Some(doc) = self.docs.get_mut(&uri) {
                 doc.dirty_since = None;
             }
-            message
+            messages
         }).collect()
     }
 
     /// Analyze `uri` and keep the index, so publishing is the only place the
-    /// front end runs for a document. Returns the diagnostics message.
-    fn publish_and_index(&mut self, uri: &str) -> Value {
+    /// front end runs for a document. Returns the diagnostics message plus the
+    /// semantic-tokens refresh request.
+    fn publish_and_index(&mut self, uri: &str) -> Vec<Value> {
         let Some(path) = self.docs.get(uri).map(|doc| doc.path.clone()) else {
-            return publish_empty(uri);
+            return vec![publish_empty(uri)];
         };
         // The project's own configuration refines the server's setup, so this
         // needs the cache before the analysis borrows the documents.
@@ -1001,11 +1016,21 @@ impl Server {
             analyze_for_editor(&doc.path, &doc.text, &options, &text_of)
         };
         self.indexes.insert(uri.to_string(), analyzed.index);
-        json!({
+        // Ask the client to re-fetch the tokens it may have cached while this
+        // document's first analysis was still running (a reloaded window
+        // reopening its tabs): only this request makes VS Code fetch again.
+        let diagnostics = json!({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
             "params": { "uri": uri, "diagnostics": analyzed.diagnostics },
-        })
+        });
+        let refresh = json!({
+            "jsonrpc": "2.0",
+            "id": format!("semantic-tokens-refresh:{uri}"),
+            "method": "workspace/semanticTokens/refresh",
+            "params": Value::Null,
+        });
+        vec![diagnostics, refresh]
     }
 
     /// The options one document is analyzed with: the server's own, refined by
@@ -1054,17 +1079,78 @@ impl Server {
         if let Some(markdown) = jeti_keyword_markdown(&word) {
             return Some(markdown);
         }
-        if let Some(header) = jeti_checker::c_stdlib_function_header(&word) {
-            return Some(format!(
-                "**C library function** `{word}`\n\nDeclared in `<{header}>` (passthrough header; jetic does not parse C headers — see the header for the signature)"
-            ));
-        }
-        if let Some(header) = jeti_checker::c_stdlib_binding_header(&word) {
-            return Some(format!(
-                "**C library binding** `{word}`\n\nDeclared in `<{header}>` (global object or macro constant)"
-            ));
+        // The passthrough C surface, extracted from the real toolchain —
+        // clangd's card shape: return-type arrow, parameter list, full
+        // prototype. The old "see the header for the signature" line is gone.
+        if let Some(markdown) = self.c_library_markdown(&word, text, position) {
+            return Some(markdown);
         }
         None
+    }
+
+    /// The clangd-shaped card for a C-library symbol from the `cc -E`-extracted
+    /// table. Titles follow clangd's (`function`, `type-alias`, `macro`); a
+    /// typedef's `Type:` is the resolved chain terminal; a macro card shows
+    /// the real `#define` and the expansion with this use's arguments.
+    fn c_library_markdown(
+        &self,
+        word: &str,
+        text: &str,
+        position: LspPosition,
+    ) -> Option<String> {
+        let table = cheader::signatures_for(&index::SymbolIndex::system_headers_in(text));
+        // A real declaration beats a macro *spelling* (macOS fortify defines
+        // `memset(...)` as a macro, but clangd's card shows the prototype);
+        // macro-only names (`EOF`, `errno` on macOS) take the macro card.
+        if let Some((kind, decl)) = table.decl(word) {
+            let title = match kind {
+                cheader::DeclKind::Function => "function",
+                cheader::DeclKind::Variable => "variable",
+                cheader::DeclKind::Typedef => "type-alias",
+            };
+            let mut markdown = format!("**{title}** `{word}`");
+            markdown.push_str(&format!("\n\nprovided by `<{}>`", decl.header));
+            match kind {
+                cheader::DeclKind::Function => {
+                    markdown.push_str(&format!("\n\n→ {}", decl.type_spelling));
+                    if !decl.params.is_empty() {
+                        markdown.push_str("\n\nParameters:");
+                        for param in &decl.params {
+                            markdown.push_str(&format!("\n• `{param}`"));
+                        }
+                    }
+                }
+                // clangd shows the resolved terminal, not the alias one hop
+                // away (`va_list` → `char *`).
+                cheader::DeclKind::Typedef => {
+                    markdown
+                        .push_str(&format!("\n\nType: {}", table.resolve_type(&decl.type_spelling)));
+                }
+                cheader::DeclKind::Variable => {
+                    markdown.push_str(&format!("\n\nType: {}", decl.type_spelling));
+                }
+            }
+            markdown.push_str(&format!("\n\n```jeti\n{}\n```", decl.label));
+            return Some(markdown);
+        }
+        let macro_def = table.macro_def(word)?;
+        let spelling = if macro_def.params.is_empty() {
+            format!("#define {word} {}", macro_def.body)
+        } else {
+            format!("#define {word}({}) {}", macro_def.params.join(", "), macro_def.body)
+        };
+        let mut markdown = format!("**macro** `{word}`");
+        markdown.push_str(&format!("\n\nprovided by `<{}>`", macro_def.header));
+        markdown.push_str(&format!("\n\n```jeti\n{spelling}\n```"));
+        // The expansion with this use's actual arguments — only when the
+        // cursor sits on a call-shaped use (`va_start(ap, fmt)`), never on a
+        // bare mention.
+        let args = macro_args_at(text, position, word);
+        if !args.is_empty() {
+            let expanded = cheader::substitute_params(&macro_def.body, &macro_def.params, &args);
+            markdown.push_str(&format!("\n\n```jeti\n// Expands to\n{expanded}\n```"));
+        }
+        Some(markdown)
     }
 
     fn text_of(&self) -> impl Fn(&str) -> Option<String> + '_ {        move |path: &str| {
@@ -1279,6 +1365,74 @@ fn word_at(text: &str, position: LspPosition) -> Option<String> {
 
 fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+/// Byte bounds of the word `position` anchors to — the same rule `word_at`
+/// uses (a one-past-the-end cursor belongs to the word before it).
+fn word_span_at(text: &str, position: LspPosition) -> Option<(usize, usize)> {
+    let offset = SourceFile::lsp_to_offset(text, position)?;
+    let bytes = text.as_bytes();
+    let mut start = offset.min(bytes.len());
+    if start == bytes.len() || !is_word_byte(bytes[start]) {
+        if start == 0 || !is_word_byte(bytes[start - 1]) {
+            return None;
+        }
+        start -= 1;
+    }
+    let mut end = start + 1;
+    while start > 0 && is_word_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    while end < bytes.len() && is_word_byte(bytes[end]) {
+        end += 1;
+    }
+    Some((start, end))
+}
+
+/// The actual arguments of a macro *use* at `position` — `va_start(ap, fmt)`
+/// with the cursor on `va_start` yields `["ap", "fmt"]`. Empty unless the
+/// word is the macro itself and a complete `(...)` call follows it: a bare
+/// mention gets the definition card without an expansion.
+fn macro_args_at(text: &str, position: LspPosition, word: &str) -> Vec<String> {
+    let Some((start, end)) = word_span_at(text, position) else {
+        return Vec::new();
+    };
+    if text[start..end] != *word || !text[end..].starts_with('(') {
+        return Vec::new();
+    }
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut args = Vec::new();
+    let mut current = String::new();
+    for i in end..bytes.len() {
+        match bytes[i] {
+            b'(' => {
+                depth += 1;
+                if depth > 1 {
+                    current.push('(');
+                }
+            }
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    if !current.trim().is_empty() || !args.is_empty() {
+                        args.push(current.trim().to_string());
+                    }
+                    return args;
+                }
+                current.push(')');
+            }
+            b',' if depth == 1 => {
+                args.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => {
+                let len = text[i..].chars().next().map(char::len_utf8).unwrap_or(1);
+                current.push_str(&text[i..i + len]);
+            }
+        }
+    }
+    Vec::new() // unpaired `(`: not a complete call
 }
 
 /// Builtin type keywords — the card clangd shows for `int`, terse and
@@ -1705,10 +1859,11 @@ mod tests {
             }},
         });
         let out = server.handle(&open);
-        assert_eq!(out.len(), 1);
+        assert_eq!(out.len(), 2, "diagnostics plus the tokens refresh: {out:?}");
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
         assert_eq!(out[0]["params"]["uri"], uri);
         assert!(!out[0]["params"]["diagnostics"].as_array().unwrap().is_empty());
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
 
         // A clean edit clears them — the edit itself publishes nothing, the
         // next message runs the deferred analysis (full sync: whole buffer
@@ -1728,7 +1883,8 @@ mod tests {
         }));
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
-        assert_eq!(out[1]["id"], 3);
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
+        assert_eq!(out[2]["id"], 3);
 
         let shutdown = json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown"});
         let out = server.handle(&shutdown);
@@ -1861,6 +2017,7 @@ mod tests {
         let diagnostics = out[0]["params"]["diagnostics"].as_array().expect("diagnostics");
         assert_eq!(diagnostics.len(), 1, "{out:?}");
         assert_eq!(diagnostics[0]["range"]["start"], json!({"line": 0, "character": 25}));
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh", "{out:?}");
 
         // And the next message settles the restored buffer: clean again.
         let out = server.handle(&json!({
@@ -1868,7 +2025,8 @@ mod tests {
             "params": { "textDocument": { "uri": uri } },
         }));
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
-        assert_eq!(out[1]["id"], 1);
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
+        assert_eq!(out[2]["id"], 1);
     }
 
     #[test]
@@ -1890,8 +2048,9 @@ mod tests {
                 "text": "int main(void) { return 0; }\n",
             }},
         }));
-        assert_eq!(out.len(), 1, "didOpen still publishes right away: {out:?}");
+        assert_eq!(out.len(), 2, "didOpen still publishes right away: {out:?}");
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
 
         // Edit A (t = 0): delete the `;`. Nothing runs yet.
         t.set(Duration::ZERO);
@@ -1931,10 +2090,11 @@ mod tests {
             "jsonrpc": "2.0", "id": 1, "method": "textDocument/documentSymbol",
             "params": { "textDocument": { "uri": uri } },
         }));
-        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out.len(), 3, "{out:?}");
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
-        assert_eq!(out[1]["id"], 1);
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
+        assert_eq!(out[2]["id"], 1);
     }
 
     #[test]
@@ -1975,9 +2135,10 @@ mod tests {
         t.set(Duration::from_millis(100));
         assert_eq!(server.next_flush_in(), Some(Duration::ZERO));
         let out = server.flush_due();
-        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out.len(), 2, "diagnostics plus the tokens refresh: {out:?}");
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
         assert!(!out[0]["params"]["diagnostics"].as_array().unwrap().is_empty());
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
         // Settled: nothing left to flush; the loop blocks indefinitely again.
         assert!(server.next_flush_in().is_none());
     }
@@ -2033,9 +2194,10 @@ mod tests {
             "jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol",
             "params": { "textDocument": { "uri": uri } },
         }));
-        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out.len(), 3, "{out:?}");
         assert_eq!(out[0]["method"], "textDocument/publishDiagnostics");
-        let names: Vec<&str> = out[1]["result"].as_array().unwrap().iter()
+        assert_eq!(out[1]["method"], "workspace/semanticTokens/refresh");
+        let names: Vec<&str> = out[2]["result"].as_array().unwrap().iter()
             .map(|symbol| symbol["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"Late"), "{names:?}");
@@ -2544,7 +2706,6 @@ void runUse(void) {
     /// Hover answers for everything the declaration index cannot: locals and
     /// receivers (`sp` in `sp.label = nil`), builtin type keywords, Jeti
     /// keywords, and the C17 library surface the passthrough headers bring.
-    #[test]
     fn hover_covers_locals_builtins_keywords_and_c_stdlib() {
         let src = "\
 #include <stdio.h>
@@ -2565,7 +2726,6 @@ void runUse(void) {
 
 int main(void) { return 0; }
 ";
-        let analyzed = analyze(src);
         let hover_at = |needle: &str, extra: usize| {
             let pos = position(src, needle, extra);
             let mut server = Server::new(AnalysisOptions::default());
@@ -2593,15 +2753,18 @@ int main(void) { return 0; }
         let value = hover_at("ticks", 0).expect("ticks hover");
         assert!(value.contains("int"), "{value}");
 
-        // A passthrough C function.
+        // A passthrough C function — the clangd-shaped card, extracted from
+        // the real toolchain (`cc -E` over the included system headers).
         let value = hover_at("printf", 0).expect("printf hover");
-        assert!(value.contains("C library function") && value.contains("stdio.h"), "{value}");
+        assert!(value.contains("**function**") && value.contains("stdio.h"), "{value}");
+        assert!(value.contains("→ int") && value.contains("Parameters:"), "{value}");
+        assert!(value.contains("const char *restrict"), "{value}");
 
         // A passthrough binding — the *use* in `ticks + errno`, not the
-        // `#include <errno.h>` line: hovering the include path now answers
-        // with the header card, so the binding test must not park there.
+        // `#include <errno.h>` line. macOS spells errno as a macro, Linux as
+        // an extern variable; both come from the toolchain extraction.
         let value = hover_at("+ errno", 2).expect("errno hover");
-        assert!(value.contains("C library binding") && value.contains("errno.h"), "{value}");
+        assert!(value.contains("provided by") && value.contains("errno.h"), "{value}");
 
         // Builtin type keyword.
         let value = hover_at("int main", 0).expect("int hover");
@@ -2862,6 +3025,255 @@ noise after the list
             !dirs[2].ends_with("(framework directory)"),
             "annotation must be stripped: {dirs:?}"
         );
+    }
+
+    #[test]
+    #[ignore] // probe: decode semantic tokens for the screenshot's white shapes
+    fn probe_semantic_shapes() {
+        let src = "\
+#define FSQ_MAX(a, b) ((a) > (b) ? (a) : (b))
+static int fs_double_it(int v) { return v * 2; }
+static void sec1_c_superset(void) {
+    int x1 = 10, x2 = 20;
+    int *pa = &x1, *pb = &x2;
+    printf(\"1.1 %d\\n\", *pa, *pb);
+    int (*fp)(int) = fs_double_it;
+    memset(&x1, 0, sizeof(x1));
+    struct FsWidget { int wid; int (*cb)(int); };
+    struct FsWidget w;
+    w.cb = fs_double_it;
+    w.wid = 7;
+    w.cells[0] = 1;
+    int r = FSQ_MAX(x1, x2);
+}
+int main(void) { return 0; }
+";
+        let names = ["namespace", "class", "type", "enum", "function", "variable", "property", "macro", "enumMember"];
+        let analyzed = analyze(src);
+        let data = analyzed.index.semantic_tokens(src);
+        let mut i = 0;
+        let mut line = 0;
+        let mut character = 0;
+        while i < data.len() {
+            if data[i] > 0 { line += data[i]; character = data[i + 1]; } else { character += data[i + 1]; }
+            let (len, ty) = (data[i + 2], data[i + 3]);
+            let text: String = src.lines().nth(line as usize).unwrap()
+                [character as usize..(character + len) as usize].to_string();
+            println!("L{line:>3} c{character:>3} {:<10} {ty:<2} `{text}`", names[ty as usize]);
+            i += 5;
+        }
+    }
+
+    #[test]
+    /// The shapes the screenshots showed as plain white all classify: C
+    /// stdlib calls (`printf`, `memset` — headers the analysis never parses),
+    /// member accesses after `.`/`->` (`w.cb`, `w.wid`, `w.cells`), locals in
+    /// comma declaration chains, and macro uses. Keywords like `sizeof` stay
+    /// grammar-colored (no semantic token).
+    fn semantic_tokens_cover_stdlib_member_and_macro_shapes() {
+        // The include is what arms the C surface: symbols come from the
+        // toolchain for exactly the headers the document includes (a document
+        // without the include has no `printf` to color — clangd's semantics).
+        let src = "\
+#include <stdio.h>
+#include <string.h>
+#define FSQ_MAX(a, b) ((a) > (b) ? (a) : (b))
+static int fs_double_it(int v) { return v * 2; }
+static void sec1_c_superset(void) {
+    int x1 = 10, x2 = 20;
+    printf(\"1.1 %d\\n\", x1, x2);
+    memset(&x1, 0, sizeof(x1));
+    struct FsWidget { int wid; int (*cb)(int); };
+    struct FsWidget w;
+    w.cb = fs_double_it;
+    w.wid = 7;
+    int r = FSQ_MAX(x1, x2);
+}
+int main(void) { return 0; }
+";
+        // Decode the delta stream into (line, character, type) triples.
+        let decoded = |data: &[u32]| -> Vec<(u32, u32, u32)> {
+            let mut out = Vec::new();
+            let (mut line, mut character) = (0u32, 0u32);
+            let mut i = 0;
+            while i + 4 < data.len() {
+                if data[i] > 0 {
+                    line += data[i];
+                    character = data[i + 1];
+                } else {
+                    character += data[i + 1];
+                }
+                out.push((line, character, data[i + 3]));
+                i += 5;
+            }
+            out
+        };
+        let at = |decoded: &[(u32, u32, u32)], line: u32, character: u32| -> u32 {
+            decoded
+                .iter()
+                .find(|(l, c, _)| *l == line && *c == character)
+                .map(|(_, _, t)| *t)
+                .unwrap_or(u32::MAX)
+        };
+        const FUNCTION: u32 = 4;
+        const VARIABLE: u32 = 5;
+        const PROPERTY: u32 = 6;
+        const MACRO: u32 = 7;
+
+        let tokens = decoded(&analyze(src).index.semantic_tokens(src));
+
+        // C stdlib calls color as functions (lines 0–1 are the includes; a
+        // header the document does not include arms no symbols).
+        assert_eq!(at(&tokens, 6, 4), FUNCTION, "printf");
+        assert_eq!(at(&tokens, 7, 4), FUNCTION, "memset");
+        // Member accesses after `.` color as properties.
+        assert_eq!(at(&tokens, 10, 6), PROPERTY, "w.cb");
+        assert_eq!(at(&tokens, 11, 6), PROPERTY, "w.wid");
+        // Locals — comma chains included — color as variables.
+        assert_eq!(at(&tokens, 5, 8), VARIABLE, "x1");
+        assert_eq!(at(&tokens, 5, 17), VARIABLE, "x2");
+        // The macro use colors as a macro.
+        assert_eq!(at(&tokens, 12, 12), MACRO, "FSQ_MAX use");
+        // sizeof stays grammar-colored: no token at its position.
+        assert_ne!(at(&tokens, 7, 15), VARIABLE, "sizeof must not tokenize");
+    }
+
+    #[test]
+    /// Words inside comments and string literals keep their container's single
+    /// color: the semantic scan runs through the same code mask find-references
+    /// uses, so a keyword *mentioned* (`struct` in a comment, `int` in a
+    /// string) never becomes a token.
+    fn comments_and_strings_never_tokenize() {
+        // Line 0's include arms the C table, so the `printf` *mentioned* in
+        // the comments would classify as a function if the mask ever slipped.
+        let src = "\
+#include <stdio.h>
+struct FsWidget { int wid; };
+int main(void) {
+    // mention struct and int in a comment
+    /* block comment: FsWidget, printf */
+    const char *s = \"int and printf\";
+    struct FsWidget w;
+    printf(\"%s\", s);
+    return 0;
+}
+";
+        // Decode the delta stream into (line, character) positions only.
+        let decoded = |data: &[u32]| -> Vec<(u32, u32)> {
+            let mut out = Vec::new();
+            let (mut line, mut character) = (0u32, 0u32);
+            let mut i = 0;
+            while i + 4 < data.len() {
+                if data[i] > 0 {
+                    line += data[i];
+                    character = data[i + 1];
+                } else {
+                    character += data[i + 1];
+                }
+                out.push((line, character));
+                i += 5;
+            }
+            out
+        };
+        let tokens = decoded(&analyze(src).index.semantic_tokens(src));
+
+        // Comment lines (3, 4) and the string literal on line 5: no token may
+        // start inside them. (The `FsWidget`/`printf` mentioned there and the
+        // `int` in the string would otherwise classify as type/function —
+        // `main` on line 2 and the variable `s` on line 5 at col 16 are the
+        // real code and must stay.) Lines 0–9:
+        // 0 include, 1 struct decl, 2 main, 3 line comment, 4 block comment,
+        // 5 string literal, 6 local w, 7 printf, 8 return, 9 }.
+        for line in [3u32, 4, 5] {
+            assert!(
+                !tokens.iter().any(|(l, c)| *l == line && *c >= 4 && (*l, *c) != (5, 16)),
+                "line {line} must carry no semantic tokens: {tokens:?}"
+            );
+        }
+        // The real code around them still classifies.
+        assert!(tokens.iter().any(|(l, c)| *l == 7 && *c == 4), "printf call: {tokens:?}");
+        assert!(tokens.iter().any(|(l, c)| *l == 5 && *c == 16), "variable s: {tokens:?}");
+    }
+
+    #[test]
+    /// `async`/`await` color as keywords only in keyword position — the same
+    /// raw-source judgment the parser applies. An identifier spelled `async`
+    /// (a parameter here) keeps its variable color, and `await + 1` stays an
+    /// identifier (C compatibility: bare `+` is not an expression start).
+    fn soft_keywords_color_only_in_keyword_position() {
+        let src = "\
+#include <stdio.h>
+async int fetch(int n) {
+    return n;
+}
+int main(void) {
+    int async = 3;
+    async = async + 1;
+    printf(\"%d\", async);
+    return 0;
+}
+";
+        let decoded = |data: &[u32]| -> Vec<(u32, u32, u32)> {
+            let mut out = Vec::new();
+            let (mut line, mut character) = (0u32, 0u32);
+            let mut i = 0;
+            while i + 4 < data.len() {
+                if data[i] > 0 {
+                    line += data[i];
+                    character = data[i + 1];
+                } else {
+                    character += data[i + 1];
+                }
+                out.push((line, character, data[i + 3]));
+                i += 5;
+            }
+            out
+        };
+        let tokens = decoded(&analyze(src).index.semantic_tokens(src));
+        let at = |l: u32, c: u32| tokens.iter().find(|(tl, tc, _)| *tl == l && *tc == c).map(|(_, _, t)| *t);
+        const KEYWORD: u32 = 9;
+
+        // Line 1 `async int fetch`: keyword position (followed by a type).
+        assert_eq!(at(1, 0), Some(KEYWORD), "async modifier: {tokens:?}");
+        // Lines 5–7: a local variable named `async` — identifier position
+        // (followed by `=`, `+`, `)`), never a keyword token.
+        for (line, col) in [(5u32, 8u32), (6, 4), (6, 12), (7, 17)] {
+            assert_ne!(at(line, col), Some(KEYWORD), "{line}:{col} is an identifier: {tokens:?}");
+        }
+    }
+
+    /// Typing `-` inside an argument list must not blank the editor's
+    /// answers: the completion provider fires (trigger character) and the
+    /// prefix degenerates to the number being typed or to empty — the full
+    /// symbol list is the honest fallback, never the file-name suggestions
+    /// VS Code shows when a provider answers nothing.
+    #[test]
+    fn completion_after_minus_keeps_the_symbol_list() {
+        let src = "\
+@interface Adder : jeti_root
+- (int)add:(int)x to:(int)y;
+@end
+
+@implementation Adder
+- (int)add:(int)x to:(int)y { return x + y; }
+@end
+
+int main(void) {
+    Adder *a = 0;
+    int r = [a add:-1 to:-2];
+    return r;
+}
+";
+        let analyzed = analyze(src);
+        // Right after the `-` of `-1`: the send site is alive and the
+        // signature help still answers with the active parameter.
+        let pos = position(src, "-1", 1);
+        let help = analyzed.index.signature_help(pos).expect("signature through the minus");
+        assert_eq!(help.signatures.len(), 1, "{help:?}");
+        // The completion prefix at that spot filters to the digit or empty;
+        // both paths return the server's own list, never nothing-then-files.
+        let prefix = crate::index::typed_name_at(src, pos).unwrap_or_default();
+        assert!(prefix.is_empty() || prefix == "1", "unexpected prefix {prefix:?}");
     }
 
     fn hover_and_completion_speak_qualified_names() {

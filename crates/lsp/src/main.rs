@@ -140,16 +140,26 @@ fn main() {
     let mut writer = BufWriter::new(stdout.lock());
 
     loop {
-        // `None`: nothing is dirty — block indefinitely. Otherwise wake the
-        // moment the nearest quiet period expires, even when the client has
-        // sent no message since the last edit.
-        if !wait::ready(server.next_flush_in()) {
+        // Bytes the last `read_message` already pulled into the reader are
+        // invisible to `poll`: the OS pipe can look empty while a request
+        // sits inside the process. Waiting on the fd alone would strand that
+        // request forever — the editor waits for an answer that already
+        // arrived — so buffered input counts as ready.
+        let buffered = !reader.buffer().is_empty();
+        if !buffered && !wait::ready(server.next_flush_in()) {
             for outgoing in server.flush_due() {
                 if write_message(&mut writer, &outgoing).is_err() {
                     return;
                 }
             }
             continue;
+        }
+        // A request is at hand. Settle a due edit before answering it, so
+        // the response reflects the buffer the editor actually holds.
+        for outgoing in server.flush_due() {
+            if write_message(&mut writer, &outgoing).is_err() {
+                return;
+            }
         }
         let body = match read_message(&mut reader) {
             Ok(Some(body)) => body,

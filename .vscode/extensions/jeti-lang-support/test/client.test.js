@@ -72,12 +72,14 @@ async function main() {
 
   const feed = createFeed();
   const logs = [];
+  let refreshes = 0;
   const client = new JetiLanguageClient({
     command: SERVER,
     args: ['--include', path.join(REPO_ROOT, 'include')],
     cwd: REPO_ROOT,
     onDiagnostics: feed.onDiagnostics,
     onLog: (text) => logs.push(text),
+    onSemanticTokensRefresh: () => refreshes += 1,
   });
 
   try {
@@ -90,8 +92,13 @@ async function main() {
     assert.strictEqual(init.capabilities.completionProvider.resolveProvider, false, 'expected inline completions');
     assert.deepStrictEqual(
       init.capabilities.signatureHelpProvider.triggerCharacters,
-      [':'],
-      'expected signature help on the keyword colon',
+      [':', '(', ',', '-'],
+      'expected signature help on the keyword colon and through argument lists',
+    );
+    assert.deepStrictEqual(
+      init.capabilities.completionProvider.triggerCharacters,
+      [':', '(', ',', '-'],
+      'expected completion on selector colons, argument lists, and method prefixes',
     );
     assert.strictEqual(init.serverInfo.name, 'jeti-lsp');
     console.log('ok  initialize handshake');
@@ -119,6 +126,11 @@ async function main() {
     assert.ok(Array.isArray(tokens?.data) && tokens.data.length >= 5, 'expected semantic tokens');
     assert.strictEqual(tokens.data[3], 4, `expected main as function, got ${JSON.stringify(tokens.data)}`);
     console.log(`ok  semanticTokens → ${tokens.data.length / 5} token(s), main = function`);
+
+    // The first analysis asks the client to re-pull the tokens (a fetch that
+    // raced the analysis cached an empty run): one refresh per publish.
+    await feed.waitFor(uri, () => refreshes > 0);
+    console.log(`ok  semanticTokens refresh → ${refreshes} request(s) acknowledged`);
 
     // didClose clears the entry as well and must not resurrect it.
     client.closeDocument(uri);
