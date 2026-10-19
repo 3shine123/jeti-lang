@@ -35,5 +35,8 @@ node_modules/
 todo.md
 mimo.sh
 
+# Python env for test_all.py (`rich`) — test_all.sh bootstraps it on first use.
+.venv/
+
 # Rust build
 target/
