@@ -180,6 +180,9 @@ struct ClassInfo {
     /// (`@interface Box<T, U>` → `["T", "U"]`): the keys a concrete receiver's
     /// type arguments are substituted against.
     type_params: Vec<String>,
+    /// Declared outside the document being edited (an imported header) — the
+    /// `defaultLibrary` modifier's signal, clangd's system-surface rule.
+    external: bool,
 }
 
 /// A callable's signature, as an editor wants it: the label to show, and the
@@ -702,7 +705,7 @@ impl SymbolIndex {
         // `#define`d names: the definition site colors as macro, and so does
         // every later use (clangd does the same from its macro table).
         let mut macros: HashSet<String> = HashSet::new();
-        let mut tokens: Vec<(u32, u32, u32, u8)> = Vec::new();
+        let mut tokens: Vec<(u32, u32, u32, u8, u8)> = Vec::new();
         for (i, line) in text.lines().enumerate() {
             let line = line.trim_start();
             let Some(rest) = line.strip_prefix('#') else { continue };
@@ -719,7 +722,7 @@ impl SymbolIndex {
             let name_len = name.chars().map(|c| c.len_utf16() as u32).sum();
             macros.insert(name);
             let char = (line.len() - rest.len()) as u32;
-            tokens.push((i as u32, char, name_len, T_MACRO));
+            tokens.push((i as u32, char, name_len, T_MACRO, 0));
         }
 
         // Identifier scan: classify each word that is actually code —
@@ -766,9 +769,9 @@ impl SymbolIndex {
                     let word = &line[from..col];
                     let pos = LspPosition { line: i as u32, character: start16 };
                     let rest = &text[line_starts[i] + col..];
-                    if let Some(t) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
+                    if let Some((t, mods)) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
                         let len = word.chars().map(|c| c.len_utf16() as u32).sum();
-                        tokens.push((i as u32, start16, len, t));
+                        tokens.push((i as u32, start16, len, t, mods));
                     }
                     // `.` or `->` between words: what follows is a member.
                     // The `>` of `->` must keep the tail alive, not reset it.
@@ -792,25 +795,25 @@ impl SymbolIndex {
                 let word = &line[from..];
                 let pos = LspPosition { line: i as u32, character: start16 };
                 let rest = &text[line_starts[i] + line.len()..];
-                if let Some(t) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
+                if let Some((t, mods)) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
                     let len = word.chars().map(|c| c.len_utf16() as u32).sum();
-                    tokens.push((i as u32, start16, len, t));
+                    tokens.push((i as u32, start16, len, t, mods));
                 }
             }
         }
 
-        tokens.sort_by_key(|&(line, char, _, _)| (line, char));
+        tokens.sort_by_key(|&(line, char, _, _, _)| (line, char));
         // LSP delta encoding.
         let mut out = Vec::with_capacity(tokens.len() * 5);
         let mut prev_line = 0u32;
         let mut prev_char = 0u32;
-        for (line, char, len, t) in tokens {
+        for (line, char, len, t, mods) in tokens {
             let (dline, dchar) = if line == prev_line {
                 (0, char - prev_char)
             } else {
                 (line - prev_line, char)
             };
-            out.extend([dline, dchar, len, t as u32, 0]);
+            out.extend([dline, dchar, len, t as u32, mods as u32]);
             prev_line = line;
             prev_char = char;
         }
@@ -825,14 +828,14 @@ impl SymbolIndex {
         c_table: &crate::cheader::CSignatures,
         rest: &str,
         access: bool,
-    ) -> Option<u8> {
+    ) -> Option<(u8, u8)> {
         if BUILTIN_AND_KEYWORDS.contains(&word) {
             return None;
         }
         // A soft keyword in keyword position colors as a keyword; the same
         // spelling in identifier position falls through to the usual rules.
         if let Some(t) = soft_keyword_token(word, rest) {
-            return Some(t);
+            return Some((t, 0));
         }
         // Numbers never take a semantic color (`1.5` would otherwise make the
         // `5` a "member" — the digit-start guard is what keeps floats whole).
@@ -840,45 +843,70 @@ impl SymbolIndex {
             return None;
         }
         if macros.contains(word) {
-            return Some(7);
+            return Some((7, 0));
         }
         // `obj.member` / `ptr->member`: a class method dispatches (function
         // color, clangd's method-call yellow), anything else reads as a
-        // property — known field or not, it sits left of `=`.
+        // property — known field or not, it sits left of `=`. Selector parts
+        // match per colon segment (`addObject:` answers to `addObject`) — the
+        // whole-word compare is what left multi-part selectors colorless. A
+        // class method carries `static`, clangd's modifier for `+` methods.
+        let find_member =
+            |info: &ClassInfo| {
+                info.members
+                    .iter()
+                    .find(|m| selector_part_matches(word, &m.label))
+                    .map(|m| (m.kind, m.is_class_method))
+            };
+        let method_pair = |kind: u8, class_method: bool| -> (u8, u8) {
+            if kind == kind::METHOD {
+                (4, if class_method { MOD_STATIC } else { 0 })
+            } else {
+                (6, 0)
+            }
+        };
         if access {
             for info in self.classes.values() {
-                if let Some(member) = info.members.iter().find(|m| m.label == word) {
-                    return Some(if member.kind == kind::METHOD { 4 } else { 6 });
+                if let Some((member_kind, class_method)) = find_member(info) {
+                    return Some(method_pair(member_kind, class_method));
                 }
             }
-            return Some(6);
+            return Some((6, 0));
         }
         // Innermost scope wins: a local shadows anything global.
         if self.local_at(pos, word).is_some() {
-            return Some(5);
+            return Some((5, 0));
         }
         if self.functions.contains_key(word) {
-            return Some(4);
+            return Some((4, 0));
         }
         for info in self.classes.values() {
-            if let Some(member) = info.members.iter().find(|m| m.label == word) {
-                return Some(if member.kind == kind::METHOD { 4 } else { 6 });
+            if let Some((member_kind, class_method)) = find_member(info) {
+                return Some(method_pair(member_kind, class_method));
             }
         }
         if self.enum_member_names.contains(word) {
-            return Some(8);
+            return Some((8, 0));
         }
         if self.enum_names.contains(word) {
-            return Some(3);
+            return Some((3, 0));
+        }
+        // A class name used as a type stays class-colored (clangd's rule for
+        // ObjC interfaces): a Foundation class also carries a struct layout
+        // under the same name, and hitting the `type` branch below first is
+        // what made class uses render in the alias color. A class declared in
+        // an imported header carries `defaultLibrary` — the theme's cue to
+        // style the system surface (clangd's italics) apart from project
+        // classes (the underline).
+        if let Some(info) = self.classes.get(word) {
+            let mods = if info.external { MOD_DEFAULT_LIBRARY } else { 0 };
+            return Some((1, mods));
         }
         if self.protocols.contains_key(word)
             || self.layouts.contains_key(word)
             || self.typedef_types.contains_key(word)
         {
-            return Some(2);
-        }
-        if self.classes.contains_key(word) {
-            return Some(1);
+            return Some((2, 0));
         }
         // Passthrough C surface, extracted from the real toolchain for the
         // headers this document includes — no name tables in the source.
@@ -886,25 +914,27 @@ impl SymbolIndex {
         // function named `printf` wins over the library's. A real prototype
         // also beats a macro *spelling*: macOS fortify defines `memset(...)`
         // as a macro, but the use in code still reads as the declared call.
+        // Everything the toolchain table holds came from system headers, so
+        // each shape carries `defaultLibrary` the way clangd's does.
         match c_table.decl(word) {
-            Some((crate::cheader::DeclKind::Function, _)) => return Some(4),
-            Some((crate::cheader::DeclKind::Variable, _)) => return Some(5),
-            Some((crate::cheader::DeclKind::Typedef, _)) => return Some(2),
+            Some((crate::cheader::DeclKind::Function, _)) => return Some((4, MOD_DEFAULT_LIBRARY)),
+            Some((crate::cheader::DeclKind::Variable, _)) => return Some((5, MOD_DEFAULT_LIBRARY)),
+            Some((crate::cheader::DeclKind::Typedef, _)) => return Some((2, MOD_DEFAULT_LIBRARY)),
             None => {}
         }
         // The toolchain's macro-only surface (`EOF`, `NULL`, `errno` on
         // macOS) colors as a macro wherever it appears.
         if c_table.macro_name(word).is_some() {
-            return Some(7);
+            return Some((7, MOD_DEFAULT_LIBRARY));
         }
         if self.global_vars.contains(word) {
-            return Some(5);
+            return Some((5, 0));
         }
         if self.namespaces.contains(word) {
-            return Some(0);
+            return Some((0, 0));
         }
         if self.field_at(word, pos).is_some() {
-            return Some(6);
+            return Some((6, 0));
         }
         None
     }
@@ -1228,7 +1258,10 @@ impl SymbolIndex {
             // the declaration plus its enclosing container, which is exactly
             // what this loop has.
             if let (Some(name), AstDeclData::Class { .. }) = (&decl.name, &decl.data) {
-                self.register_class(name, &decl.data);
+                let external = decl_path(decl, source_map)
+                    .map(|path| !same_file(&path, document))
+                    .unwrap_or(false);
+                self.register_class(name, &decl.data, external);
             }
             if let (Some(name), AstDeclData::Protocol { parents, required_methods, optional_methods }) =
                 (&decl.name, &decl.data)
@@ -1383,7 +1416,7 @@ impl SymbolIndex {
     /// usually declared in a header). Declaration and implementation merge into
     /// one entry; the first non-empty ancestor wins, since an `@implementation`
     /// records only the implicit root.
-    fn register_class(&mut self, name: &str, data: &AstDeclData) {
+    fn register_class(&mut self, name: &str, data: &AstDeclData, external: bool) {
         let AstDeclData::Class { super_name, methods, properties, ivars, impl_vars, type_params, .. } = data else {
             return;
         };
@@ -1394,6 +1427,7 @@ impl SymbolIndex {
         if entry.type_params.is_empty() {
             entry.type_params = type_params.clone();
         }
+        entry.external |= external;
         let members = methods
             .iter()
             .chain(properties.iter())
@@ -3411,6 +3445,21 @@ fn soft_keyword_token(word: &str, rest: &str) -> Option<u8> {
         _ => None,
     }
 }
+
+/// A scanned word matches a member when it equals any colon-separated part
+/// of the stored selector: `addObject:` answers to `addObject`,
+/// `setObject:atIndex:` to both `setObject` and `atIndex` — clangd colors
+/// every selector part, and a whole-word scan never sees the colons.
+pub(crate) fn selector_part_matches(word: &str, label: &str) -> bool {
+    label.split(':').any(|part| part == word)
+}
+
+/// Modifier bits, matching the legend order in the capabilities
+/// (`["static", "defaultLibrary"]`). clangd marks class methods `static` and
+/// system-header surface `defaultLibrary`; themes style the combinations
+/// apart (the italic/underline distinctions), so the server must carry them.
+const MOD_STATIC: u8 = 1;
+const MOD_DEFAULT_LIBRARY: u8 = 2;
 
 const BUILTIN_AND_KEYWORDS: &[&str] = &[
     "asm", "auto", "bool", "BOOL", "break", "case", "char", "Class", "const", "continue",

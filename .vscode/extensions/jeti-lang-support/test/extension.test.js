@@ -34,6 +34,7 @@ const statusItems = [];
 const collections = new Map();
 const listeners = new Map();
 const providers = new Map();
+const legends = new Map();
 
 const vscode = {
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
@@ -41,6 +42,12 @@ const vscode = {
   // these; the mock only needs the constructors to exist.
   SemanticTokens: class { constructor(data) { this.data = data; } },
   SemanticTokensLegend: class { constructor(tokenTypes, tokenModifiers) { this.tokenTypes = tokenTypes; this.tokenModifiers = tokenModifiers; } },
+  EventEmitter: class {
+    constructor() { this.handlers = []; }
+    get event() { return (handler) => { this.handlers.push(handler); return { dispose: () => {} }; }; }
+    fire() { for (const handler of this.handlers) handler(); }
+    dispose() {}
+  },
   // The status bar API is top-level in VS Code (vscode.StatusBarAlignment),
   // which is how extension.js reads it.
   StatusBarAlignment: { Left: 1, Right: 2 },
@@ -152,7 +159,7 @@ const vscode = {
     registerHoverProvider: (selector, provider) => registerProvider('hover', provider),
     registerCompletionItemProvider: (selector, provider) => registerProvider('completion', provider),
     registerSignatureHelpProvider: (selector, provider) => registerProvider('signatureHelp', provider),
-    registerSemanticTokensProvider: (selector, provider) => registerProvider('semanticTokens', provider),
+    registerDocumentSemanticTokensProvider: (selector, provider, legend) => registerProvider('semanticTokens', provider, legend),
     registerDocumentLinkProvider: (selector, provider) => registerProvider('documentLink', provider),
   },
   commands: {
@@ -222,8 +229,9 @@ function subscribe(kind, listener) {
   return { dispose: () => {} };
 }
 
-function registerProvider(kind, provider) {
+function registerProvider(kind, provider, legend) {
   providers.set(kind, provider);
+  if (legend) legends.set(kind, legend);
   return { dispose: () => {} };
 }
 
@@ -335,6 +343,20 @@ async function main() {
 
     const collection = () => collections.get('jeti');
     assert.ok(collection(), 'expected a "jeti" diagnostic collection');
+
+    // The client legend must carry every type the server can emit — a type
+    // index past the legend makes VS Code silently drop the token (the
+    // async/await `keyword` type shipped before this check existed and the
+    // whole semantic layer went colorless).
+    const legend = legends.get('semanticTokens');
+    assert.ok(legend, 'expected the semantic tokens provider to register with a legend');
+    for (const type of ['namespace', 'class', 'type', 'enum', 'function', 'variable', 'property', 'macro', 'enumMember', 'keyword']) {
+      assert.ok(legend.tokenTypes.includes(type), `client legend must include "${type}"`);
+    }
+    for (const modifier of ['static', 'defaultLibrary']) {
+      assert.ok(legend.tokenModifiers.includes(modifier), `client legend must include modifier "${modifier}"`);
+    }
+    console.log('ok  semantic tokens legend covers all server token types');
 
     // didOpen → diagnostics rendered into the collection (LSP → VS Code).
     fire('open', documentFor(file, broken));
@@ -521,6 +543,57 @@ async function main() {
     });
     await waitUntil(() => (collection().get(uri) || []).length === 0, 'the range edit to be undone');
     console.log('ok  didChange (full sync) → diagnostics track the edit');
+
+    // The provider must answer from the real server with the compiler's own
+    // types — class names and locals included. An empty answer here is the
+    // "everything falls back to the grammar" bug: variables go white and no
+    // theme can help, because no semantic token ever arrives.
+    const tokenFile = path.join(dir, 'tokens.jeti');
+    const tokenText = [
+      '@interface Token : NPObject',
+      '@end',
+      'int main(void) {',
+      '    Token *t = 0;',
+      '    return 0;',
+      '}',
+      '',
+    ].join('\n');
+    const tokenUri = pathToFileURL(tokenFile).toString();
+    fire('open', documentFor(tokenFile, tokenText));
+    await waitUntil(
+      () => collections.get('jeti').get(tokenUri) !== undefined,
+      'the token probe document to publish once',
+    );
+    const tokenProvider = providers.get('semanticTokens');
+    let probeData = [];
+    for (let attempt = 0; attempt < 200 && probeData.length === 0; attempt += 1) {
+      const answer = await tokenProvider.provideDocumentSemanticTokens(documentFor(tokenFile, tokenText));
+      probeData = Array.from(answer?.data ?? []);
+      if (probeData.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(probeData.length > 0, 'semantic token provider returned no tokens from the real server');
+    const decodedTokens = [];
+    let tokenLine = 0;
+    let tokenChar = 0;
+    for (let i = 0; i + 4 < probeData.length; i += 5) {
+      if (probeData[i] > 0) {
+        tokenLine += probeData[i];
+        tokenChar = probeData[i + 1];
+      } else {
+        tokenChar += probeData[i + 1];
+      }
+      decodedTokens.push([tokenLine, tokenChar, probeData[i + 3]]);
+    }
+    const tokenAt = new Map(decodedTokens.map(([l, c, t]) => [`${l}:${c}`, t]));
+    assert.strictEqual(
+      tokenAt.get('3:4'), 1,
+      `class-name use must be class: ${JSON.stringify(decodedTokens)}`,
+    );
+    assert.strictEqual(
+      tokenAt.get('3:11'), 5,
+      `local variable must be variable: ${JSON.stringify(decodedTokens)}`,
+    );
+    console.log('ok  semantic tokens flow end-to-end (class + variable from the real server)');
 
     // Build switches reach the server: `jeti.arc: false` must spawn with
     // `-fno-jeti-arc`, which is what makes an MRC project stop showing ARC

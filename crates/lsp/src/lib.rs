@@ -598,7 +598,7 @@ impl Server {
                                     "function", "variable", "property", "macro", "enumMember",
                                     "keyword",
                                 ],
-                                "tokenModifiers": [],
+                                "tokenModifiers": ["static", "defaultLibrary"],
                             },
                             "full": true,
                             // The server re-pushes this request after every
@@ -1764,6 +1764,7 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
 mod tests {
     use super::*;
     use crate::index::ReceiverInfo;
+    use crate::index::selector_part_matches;
 
     fn no_open_files() -> impl Fn(&str) -> Option<String> {
         |_: &str| None
@@ -3274,6 +3275,50 @@ int main(void) {
         // both paths return the server's own list, never nothing-then-files.
         let prefix = crate::index::typed_name_at(src, pos).unwrap_or_default();
         assert!(prefix.is_empty() || prefix == "1", "unexpected prefix {prefix:?}");
+    }
+
+    #[test]
+    /// Every selector *part* colors even though the stored label carries the
+    /// colons (`addObject:`), and a class method's use carries the `static`
+    /// modifier bit — the theme metadata clangd also sends.
+    fn selector_parts_color_and_class_methods_carry_static() {
+        let src = "\
+@interface Token : NPObject
++ (id)alloc;
+- (int)value;
+@end
+int main(void) {
+    id t = [Token alloc];
+    return 0;
+}
+";
+        let data = analyze(src).index.semantic_tokens(src);
+        let mut toks = Vec::new();
+        let (mut line, mut character) = (0u32, 0u32);
+        let mut i = 0;
+        while i + 4 < data.len() {
+            if data[i] > 0 {
+                line += data[i];
+                character = data[i + 1];
+            } else {
+                character += data[i + 1];
+            }
+            toks.push((line, character, data[i + 3], data[i + 4]));
+            i += 5;
+        }
+        let at = |l: u32, c: u32| {
+            toks.iter()
+                .find(|(tl, tc, _, _)| *tl == l && *tc == c)
+                .map(|(_, _, t, m)| (*t, *m))
+        };
+        // Line 5: `    id t = [Token alloc];` — receiver class first, then
+        // the class-method selector with bit 0 (static) set.
+        assert_eq!(at(5, 12), Some((1, 0)), "receiver class: {toks:?}");
+        assert_eq!(at(5, 18), Some((4, 1)), "class method carries static: {toks:?}");
+        // A multi-part selector's parts match per colon segment.
+        assert!(selector_part_matches("addObject", "addObject:"));
+        assert!(selector_part_matches("atIndex", "setObject:atIndex:"));
+        assert!(!selector_part_matches("Object", "addObject:"));
     }
 
     fn hover_and_completion_speak_qualified_names() {

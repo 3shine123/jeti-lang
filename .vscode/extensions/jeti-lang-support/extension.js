@@ -412,7 +412,7 @@ function restart() {
           // Must match the server legend exactly (lib.rs capabilities) — a
           // type index past this array makes VS Code drop the token.
           ['namespace', 'class', 'type', 'enum', 'function', 'variable', 'property', 'macro', 'enumMember', 'keyword'],
-          [],
+          ['static', 'defaultLibrary'],
         ),
         // The server-pushed refresh request fires this, making VS Code
         // re-invoke provideDocumentSemanticTokens for every visible editor.

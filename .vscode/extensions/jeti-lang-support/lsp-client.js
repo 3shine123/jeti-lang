@@ -29,10 +29,13 @@ class JetiLanguageClient {
    * @param {string} [options.cwd]     Server working directory.
    * @param {(uri: string, diagnostics: object[]) => void} options.onDiagnostics
    *   Called for every `publishDiagnostics` (an empty array clears).
+   * @param {() => void} [options.onSemanticTokensRefresh]
+   *   Called when the server asks for a semantic-tokens refresh; the editor
+   *   layer fires its `onDidChangeSemanticTokens` so VS Code re-pulls.
    * @param {(text: string) => void} [options.onLog]
    *   Server stderr and protocol-level notes.
    */
-  constructor({ command, args = [], cwd, onDiagnostics, onLog }) {
+  constructor({ command, args = [], cwd, onDiagnostics, onLog, onSemanticTokensRefresh }) {
     if (!command) throw new Error('jeti language client: no server command');
     if (typeof onDiagnostics !== 'function') {
       throw new Error('jeti language client: onDiagnostics is required');
@@ -41,6 +44,7 @@ class JetiLanguageClient {
     this.args = args;
     this.cwd = cwd;
     this.onDiagnostics = onDiagnostics;
+    this.onSemanticTokensRefresh = onSemanticTokensRefresh || (() => {});
     this.onLog = onLog || (() => {});
 
     this.process = null;
@@ -313,8 +317,18 @@ class JetiLanguageClient {
     if (message.method === 'window/logMessage' || message.method === 'window/showMessage') {
       this.onLog(`${message.params?.type ?? ''} ${message.params?.message ?? ''}\n`);
     }
-    // Server-initiated requests are not needed by this subset; anything else is
-    // ignored on purpose rather than answered with a wrong reply.
+    if (message.method === 'workspace/semanticTokens/refresh') {
+      // A server-initiated request: acknowledge with the spec's void result,
+      // then tell the editor layer to make VS Code re-pull the tokens it may
+      // have cached before the first analysis finished.
+      if (message.id !== undefined) {
+        this._send({ jsonrpc: '2.0', id: message.id, result: null });
+      }
+      this.onSemanticTokensRefresh();
+      return;
+    }
+    // Other server-initiated requests are not needed by this subset; anything
+    // else is ignored on purpose rather than answered with a wrong reply.
   }
 
   _failAll(error) {

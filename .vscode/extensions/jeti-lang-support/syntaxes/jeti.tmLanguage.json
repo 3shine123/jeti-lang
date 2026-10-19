@@ -489,7 +489,7 @@
       "patterns": [
         {
           "name": "keyword.control",
-          "match": "\\b(?:return|if|else|switch|case|default|while|do|for|break|continue|goto)\\b"
+          "match": "\\b(?:return|if|else|switch|case|default|while|do|for|break|continue|goto|sizeof)\\b"
         }
       ]
     },

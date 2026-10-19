@@ -2,7 +2,7 @@
   "name": "jeti-lang",
   "displayName": "Jeti Language",
   "description": "Syntax highlighting and language support for Jeti — a statically-dispatched Objective-C dialect",
-  "version": "0.9.0",
+  "version": "0.0.8",
   "publisher": "jeti-lang",
   "engines": {
     "vscode": "^1.80.0"
@@ -36,22 +36,6 @@
         "language": "jeti",
         "scopeName": "source.jeti",
         "path": "./syntaxes/jeti.tmLanguage.json"
-      }
-    ],
-    "semanticTokenScopes": [
-      {
-        "language": "jeti",
-        "scopes": {
-          "namespace": ["entity.name.namespace"],
-          "class": ["entity.name.class"],
-          "type": ["entity.name.type", "entity.name.struct"],
-          "enum": ["entity.name.enum"],
-          "enumMember": ["constant.other.enummember", "entity.name.constant"],
-          "function": ["entity.name.function"],
-          "variable": ["variable.other"],
-          "property": ["variable.other.property", "entity.name.field"],
-          "macro": ["entity.name.function.preprocessor"]
-        }
       }
     ],
     "configuration": {
