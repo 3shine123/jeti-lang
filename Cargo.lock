@@ -250,7 +250,7 @@ version = "0.1.0"
 
 [[package]]
 name = "jeti-lsp"
-version = "0.1.0"
+version = "0.0.8"
 dependencies = [
  "jeti-ast",
  "jeti-checker",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "jetic"
-version = "0.1.0"
+version = "0.0.8"
 dependencies = [
  "attrs",
  "cc",
