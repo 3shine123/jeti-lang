@@ -254,6 +254,10 @@ static C_STDLIB_FUNCTIONS: &[(&str, &[&str])] = &[
         "creal", "cimag", "crealf", "cimagf", "cabs", "cabsf", "carg",
         "cargf", "conj", "conjf",
     ]),
+    ("dlfcn.h", &[
+        "dlopen", "dlsym", "dlvsym", "dlerror", "dlclose", "dladdr",
+        "dlinfo", "dlmopen",
+    ]),
 ];
 
 /// The C17 library *binding* surface (globals and macro constants) — same
@@ -307,6 +311,10 @@ static C_STDLIB_BINDINGS: &[(&str, &[&str])] = &[
     ]),
     ("time.h", &["CLOCKS_PER_SEC"]),
     ("stdlib.h", &["EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX"]),
+    ("dlfcn.h", &[
+        "RTLD_LAZY", "RTLD_NOW", "RTLD_GLOBAL", "RTLD_LOCAL",
+        "RTLD_DEFAULT", "RTLD_NEXT", "RTLD_SELF",
+    ]),
 ];
 
 /// Which C17 header declares this function — the LSP hover card's
@@ -1402,6 +1410,17 @@ impl Checker {
                 if sym.kind == SymbolKind::Function {
                     return;
                 }
+            }
+        }
+        // A call to a whitelisted passthrough-C function has no signature in
+        // the curated table (names only, by design), so its type falls back
+        // to `int` — a width warning built on that guess would be false (the
+        // real `dlsym` returns `void *`; clang stays silent on the textbook
+        // `(fnptr)dlsym(...)`). A missed diagnostic here is the escape hatch
+        // working as designed; a false error would not be.
+        if let AstExprData::FuncCall { name, .. } = &operand.data {
+            if !name.is_empty() && Self::c_stdlib_declares(self, name) {
+                return;
             }
         }
         let is_ptr = |t: &AstType| Self::is_pointer_like(t);

@@ -177,6 +177,26 @@ static void sec1_c_superset(void) {
     struct FsWidget in_w;
     in_w.in = in * 2;
     printf("1.20 in %d %d\n", in, in_w.in);
+
+    // 1.21 类型强转表达式：浮点截断 / 符号重解释 / fnptr 强转
+    double fs_cd = 3.9;
+    long fs_cl = (long)fs_cd;                   // 截断取整 → 3
+    unsigned fs_cu = (unsigned)(fs_cd * 10.0);  // 39 → 39
+    int (*fs_cfp)(int) = (int (*)(int))fs_double_it;
+    printf("1.21 castx %ld %u %d\n", fs_cl, fs_cu, fs_cfp(30));
+
+    // 1.22 故意触发的类型强转警告用例（两边同源：看各自 clang 是否都报）
+    //   变量 int → char *：-Wint-to-pointer-cast（默认开；字面量 int→指针 clang 特判不报）
+    //   void * → (int)：-Wvoid-pointer-to-int-cast（默认开）
+    //   int * → (int)：-Wpointer-to-int-cast（默认开）
+    // 运行时安全：只判非空不 deref，输出确定
+    int fs_i2p = 123;
+    char *fs_badp1 = (char *)123;           // 探针证实：无警告（字面量特判）
+    char *fs_badp2 = (char *)fs_i2p;        // 有警告
+    void *fs_vp = (void *)&fs_i2p;
+    int fs_addr = (int)(void *)fs_vp;       // 有警告（经 void * 中转）
+    int fs_addr2 = (int)&fs_i2p;            // 有警告：-Wpointer-to-int-cast
+    printf("1.22 castwarn %d %d %d %d\n", fs_badp1 != NULL, fs_badp2 != NULL, fs_addr != 0, fs_addr2 != 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════
