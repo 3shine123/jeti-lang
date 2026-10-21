@@ -82,6 +82,13 @@ pub struct Pipeline {
     /// Spelling is `Class<Arg, ...>`; codegen turns each into a real
     /// monomorphized class in every TU that has the generic implementation.
     pub forced_generic_instantiations: Vec<String>,
+    /// `--instantiate-only` (internal, driver-spawned): this TU's main-file
+    /// `@implementation`s are template bodies being compiled for ONE demanded
+    /// specialization, not the class's authoritative definition. R2 ownership
+    /// is dropped, so every metadata symbol stays weak and the precompiled
+    /// library keeps its strong `JETI_VTABLE_$_X` — the specialization links
+    /// beside it instead of colliding with it.
+    pub instantiate_only: bool,
     /// C compiler + leading args used for the link step (e.g. `["zig", "cc"]`).
     /// Also used by the C type-name probe; empty means "unknown", which skips
     /// the probe.
@@ -136,6 +143,7 @@ impl Pipeline {
             eh_checked: DEFAULT_EH_CHECKED,
             slots_manifest: None,
             forced_generic_instantiations: Vec::new(),
+            instantiate_only: false,
             c_cc: Vec::new(),
             c_arch: None,
             no_ctype_probe: false,
@@ -683,7 +691,14 @@ impl Pipeline {
         let public_methods = collect_public_methods(&ast, filename, &pre.source_map);
         // R2: the classes this TU owns (its `@implementation`s live in the main
         // file). Their metadata is emitted strong, everyone else's stays weak.
-        let owned_classes = collect_owned_classes(&ast, filename, &pre.source_map);
+        // A template-instantiation pass (`--instantiate-only`) contributes
+        // specializations only — the precompiled archive stays the owner, so it
+        // claims nothing and every symbol it emits is weak.
+        let owned_classes = if self.instantiate_only {
+            std::collections::HashSet::new()
+        } else {
+            collect_owned_classes(&ast, filename, &pre.source_map)
+        };
         let mut cg = jeti_codegen::ast_to_cg_unit_with_slots_ext(
             &ast, self.backend, slots.as_deref(), Some(&public_methods),
             Some(&self.forced_generic_instantiations),
@@ -703,6 +718,7 @@ impl Pipeline {
         self.last_generic_demands = cg.generic_demands.clone();
         cg.no_arc = self.no_arc;
         cg.owned_classes = owned_classes;
+        cg.instantiate_only = self.instantiate_only;
         // 阶段 2: `-line-directives` emits `#line` at user-statement positions
         // (mapped through the preprocessor's SourceMap) so clang diagnostics
         // point back at the .jeti/.hje. Off by default; -rewrite-jeti output

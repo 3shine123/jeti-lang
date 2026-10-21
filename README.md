@@ -1409,7 +1409,19 @@ int main(void) {
 }
 ```
 
-Build both inputs together: `jetic main.jeti lib.jeti -I . -o app`. The implementation must be available in one of the inputs (or in the source/module form used to build the library). A precompiled library can provide a fixed set of specializations, but it cannot invent a new method body for an argument type whose implementation was not shipped. If two TUs provide the same specialization, the normal owner/strong-metadata rules reject the duplicate definition instead of silently choosing an ABI.
+Build both inputs together: `jetic main.jeti lib.jeti -I . -o app`. The implementation must be available in one of the inputs (or in the source/module form used to build the library). If two TUs provide the same specialization, the normal owner/strong-metadata rules reject the duplicate definition instead of silently choosing an ABI.
+
+A precompiled archive can only carry the specializations its own TUs demanded when it was built. To let clients spell new ones, the library ships its template sources beside the archive: `tools/build-foundation-lib.sh` writes `libjetifoundation.templates` next to `libjetifoundation.a`, and any library you build can do the same. `jetic` looks for `lib<name>.templates` next to every archive the link pulls in, and for each demanded specialization the archive does not already define, it compiles just that one out of the shipped source (weak for the bare class, strong for the specialization) and links it in:
+
+```text
+# libmylib.templates — shipped beside libmylib.a
+root    ../../include          # include root, relative to this file
+surface Foundation/Foundation.hje   # declaration surface the library used
+template NPArray T Foundation/NPArray.jeti
+defined  NPArray_NPString_ptr  # metadata the archive already defines
+```
+
+Without a manifest nothing changes: the archive's fixed specialization set is all a client can use. With one, `NPMutableArray<MyType *>` works even though the implementation never entered the client's link. Semantics stay C++-like (concrete type checked and compiled) while the library still ships binaries.
 
 This is the intended trade-off: Jeti matches Objective-C's call-site style, while its semantics are closer to C++ templates—concrete types are checked and compiled into separate code, and unused specializations do not exist.
 

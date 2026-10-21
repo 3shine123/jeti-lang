@@ -1,0 +1,21 @@
+#import "model.hje"
+
+// Compiled once into `lib18_lib_template.a`. This translation unit is the
+// OWNER of the bare `Bin` class (R2): the client never sees this file, only the
+// archive and the header.
+@implementation Bin
+
+- (void)put:(T)item {
+    _item = item;
+    _filled = 1;
+}
+
+- (T)take {
+    return _item;
+}
+
+- (int)filled {
+    return _filled;
+}
+
+@end

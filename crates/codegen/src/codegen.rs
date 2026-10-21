@@ -747,6 +747,12 @@ pub struct CgUnit {
     /// arrives through an `#import` stays weak — that is what keeps the
     /// self-contained mode (every TU inlines Foundation) merging as before.
     pub owned_classes: std::collections::HashSet<String>,
+    /// `--instantiate-only`: this TU exists to materialize SPECIALIZATIONS out
+    /// of a template source shipped by a precompiled library. The bare template
+    /// class stays the archive's (weak here), but a specialization it emits is
+    /// the only definition in the link — so it must be STRONG, or the client's
+    /// empty weak stub could win the weak-merge and dispatch into NULL slots.
+    pub instantiate_only: bool,
     /// The instance-method names whose vtable layout must agree across all
     /// linked TUs — the segment the `__sig` fingerprint is computed over
     /// (rule R3 of `docs/plans/stable_slots_plan.md`).
@@ -991,6 +997,14 @@ fn emit_arc_dealloc_wrappers(classes: &[CgClassMeta]) -> (std::collections::Hash
     (names, defs)
 }
 
+/// Flatten a class reference (`Name<Arg *>`) into the symbol suffix codegen
+/// uses for its metadata (`Name_Arg_ptr`). Exposed so the multi-TU driver can
+/// tell whether a demanded specialization is already defined inside a
+/// precompiled library without re-deriving the mangling.
+pub fn symbol_flat_name(fqn: &str) -> String {
+    name_flat(fqn)
+}
+
 fn name_flat(fqn: &str) -> String {
     // First mangle generic type arguments: `Name<T1, T2*>` → `Name_T1_T2_ptr`
     // so that e.g. `DataPack<QuantumToken*>` becomes `DataPack_QuantumToken_ptr`.
@@ -1145,6 +1159,13 @@ fn ast_args_are_template_params(args: &[AstType], params: &[String]) -> bool {
 /// winning the linker merge (a client's vtable slots are NULL — that dispatch
 /// ends at address 0).
 fn class_is_owned(unit: &CgUnit, class_name: &str) -> bool {
+    // A template-instantiation TU owns every SPECIALIZATION it materializes
+    // (nothing else in the link can define one) while the bare template class
+    // stays the archive's. A strong specialization table is what stops the
+    // client's empty weak stub from winning the weak-merge.
+    if unit.instantiate_only && class_name.contains('<') {
+        return true;
+    }
     unit.owned_classes.contains(class_name)
         || class_name
             .split('<')
@@ -6472,7 +6493,7 @@ method_names: info.method_names,
     // the same specializations compare equal and the fixed-point loop stops.
     generic_demands.sort();
     generic_demands.dedup();
-    let mut unit = CgUnit { decls, filename: ast.filename.clone(), c_headers: Vec::new(), selectors, classes, global_instance_method_names, struct_eq_tags: Vec::new(), no_arc: false, owned_classes: std::collections::HashSet::new(), vtable_sig_names, kvc: false, protocols: protocol_table, generic_demands };
+    let mut unit = CgUnit { decls, filename: ast.filename.clone(), c_headers: Vec::new(), selectors, classes, global_instance_method_names, struct_eq_tags: Vec::new(), no_arc: false, owned_classes: std::collections::HashSet::new(), instantiate_only: false, vtable_sig_names, kvc: false, protocols: protocol_table, generic_demands };
     // The authoritative record of which method function bodies exist: every
     // `CgDeclData::Function` with a body. This covers paths that do not go
     // through `ClassInfo::method_bodies` — notably @property-synthesised
@@ -9559,6 +9580,7 @@ mod vtable_sig_tests {
             struct_eq_tags: Vec::new(),
             no_arc: false,
             owned_classes: std::collections::HashSet::new(),
+            instantiate_only: false,
             kvc: false,
             protocols: Vec::new(),
             generic_demands: Vec::new(),
@@ -9664,6 +9686,7 @@ mod vtable_sig_tests {
             struct_eq_tags: Vec::new(),
             no_arc: false,
             owned_classes: std::collections::HashSet::new(),
+            instantiate_only: false,
             kvc: false,
             protocols: Vec::new(),
             generic_demands: Vec::new(),
@@ -9773,6 +9796,7 @@ mod eh_runtime_include_tests {
             struct_eq_tags: Vec::new(),
             no_arc: false,
             owned_classes: std::collections::HashSet::new(),
+            instantiate_only: false,
             kvc: false,
             protocols: Vec::new(),
             generic_demands: Vec::new(),

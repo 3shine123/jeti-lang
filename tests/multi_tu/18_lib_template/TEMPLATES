@@ -1,0 +1,4 @@
+# Becomes `lib18_lib_template.templates` beside the archive (the runner
+# prepends `root <case dir>`). Format: crates/jetic/src/main.rs (TemplateManifest).
+surface model.hje
+template Bin T lib.jeti

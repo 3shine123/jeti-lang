@@ -1,0 +1,19 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+// Precompiled-library client: no user class, so the public vtable segment is
+// exactly Foundation's and the R3 startup check agrees. The only gap left is
+// the generic specialization: `NPMutableArray<NPString *>` must be instantiated
+// without the template implementation (`NPMutableArray.jeti`) being part of the
+// link. `libjetifoundation.templates` names that source, so jetic compiles just
+// this specialization and links it in.
+//
+// Before that manifest existed this program linked an empty weak stub and died
+// with SIGSEGV (exit 139) on `[a addObject:]`.
+int main(void) {
+    NPMutableArray<NPString *> *a = [NPMutableArray array];
+    [a addObject:[NPString stringWithUTF8String:"hi"]];
+    NPString *s = [a objectAtIndex:0];
+    printf("first=%s count=%lld\n", [s UTF8String], (long long)[a count]);
+    return 0;
+}

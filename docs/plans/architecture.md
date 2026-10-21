@@ -96,7 +96,11 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 - **R4**（`__layout_sig` 校验，ivar 段）：每个类的 vtable 实例额外携带该类的 ivar 段指纹与原始拼写（`. __layout_sig` / `.__layout_text`，结构体里紧跟在 `__sig` 后）。`struct <Class>` 是**扁平** C 结构体（祖先 ivar 按声明顺序内联），所以某个 TU 用过期 `.hje` 编译时，同一个字段在两边偏移不同、读出来是垃圾值。启动期校验把"链接胜出的实例指纹"与"本 TU 编译时的指纹"逐类比较，不一致即 abort 并打印两边的 ivar 列表（如 `Widget < NPObject | int _a | int _b` vs `... | short _a | int _b | int _c`）。
   - 该检查刻意是**运行期**而非链接期：Jeti 允许"只声明、无任何 `@implementation`"的纯数据类（`tests/golden/01_basics/hello.jeti` 的 `Student`），链接期无法区分"链接里没有 owner"与"头过期"，会误报；逐类比较只发生在同一个类被两个 TU 同时链接时，因此零误报。
   - 只比较自身 ivar 段 + 超类拼写：祖先的 ivar 由祖先自己的条目比较（能同时见到某个类，就必然同时见到它的超类）。泛型实例同样逐类参与，只被一个 TU 实例化时不产生比较。
-- **R2**（实例归属）见 §4。R1/R2/R3/R4 均已落地：多 TU 行为由 `tests/multi_tu/`（17 用例）与 `probes/x5_layout/` 守护，R4 的指纹/发射另有 codegen 单测覆盖。
+- **R2**（实例归属）见 §4。R1/R2/R3/R4 均已落地：多 TU 行为由 `tests/multi_tu/`（18 用例）与 `probes/x5_layout/` 守护，R4 的指纹/发射另有 codegen 单测覆盖。
+- **R5**（预编译库如何满足新特化：随包模板清单）：归档里只有它构建时自己 TU 要求的特化。库把模板源码随包分发 —— `tools/build-foundation-lib.sh` 在 `.a` 旁写 `libjetifoundation.templates`（`root` / `surface` / `template <Class> <Params> <源>.jeti` / `defined <flat>`）—— 驱动在链接前读 `lib<name>.templates`，对"库已 `defined` 之外"的 demand 以 `--instantiate-only` 只编译该特化（**裸类弱、特化强**，避免客户端空弱桩赢得弱合并），再把生成的 C 一起链接。
+  - 没有清单就等于回到旧行为（只能用库里烘焙好的特化），不会新增失败模式。
+  - 模板 TU 用与库相同的 `surface`（声明伞头）编译，公共段与 `__sig` 因此与归档一致；这也解释为什么"客户端自己加类方法 + 只 import `.hje`"会撞 R3：那是段差异，与 R5 无关。
+  - 验收：`tests/multi_tu/18_lib_template/`（预编译 `.a` + `Bin<NPString *>` 跨 TU 自动实例化，抽掉清单即段错误）与 `probes/x6_lib_template/`。
 
 ## 6. class metadata：静态初始化
 

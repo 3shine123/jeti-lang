@@ -1,0 +1,13 @@
+#import "model.hje"
+#include <stdio.h>
+
+// The client: declarations + a precompiled archive. `Bin<NPString *>` was never
+// built into the archive, so without the shipped template source this would
+// link an empty weak stub and crash on `[b put:]` (NULL slot). The driver
+// instantiates the demand from `lib.jeti` via the manifest instead.
+int main(void) {
+    Bin<NPString *> *b = [[Bin<NPString *> alloc] init];
+    [b put:[NPString stringWithUTF8String:"from-lib"]];
+    printf("take=%s filled=%d\n", [[b take] UTF8String], [b filled]);
+    return 0;
+}

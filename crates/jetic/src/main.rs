@@ -48,6 +48,7 @@ fn scan_generic_instantiations(source: &str) -> Vec<String> {
 /// tables are process-global (`OnceLock`), so a second in-process transpile is
 /// not possible. Link-only flags (-L/-l/-asm/-framework) are not needed by the
 /// transpile step and are deliberately absent.
+#[derive(Clone, Copy)]
 struct TuPass<'a> {
     exe: &'a str,
     include_dirs: &'a [String],
@@ -72,13 +73,13 @@ impl TuPass<'_> {
     /// `capture` swallows the child's stderr on success: used for the main
     /// TU's manifest-only pre-pass, whose diagnostics the in-process transpile
     /// reports anyway.
-    fn run(&self, tu: &str, out_c: &str, out_demands: &str, forced: &[String], capture: bool) -> Vec<String> {
-        let mut cmd: Vec<String> = vec![
-            self.exe.to_string(),
-            "-rewrite-jeti".into(), tu.to_string(),
-            "-o".into(), out_c.to_string(),
-            "--emit-generic-demands".into(), out_demands.to_string(),
-        ];
+    /// Flags every child transpile shares: include paths plus the passes' own
+    /// switches (ARC, checker, EH backend, slots manifest, target/backend).
+    /// Extracted so the template-instantiation pass below cannot drift from the
+    /// per-TU pass — a specialization compiled with different ABI switches than
+    /// its siblings would be a silent layout disagreement.
+    fn common_args(&self) -> Vec<String> {
+        let mut cmd: Vec<String> = Vec::new();
         for d in self.include_dirs {
             cmd.push("-I".into());
             cmd.push(d.clone());
@@ -92,10 +93,6 @@ impl TuPass<'_> {
             cmd.push("--slots".into());
             cmd.push(slots.clone());
         }
-        for inst in forced {
-            cmd.push("--generic-instantiation".into());
-            cmd.push(inst.clone());
-        }
         if let Some(b) = self.backend {
             cmd.push("-backend".into());
             cmd.push(b.clone());
@@ -108,6 +105,21 @@ impl TuPass<'_> {
         if self.nostdinc { cmd.push("-nostdinc".into()); }
         if self.no_comments { cmd.push("-no-comments".into()); }
         if self.verbose { cmd.push("-v".into()); }
+        cmd
+    }
+
+    fn run(&self, tu: &str, out_c: &str, out_demands: &str, forced: &[String], capture: bool) -> Vec<String> {
+        let mut cmd: Vec<String> = vec![
+            self.exe.to_string(),
+            "-rewrite-jeti".into(), tu.to_string(),
+            "-o".into(), out_c.to_string(),
+            "--emit-generic-demands".into(), out_demands.to_string(),
+        ];
+        cmd.extend(self.common_args());
+        for inst in forced {
+            cmd.push("--generic-instantiation".into());
+            cmd.push(inst.clone());
+        }
         if self.verbose {
             eprintln!("[jetic] transpiling TU: {}", tu);
         }
@@ -145,6 +157,40 @@ impl TuPass<'_> {
         fs::read_to_string(out_demands)
             .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
             .unwrap_or_default()
+    }
+
+    /// Compile ONE demanded specialization out of a template source that a
+    /// precompiled library ships (manifest `template` line). `--instantiate-
+    /// only` keeps this TU's metadata weak, so the archive remains the owner of
+    /// the bare class and only the new specialization is contributed here.
+    fn run_template(&self, wrapper: &str, out_c: &str, demand: &str, out_demands: &str) -> bool {
+        let mut cmd: Vec<String> = vec![
+            self.exe.to_string(),
+            "-rewrite-jeti".into(), wrapper.to_string(),
+            "-o".into(), out_c.to_string(),
+            "--generic-instantiation".into(), demand.to_string(),
+            "--emit-generic-demands".into(), out_demands.to_string(),
+            "--instantiate-only".into(),
+        ];
+        cmd.extend(self.common_args());
+        if self.verbose {
+            eprintln!("[jetic] instantiating template specialization: {}", demand);
+        }
+        // The generated C for a specialization is machine-made glue, and the
+        // library it came from is compiled `-w`. Keep its warnings out of the
+        // user's build; a real failure still forwards the child's stderr.
+        match Command::new(&cmd[0]).args(&cmd[1..]).output() {
+            Ok(out) => {
+                if !out.status.success() {
+                    let _ = std::io::stderr().write_all(&out.stderr);
+                }
+                out.status.success()
+            }
+            Err(e) => {
+                eprintln!("error: failed to spawn jetic for {}: {}", wrapper, e);
+                std::process::exit(1);
+            }
+        }
     }
 }
 use clap::{Command as ClapCommand, Arg};
@@ -398,6 +444,249 @@ fn find_libjetifoundation(custom_libs: &[String]) -> Option<String> {
         }
     }
     None
+}
+
+/// A `lib<name>.templates` manifest shipped beside a precompiled archive.
+///
+/// WHY THIS EXISTS
+/// ---------------
+/// A precompiled library carries only the specializations its own TUs demanded
+/// when it was built. A client that spells a NEW one (`Box<MyType *>`) gets no
+/// method body out of the archive: codegen can only emit an empty weak stub, so
+/// the link succeeds and the first dispatch jumps to NULL. The manifest names
+/// the template sources the library was built from, so the driver can compile
+/// just the demanded specialization and link it in — the library keeps shipping
+/// binaries, its templates stay the source of truth.
+///
+/// Format (line-oriented, `#` starts a comment):
+///   root     <dir relative to this manifest, or absolute>
+///   surface  <header imported first, relative to root>
+///   template <Class> <TypeParam...> <source .jeti, relative to root>
+///   defined  <flat>   (metadata symbol the archive already defines)
+struct TemplateManifest {
+    /// Directory every path in this manifest is relative to (already joined).
+    root: std::path::PathBuf,
+    /// Declaration header the library TU was compiled against. Importing the
+    /// same one keeps this specialization's public vtable segment — and so its
+    /// `__sig` — identical to the archive's TUs.
+    surface: String,
+    /// (class name, type parameters, source path relative to `root`).
+    templates: Vec<(String, Vec<String>, String)>,
+    /// Metadata flats the archive already defines; a demand matching one needs
+    /// no instantiation (and would otherwise be a duplicate definition).
+    defined: std::collections::HashSet<String>,
+}
+
+impl TemplateManifest {
+    fn parse(path: &str) -> Option<TemplateManifest> {
+        let text = fs::read_to_string(path).ok()?;
+        let dir = Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let mut root = dir.clone();
+        let mut surface = String::new();
+        let mut templates: Vec<(String, Vec<String>, String)> = Vec::new();
+        let mut defined = std::collections::HashSet::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            let mut it = line.split_whitespace();
+            match it.next() {
+                Some("root") => {
+                    if let Some(p) = it.next() {
+                        let p = Path::new(p);
+                        root = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
+                    }
+                }
+                Some("surface") => { if let Some(p) = it.next() { surface = p.to_string(); } }
+                Some("template") => {
+                    let class = it.next()?.to_string();
+                    let rest: Vec<&str> = it.collect();
+                    // One type parameter and a source path is the minimum a
+                    // usable entry can have (`template Box T Box.jeti`).
+                    if rest.len() < 2 { continue; }
+                    let src = rest[rest.len() - 1].to_string();
+                    let params = rest[..rest.len() - 1].iter().map(|s| s.to_string()).collect();
+                    templates.push((class, params, src));
+                }
+                Some("defined") => { if let Some(f) = it.next() { defined.insert(f.to_string()); } }
+                _ => {}
+            }
+        }
+        // No surface or no template entry: the file cannot drive an
+        // instantiation, so treat it as absent instead of failing a build.
+        if surface.is_empty() || templates.is_empty() { return None; }
+        Some(TemplateManifest { root, surface, templates, defined })
+    }
+
+    fn template_for(&self, base: &str) -> Option<&(String, Vec<String>, String)> {
+        self.templates.iter().find(|(c, _, _)| c == base)
+    }
+}
+
+/// Every template manifest this link can use: an explicit `--template-manifest`
+/// wins, otherwise `lib<name>.templates` next to each archive the link pulls in.
+/// No manifest simply means "the library shipped binaries only" — exactly the
+/// pre-#3 behaviour, no new failure mode.
+fn find_template_manifests(
+    explicit: Option<&String>,
+    lib_dirs: &[String],
+    libs: &[String],
+) -> Vec<TemplateManifest> {
+    if let Some(p) = explicit {
+        return match TemplateManifest::parse(p) {
+            Some(m) => vec![m],
+            None => {
+                eprintln!("error: --template-manifest {} is not a usable template manifest", p);
+                std::process::exit(1);
+            }
+        };
+    }
+    let mut names: Vec<String> = libs.to_vec();
+    // The Foundation archive is auto-linked for declaration-only clients, so
+    // its manifest has to be discovered the same way (by lib name, not by the
+    // user spelling `-ljetifoundation`).
+    names.push("jetifoundation".to_string());
+    names.sort();
+    names.dedup();
+    let mut dirs: Vec<String> = lib_dirs.to_vec();
+    if let Some(fdir) = find_libjetifoundation(lib_dirs) { dirs.push(fdir); }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for d in &dirs {
+        for n in &names {
+            let p = format!("{}/lib{}.templates", d, n);
+            if !seen.insert(p.clone()) { continue; }
+            if let Some(m) = TemplateManifest::parse(&p) { out.push(m); }
+        }
+    }
+    out
+}
+
+/// Is this spelling the erased template itself (`Box<T>`) rather than a
+/// concrete specialization (`Box<MyType *>`)? Same rule codegen applies before
+/// it clones a body, kept here so the driver spawns no useless child.
+fn spelling_is_erased_template(spelling: &str, params: &[String]) -> bool {
+    let Some(lt) = spelling.find('<') else { return true };
+    let Some(gt) = spelling.rfind('>') else { return true };
+    if gt < lt { return true; }
+    let mut depth = 0usize;
+    let mut cur = String::new();
+    let mut args = Vec::new();
+    for ch in spelling[lt + 1..gt].chars() {
+        match ch {
+            '<' => { depth += 1; cur.push(ch); }
+            '>' => { depth -= 1; cur.push(ch); }
+            ',' if depth == 0 => { args.push(std::mem::take(&mut cur)); }
+            _ => cur.push(ch),
+        }
+    }
+    args.push(cur);
+    args.iter().all(|a| {
+        let bare = a.trim().trim_end_matches('*').trim();
+        params.iter().any(|p| p == bare)
+    })
+}
+
+/// The C for a specialization is machine-made glue compiled for a concrete
+/// type argument — the library it came from is built `-w` for exactly that
+/// reason. Keep its diagnostics out of the user's build without silencing the
+/// user's own translation units: the pragma is scoped to this one file and sits
+/// above the inlined headers.
+fn quiet_generated_glue(path: &str) {
+    let Ok(src) = fs::read_to_string(path) else { return };
+    if src.starts_with("/* jetic: generated glue") { return; }
+    let guarded = "/* jetic: generated glue — see instantiate_shipped_templates */\n\
+#if defined(__clang__)\n\
+#pragma clang diagnostic ignored \"-Weverything\"\n\
+#elif defined(__GNUC__)\n\
+#pragma GCC diagnostic ignored \"-Wall\"\n\
+#endif\n";
+    let _ = fs::write(path, format!("{}{}", guarded, src));
+}
+
+/// Compile one specialization per satisfied demand straight out of the shipped
+/// template sources, returning the generated C files for the link step.
+///
+/// Only spelling strings travel between processes; the type substitution stays
+/// inside the compiler, so every specialization still has exactly one
+/// authoritative definition (R2). Transitively demanded specializations are
+/// followed through the child's own demand manifest, the same closure the
+/// multi-TU driver runs for source TUs.
+fn instantiate_shipped_templates(
+    pass: &TuPass,
+    manifests: &[TemplateManifest],
+    demands: &[String],
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut done: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: Vec<String> = demands.iter().filter(|d| !d.trim().is_empty()).cloned().collect();
+    queue.sort();
+    queue.dedup();
+    while let Some(demand) = queue.pop() {
+        if !done.insert(demand.clone()) { continue; }
+        let base = demand.split('<').next().unwrap_or(&demand).trim().to_string();
+        let Some(m) = manifests.iter().find(|m| m.template_for(&base).is_some()) else { continue };
+        let (_, params, rel_src) = m.template_for(&base).unwrap();
+        // `Box<T>` inside the template body is the erased template, not a
+        // specialization of it.
+        if spelling_is_erased_template(&demand, params) { continue; }
+        let flat = jeti_codegen::symbol_flat_name(&demand);
+        // The archive already defines this one: instantiating it again would
+        // collide with the library's own body.
+        if m.defined.contains(&flat) { continue; }
+        let src_path = m.root.join(rel_src);
+        let body = match fs::read_to_string(&src_path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!(
+                    "error: template manifest names {} for {} but it cannot be read: {}",
+                    src_path.display(), base, e
+                );
+                std::process::exit(1);
+            }
+        };
+        // The wrapper mirrors how the library itself was built: the shared
+        // declaration surface first, then the template source. That keeps this
+        // TU's public vtable segment (and `__sig`) identical to the archive's.
+        let tmp = std::env::temp_dir().join(format!(
+            "jetic-inst-{}-{}", std::process::id(), flat
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let wrapper = tmp.join(format!("{}.template.jeti", flat));
+        let out_c = tmp.join(format!("{}.c", flat));
+        let dem = tmp.join(format!("{}.demands", flat));
+        let text = format!(
+            "// generated: specialization of {} out of a shipped template source\n#import <{}>\n{}",
+            base, m.surface, body
+        );
+        if let Err(e) = fs::write(&wrapper, text) {
+            eprintln!("error: cannot write template wrapper {}: {}", wrapper.display(), e);
+            std::process::exit(1);
+        }
+        // Include order matters: the manifest root (its `surface`) first, then
+        // the library's own directory, then whatever the user passed.
+        let mut incs: Vec<String> = vec![m.root.to_string_lossy().to_string()];
+        let inner = m.root.join("Foundation");
+        if inner.is_dir() { incs.push(inner.to_string_lossy().to_string()); }
+        incs.extend(pass.include_dirs.iter().cloned());
+        let tpass = TuPass { include_dirs: &incs, ..*pass };
+        if pass.verbose {
+            eprintln!("[jetic] template pass: {} → {}", demand, out_c.display());
+        }
+        if !tpass.run_template(&wrapper.to_string_lossy(), &out_c.to_string_lossy(), &demand, &dem.to_string_lossy()) {
+            eprintln!("error: cannot instantiate {} from {}", demand, src_path.display());
+            std::process::exit(1);
+        }
+        quiet_generated_glue(&out_c.to_string_lossy());
+        // A cloned body may itself demand further specializations (the same
+        // transitive chain the multi-TU closure follows between processes).
+        if let Ok(ds) = fs::read_to_string(&dem) {
+            for d in ds.lines().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+                if !done.contains(d) { queue.push(d.to_string()); }
+            }
+        }
+        out.push(out_c.to_string_lossy().to_string());
+    }
+    out
 }
 
 /// Extract the target of an `#import <...>` directive, if any.
@@ -1018,6 +1307,13 @@ fn main() {
     let mut slots_manifest: Option<String> = None; // --slots <file> (stable cross-TU vtable layout)
     // Internal multi-TU transport for true-generic specialization demands.
     let mut forced_generic_instantiations: Vec<String> = Vec::new();
+    // `--instantiate-only`: this TU only contributes specializations out of a
+    // template source shipped with a precompiled library, so it must not claim
+    // R2 ownership of the classes it implements (see Pipeline::instantiate_only).
+    let mut instantiate_only = false;
+    // `--template-manifest <file>`: use this manifest instead of discovering
+    // `lib<name>.templates` next to the archives the link pulls in.
+    let mut template_manifest: Option<String> = None;
     // Internal multi-TU transport: where to write this TU's demand manifest
     // (`--emit-generic-demands`). Only the driver inside jetic sets it.
     let mut generic_demands_out: Option<String> = None;
@@ -1196,6 +1492,22 @@ fn main() {
                 Some(v) => { forced_generic_instantiations.push(v); i += adv; }
                 None => {
                     eprintln!("error: --generic-instantiation expects Class<Args>");
+                    std::process::exit(1);
+                }
+            }
+        } else if normalized == "--instantiate-only" {
+            instantiate_only = true;
+            i += 1;
+        } else if normalized == "--template-manifest" {
+            let (val, adv) = if let Some(iv) = inline_val {
+                (Some(iv.to_string()), 1)
+            } else if i + 1 < args.len() {
+                (Some(args[i + 1].clone()), 2)
+            } else { (None, 1) };
+            match val {
+                Some(v) => { template_manifest = Some(v); i += adv; }
+                None => {
+                    eprintln!("error: --template-manifest expects a file path");
                     std::process::exit(1);
                 }
             }
@@ -1446,6 +1758,7 @@ fn main() {
     pipeline.eh_checked = eh_checked;
     pipeline.slots_manifest = slots_manifest.clone();
     pipeline.forced_generic_instantiations = forced_generic_instantiations.clone();
+    pipeline.instantiate_only = instantiate_only;
     if let Some(ref b) = backend {
         match attrs::Backend::parse(b) {
             Some(be) => pipeline.backend = be,
@@ -1508,6 +1821,47 @@ fn main() {
     // input and every extra TU — a mixed binary must not auto-link either.
     let foundation_impl_inlined = tu_imports_foundation_impl(&input_path)
         || extra_inputs.iter().any(|t| tu_imports_foundation_impl(t));
+
+    // ── Specializations a precompiled archive cannot satisfy by itself ──
+    //
+    // An archive ships metadata only for the specializations its own TUs were
+    // built with. A client that spells a NEW one gets codegen's empty weak stub,
+    // which links fine and jumps to NULL on the first dispatch. If the library
+    // also shipped its template sources (`lib<name>.templates`), close the gap
+    // by compiling just those demands — the same Cfront-style manifest closure
+    // the multi-TU path runs between source TUs, one level down.
+    if mode != "rewrite" && !instantiate_only {
+        let manifests = find_template_manifests(template_manifest.as_ref(), &lib_dirs, &libs);
+        if !manifests.is_empty() {
+            let mut demands = forced_generic_instantiations.clone();
+            demands.extend(pipeline.last_generic_demands.iter().cloned());
+            demands.sort();
+            demands.dedup();
+            if !demands.is_empty() {
+                let exe = std::env::current_exe().unwrap_or_else(|e| {
+                    eprintln!("error: cannot locate jetic for the template pass: {}", e);
+                    std::process::exit(1);
+                });
+                let exe = exe.to_string_lossy().to_string();
+                let pass = TuPass {
+                    exe: &exe,
+                    include_dirs: &include_dirs,
+                    no_arc,
+                    no_checker,
+                    werror,
+                    eh_checked,
+                    slots_manifest: slots_manifest.as_ref(),
+                    backend: backend.as_ref(),
+                    arch: arch.as_ref(),
+                    no_libc,
+                    nostdinc,
+                    no_comments,
+                    verbose,
+                };
+                extra_c_files.extend(instantiate_shipped_templates(&pass, &manifests, &demands));
+            }
+        }
+    }
 
     // Plan 阶段 4: write the versioned sidecar source map (.jeti.map) next to
     // the .jeti source. The generated C's location differs per mode:

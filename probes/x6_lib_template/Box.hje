@@ -1,0 +1,12 @@
+#import <Foundation/Foundation.hje>
+
+// Generic class whose IMPLEMENTATION ships only as a precompiled object:
+// clients see declarations, never the body.
+@interface Box<T> : NPObject {
+@public
+    NPObject *_value;
+}
+
+- (T)value;
+- (void)setValue:(T)v;
+@end

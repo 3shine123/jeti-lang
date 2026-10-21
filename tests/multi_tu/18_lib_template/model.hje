@@ -1,0 +1,17 @@
+#import <Foundation/Foundation.jeti>
+
+// A generic container that ships its IMPLEMENTATION only as a precompiled
+// archive (`lib.jeti` → `lib18_lib_template.a`). Clients see this header and
+// link the archive; the template body never enters their link, so a
+// specialization they spell has to be produced from the shipped source.
+@interface Bin<T> : NPObject {
+@public
+    T _item;
+    int _filled;
+}
+
+- (void)put:(T)item;
+- (T)take;
+- (int)filled;
+
+@end

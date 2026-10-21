@@ -1,0 +1,13 @@
+#import "Box.hje"
+
+@implementation Box
+
+- (id)value {
+    return _value;
+}
+
+- (void)setValue:(id)v {
+    _value = v;
+}
+
+@end

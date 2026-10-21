@@ -1,0 +1,11 @@
+#import <Foundation/Foundation.hje>
+#import "Box.hje"
+#include <stdio.h>
+
+int main(void) {
+    Box<NPString *> *b = [[Box<NPString *> alloc] init];
+    NPString *s = [NPString stringWithUTF8String:"hi"];
+    [b setValue:s];
+    printf("boxed=%s\n", [[b value] UTF8String]);
+    return 0;
+}
