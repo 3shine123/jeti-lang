@@ -1423,6 +1423,15 @@ defined  NPArray_NPString_ptr  # metadata the archive already defines
 
 Without a manifest nothing changes: the archive's fixed specialization set is all a client can use. With one, `NPMutableArray<MyType *>` works even though the implementation never entered the client's link. Semantics stay C++-like (concrete type checked and compiled) while the library still ships binaries.
 
+A precompiled archive also freezes its **selector→slot assignment**. `struct jeti_vtable` is one uniform layout per translation unit, so a client whose own headers add a selector would otherwise shift a library class's slot indices and abort at startup (`vtable layout mismatch across translation units`). To make that boundary as carefree as Objective-C, `tools/build-foundation-lib.sh` compiles every Foundation TU with `--slots` and ships `libjetifoundation.slots` beside the archive. `jetic` discovers `lib<name>.slots` next to any archive the link pulls in, inherits it **read-only** as this build's layout prefix, and appends the client's own selectors after it — no flag, and no ordering rules in user code. Build your own libraries the same way:
+
+```bash
+# freeze a library's layout, so clients can add classes of their own
+jetic -rewrite-jeti mylib.jeti --slots <copy of libjetifoundation.slots> -o mylib.c
+```
+
+The manifest is consulted only when you passed no `--slots` of your own, and it is never written back: the installed file belongs to the library. A client that adds a selector *and* links an archive built with no manifest at all still aborts at startup — that is R3 reporting a real layout disagreement, not a false alarm.
+
 This is the intended trade-off: Jeti matches Objective-C's call-site style, while its semantics are closer to C++ templates—concrete types are checked and compiled into separate code, and unused specializations do not exist.
 
 ```jeti

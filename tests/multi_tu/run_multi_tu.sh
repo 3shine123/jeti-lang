@@ -101,7 +101,17 @@ run_case() {
     if [[ -f "$dir/BUILD_LIB" ]]; then
         native=1
         local lib_log="$out/$name.lib.log"
-        if ! "$JETIC" -rewrite-jeti "$dir/lib.jeti" -o "$out/lib.c" -I "$dir" "${INCS[@]}" > "$lib_log" 2>&1 \
+        # PIN_SLOTS marker: build the archive against its own pinned slot layout
+        # and ship the manifest beside it (`lib<case>.slots`). A client that
+        # imports headers of its OWN then inherits that frozen prefix: its extra
+        # selectors are appended after the library's instead of shifting them,
+        # which is what keeps R3 quiet across a precompiled boundary. No
+        # `--slots` on the client side — discovery is the feature under test.
+        local lib_slots=()
+        if [[ -f "$dir/PIN_SLOTS" ]]; then
+            lib_slots=(--slots "$out/lib$name.slots")
+        fi
+        if ! "$JETIC" -rewrite-jeti "$dir/lib.jeti" -o "$out/lib.c" -I "$dir" "${INCS[@]}" ${lib_slots[@]+"${lib_slots[@]}"} > "$lib_log" 2>&1 \
            || ! clang -std=c99 -fblocks -w -c "${INCS[@]}" "$out/lib.c" -o "$out/lib.o" >> "$lib_log" 2>&1 \
            || ! ar rcs "$out/lib$name.a" "$out/lib.o" >> "$lib_log" 2>&1; then
             echo "FAIL  $name (library archive build)"

@@ -1,0 +1,6 @@
+# Shipped beside libBox.a: Box's implementation is precompiled, so a client
+# that spells Box<NPString *> can only be served from the template SOURCE.
+# Format: crates/jetic/src/main.rs (TemplateManifest).
+root .
+surface Box.hje
+template Box T Box.jeti

@@ -1,0 +1,2 @@
+# Marker for run_multi_tu.sh: `lib.jeti` ships as a PRECOMPILED archive
+# instead of a source TU, and the client links it.

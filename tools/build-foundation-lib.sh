@@ -88,6 +88,14 @@ tus="$outdir/_tus"
 rm -rf "$tus"   # stale wrappers from an interrupted earlier run must not survive
 mkdir -p "$tus"
 rm -f "$outdir"/*.o   # stale objects from an earlier run must not linger into [3/4]
+# Pinned slot layout shipped beside the archive (`libjetifoundation.slots`).
+# A client that imports its OWN headers still sees the same selector→slot
+# assignment for every Foundation selector, so adding a class cannot shift a
+# Foundation class's indices and trip the R3 layout check at startup. Rebuilt
+# from scratch each run: the manifest is append-only, and a stale one would
+# freeze slot order from a header set that no longer exists.
+slots="$outdir/libjetifoundation.slots"
+rm -f "$slots"
 for gm in include/Foundation/*.jeti; do
     name="$(basename "$gm" .jeti)"
     # Skip the self-contained umbrella (Foundation.jeti): it is not a class —
@@ -101,7 +109,7 @@ for gm in include/Foundation/*.jeti; do
     { echo '#import <Foundation/Foundation.hje>'; cat "$gm"; } > "$wrap"
     c="$outdir/$name.c"
     o="$outdir/$name.o"
-    "$jetic" -rewrite-jeti "$wrap" -o "$c" -I include -I include/Foundation
+    "$jetic" -rewrite-jeti "$wrap" -o "$c" -I include -I include/Foundation --slots "$slots"
     clang -c -w "$c" -o "$o" -I include
     objs+=("$o")
     echo "  $name"

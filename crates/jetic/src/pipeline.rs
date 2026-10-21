@@ -78,6 +78,12 @@ pub struct Pipeline {
     /// `--slots <manifest>`: append-only vtable slot manifest for stable
     /// cross-TU layout (None = historical sorted layout).
     pub slots_manifest: Option<String>,
+    /// Read-only layout base handed down by a shipped library
+    /// (`lib<name>.slots` beside `lib<name>.a`). When the user did not pass
+    /// `--slots`, this TU's selector→slot assignment must start from the
+    /// library's frozen prefix; new selectors are appended after it. Never
+    /// written back — the installed file belongs to the library.
+    pub slots_seed: Option<String>,
     /// Specializations requested by sibling TUs in a multi-input build.
     /// Spelling is `Class<Arg, ...>`; codegen turns each into a real
     /// monomorphized class in every TU that has the generic implementation.
@@ -142,6 +148,7 @@ impl Pipeline {
             no_comments: false,
             eh_checked: DEFAULT_EH_CHECKED,
             slots_manifest: None,
+            slots_seed: None,
             forced_generic_instantiations: Vec::new(),
             instantiate_only: false,
             c_cc: Vec::new(),
@@ -679,7 +686,10 @@ impl Pipeline {
         if self.verbose { eprintln!("[jetic] generating C code..."); }
         // Slots manifest: read the assigned method order (if the file exists)
         // BEFORE codegen, and write the post-compile assignment back after.
-        let slots: Option<Vec<String>> = self.slots_manifest.as_ref().and_then(|path| {
+        // A shipped library's layout base (`slots_seed`) is read-only and only
+        // consulted when the user passed no `--slots` of their own.
+        let slots_base = self.slots_manifest.as_ref().or(self.slots_seed.as_ref());
+        let slots: Option<Vec<String>> = slots_base.and_then(|path| {
             fs::read_to_string(path).ok().map(|content| {
                 content.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
             })

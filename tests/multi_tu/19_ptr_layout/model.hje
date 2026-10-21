@@ -1,0 +1,13 @@
+#import <Foundation/Foundation.jeti>
+
+// A plain (non-generic) class whose IMPLEMENTATION ships only as a precompiled
+// archive. Clients see this header and link the archive.
+@interface Greeter : NPObject {
+@public
+    int _n;
+}
+
+- (void)greet;
+- (int)count;
+
+@end

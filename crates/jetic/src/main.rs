@@ -57,6 +57,7 @@ struct TuPass<'a> {
     werror: bool,
     eh_checked: bool,
     slots_manifest: Option<&'a String>,
+    slots_seed: Option<&'a String>,
     backend: Option<&'a String>,
     arch: Option<&'a String>,
     no_libc: bool,
@@ -92,6 +93,13 @@ impl TuPass<'_> {
         if let Some(slots) = self.slots_manifest {
             cmd.push("--slots".into());
             cmd.push(slots.clone());
+        }
+        // A child TU (sibling or template instantiation) must lay its vtable
+        // out on the same frozen prefix as its siblings, or the two would
+        // disagree exactly like mismatched headers do.
+        if let Some(seed) = self.slots_seed {
+            cmd.push("--slots-seed".into());
+            cmd.push(seed.clone());
         }
         if let Some(b) = self.backend {
             cmd.push("-backend".into());
@@ -561,9 +569,30 @@ fn find_template_manifests(
     out
 }
 
-/// Is this spelling the erased template itself (`Box<T>`) rather than a
-/// concrete specialization (`Box<MyType *>`)? Same rule codegen applies before
-/// it clones a body, kept here so the driver spawns no useless child.
+/// Layout base shipped beside an archive (`lib<name>.slots`). A library that
+/// pins its slot assignment freezes a prefix every client TU must reproduce:
+/// without it, a client whose own imports add ANY selector can shift a library
+/// class's slot indices and trip R3 at startup. Only consulted when the user
+/// passed no `--slots`; never written back (the file belongs to the library).
+fn find_slots_seed(lib_dirs: &[String], libs: &[String]) -> Option<String> {
+    let mut names: Vec<String> = libs.to_vec();
+    // Same reasoning as find_template_manifests: the Foundation archive is
+    // auto-linked by name, so it is never spelled `-ljetifoundation`.
+    names.push("jetifoundation".to_string());
+    names.sort();
+    names.dedup();
+    let mut dirs: Vec<String> = lib_dirs.to_vec();
+    if let Some(fdir) = find_libjetifoundation(lib_dirs) { dirs.push(fdir); }
+    for d in &dirs {
+        for n in &names {
+            let p = format!("{}/lib{}.slots", d, n);
+            if std::path::Path::new(&p).is_file() { return Some(p); }
+        }
+    }
+    None
+}
+
+
 fn spelling_is_erased_template(spelling: &str, params: &[String]) -> bool {
     let Some(lt) = spelling.find('<') else { return true };
     let Some(gt) = spelling.rfind('>') else { return true };
@@ -1305,6 +1334,9 @@ fn main() {
     // legacy` / `-eh sjlj` select the old setjmp/longjmp backend for rollback.
     let mut eh_checked = DEFAULT_EH_CHECKED;
     let mut slots_manifest: Option<String> = None; // --slots <file> (stable cross-TU vtable layout)
+    // --slots-seed <file> (internal): a library's read-only layout base,
+    // discovered from `lib<name>.slots` and forwarded to every child TU.
+    let mut slots_seed: Option<String> = None;
     // Internal multi-TU transport for true-generic specialization demands.
     let mut forced_generic_instantiations: Vec<String> = Vec::new();
     // `--instantiate-only`: this TU only contributes specializations out of a
@@ -1388,6 +1420,13 @@ fn main() {
                     .or_else(|| if j + 1 < pos { Some(args[j + 1].clone()) } else { None });
                 if slots_manifest.is_none() {
                     eprintln!("error: --slots expects a manifest file path");
+                    std::process::exit(1);
+                }
+            } else if nj == "--slots-seed" {
+                slots_seed = inline_val.map(|s| s.to_string())
+                    .or_else(|| if j + 1 < pos { Some(args[j + 1].clone()) } else { None });
+                if slots_seed.is_none() {
+                    eprintln!("error: --slots-seed expects a manifest file path");
                     std::process::exit(1);
                 }
             } else if nj == "--generic-instantiation" {
@@ -1479,6 +1518,21 @@ fn main() {
                 Some(v) => { slots_manifest = Some(v); i += adv; }
                 None => {
                     eprintln!("error: --slots expects a manifest file path");
+                    std::process::exit(1);
+                }
+            }
+        } else if normalized == "--slots-seed" {
+            let (val, adv) = if let Some(iv) = inline_val {
+                (Some(iv.to_string()), 1)
+            } else if i + 1 < args.len() {
+                (Some(args[i + 1].clone()), 2)
+            } else {
+                (None, 1)
+            };
+            match val {
+                Some(v) => { slots_seed = Some(v); i += adv; }
+                None => {
+                    eprintln!("error: --slots-seed expects a manifest file path");
                     std::process::exit(1);
                 }
             }
@@ -1667,6 +1721,15 @@ fn main() {
     // template IT owns — so it runs as a child as well; its own C output is
     // still produced by the in-process transpile below (the child pass only
     // contributes its manifest).
+    // A precompiled library may ship its pinned slot assignment beside the
+    // archive (`lib<name>.slots`). Freeze this build onto that prefix unless the
+    // user chose a manifest explicitly — otherwise the client's own imports can
+    // shift a library class's slot indices and R3 aborts at startup. Discovered
+    // before any child TU is spawned so siblings and template instantiations
+    // inherit the identical base.
+    if slots_seed.is_none() && slots_manifest.is_none() {
+        slots_seed = find_slots_seed(&lib_dirs, &libs);
+    }
     let mut extra_c_files: Vec<String> = Vec::new();
     if !extra_inputs.is_empty() {
         let exe = std::env::current_exe().unwrap_or_else(|e| {
@@ -1682,6 +1745,7 @@ fn main() {
             werror,
             eh_checked,
             slots_manifest: slots_manifest.as_ref(),
+            slots_seed: slots_seed.as_ref(),
             backend: backend.as_ref(),
             arch: arch.as_ref(),
             no_libc,
@@ -1757,6 +1821,7 @@ fn main() {
     pipeline.trace_color = !trace_no_color;
     pipeline.eh_checked = eh_checked;
     pipeline.slots_manifest = slots_manifest.clone();
+    pipeline.slots_seed = slots_seed.clone();
     pipeline.forced_generic_instantiations = forced_generic_instantiations.clone();
     pipeline.instantiate_only = instantiate_only;
     if let Some(ref b) = backend {
@@ -1851,6 +1916,7 @@ fn main() {
                     werror,
                     eh_checked,
                     slots_manifest: slots_manifest.as_ref(),
+                    slots_seed: slots_seed.as_ref(),
                     backend: backend.as_ref(),
                     arch: arch.as_ref(),
                     no_libc,

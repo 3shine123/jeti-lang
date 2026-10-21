@@ -1,0 +1,14 @@
+# Marker for run_multi_tu.sh: the archive is built with `--slots` and ships
+# `lib<case>.slots` beside itself, freezing its selector→slot assignment.
+#
+# What this pins: the archive's OWN selector order. A client inherits that
+# manifest as a read-only prefix (no `--slots` flag anywhere in this case), so
+# the library class's slots cannot depend on the client's import order or on how
+# many selectors the client's own classes bring.
+#
+# Honest scope: this case does NOT fail without the marker, because the
+# Foundation archive's shipped `libjetifoundation.slots` already pins the shared
+# prefix both TUs build on — the client's extra selector then lands after the
+# library's own. The abort that a truly unpinned client produces is covered by
+# 10_slots_manifest (library method the client never sees) and by
+# probes/x6_lib_template (precompiled Foundation + client class, no seed at all).

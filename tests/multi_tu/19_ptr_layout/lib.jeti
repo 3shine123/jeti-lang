@@ -1,0 +1,17 @@
+#import "model.hje"
+#include <stdio.h>
+
+// Compiled once into `lib19_ptr_layout.a` with `--slots`, so this TU's
+// selector→slot assignment is pinned and shipped as `lib19_ptr_layout.slots`.
+@implementation Greeter
+
+- (void)greet {
+    _n = 7;
+    printf("greeter=%d\n", _n);
+}
+
+- (int)count {
+    return _n;
+}
+
+@end

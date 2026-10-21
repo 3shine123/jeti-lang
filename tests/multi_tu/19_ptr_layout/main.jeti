@@ -1,0 +1,28 @@
+// `mine.hje` is imported FIRST on purpose. Layout = the pinned base followed by
+// the selectors only this TU knows, in the order it met them — so an unpinned
+// client would place `aaaLocalMark` ahead of the library's `greet` and shift
+// every following slot by one. `lib19_ptr_layout.slots` is discovered from the
+// archive's directory and inherited automatically, which drops both selectors
+// AFTER the frozen prefix: `greet` keeps the index the archive compiled it at.
+// Nothing here mentions slot layout, and that is the point.
+#import "mine.hje"
+#import "model.hje"
+#include <stdio.h>
+
+// The client: declarations + a precompiled archive + a class of its own.
+@implementation Local
+
+- (int)aaaLocalMark {
+    _v = 42;
+    return _v;
+}
+
+@end
+
+int main(void) {
+    Local *l = [[Local alloc] init];
+    Greeter *g = [[Greeter alloc] init];
+    [g greet];
+    printf("local=%d count=%d\n", [l aaaLocalMark], [g count]);
+    return 0;
+}

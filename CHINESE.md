@@ -1314,7 +1314,7 @@ int main(void) {
 }
 ```
 
-用一次命令把两个 TU 放进同一个构建：`jetic main.jeti lib.jeti -I . -o app`。泛型实现必须随输入源码或模块一起提供；只有 `.hje` 声明而没有实现体时，编译器无法凭空生成方法。预编译库可以携带一组已经生成的特化，但不能为发布后才出现、且库中没有实现模板的新参数类型发明方法体。若两个 TU 同时提供同一个特化，仍按 owner/strong-metadata 规则在链接期报重复定义，避免悄悄选出不一致的 ABI。
+用一次命令把两个 TU 放进同一个构建：`jetic main.jeti lib.jeti -I . -o app`。泛型实现必须随输入源码或模块一起提供；只有 `.hje` 声明而没有实现体时，编译器无法凭空生成方法。预编译库默认只带构建时自己用到的特化；但库可以把模板源码随包分发（`.a` 旁的 `lib<name>.templates`），此时发布之后才出现的新参数类型也能由驱动按需编译出一份特化再一起链接——库照旧只分发二进制（见「预编译 Foundation 库 · 预编译库的 ABI」）。若两个 TU 同时提供同一个特化，仍按 owner/strong-metadata 规则在链接期报重复定义，避免悄悄选出不一致的 ABI。
 
 这就是 Jeti 的取舍：调用语法接近 Objective-C，泛型语义和代码生成更接近 C++ 模板；类型参数是真实类型，特化按使用生成，未使用的特化不会进入最终程序。
 
@@ -1505,6 +1505,54 @@ jetic app.jeti -o app
 - **自动链接**——jetic 找得到 `libjetifoundation.a`（二进制旁、`target/foundation`、`/opt/jeti/lib`、`/usr/local/lib/jeti` 或你的 `-L` 目录）就自动链。只对**纯声明客户端**生效：内联了 Foundation 实现（`Foundation.jeti`——直接或经导入的 `.hje` 传递）的 TU 会跳过，自包含程序与多 TU 构建永远见不到库的强 vtable。`-ffreestanding`、shared 模式、显式 `-ljetifoundation` 都会抑制自动链接。
 - **`jeti_metaInit()`** 只对通过 `#import "*.jeti"` 获取实现的伞形构建（单 TU 构建、无任何 TU 持有元数据）**真正必需**。用预编译库——以及所有常规 `jetic` 工作流——元数据在加载期静态初始化，该调用是幂等空操作。
 - 客户端重实现库类，对归档而言是标准 C 覆盖语义（库成员未被引用就保持休眠）——但未实现方法的槽位是 NULL，所以派发到的方法必须全部自己实现。
+
+#### 预编译库的 ABI：模板清单与冻结槽位
+
+归档是**编译产物**，客户端却可能在库发布很久之后才写代码。有两件事库必须随包交代清楚，否则就是"链接成功、运行期出错"。
+
+**一、模板清单（`lib<name>.templates`）——库如何满足一个它构建时没见过的特化。**
+
+归档里只有它自己 TU 当时 demand 的特化。`tools/build-foundation-lib.sh` 因此在 `libjetifoundation.a` 旁写出 `libjetifoundation.templates`（当前 7 个模板类），格式是四类行：
+
+```text
+root    ../../include               # include 根，相对本文件
+surface Foundation/Foundation.hje   # 库编译时用的声明伞头
+template NPArray T Foundation/NPArray.jeti
+defined  NPArray_NPString_ptr       # 可选：归档已经定义过的扁平特化名
+```
+
+前三类是必需的；`defined` 行只在该归档恰好包含某个特化时才写出（Foundation 归档当前不含特化，所以这份清单只有 `root`/`surface`/`template` 三类行）。
+
+`jetic` 在链接前读取每个被拉入归档旁边的 `lib<name>.templates`；对"归档没有 `defined`、而客户端确实 demand 了"的特化，用随包源码以 `--instantiate-only --generic-instantiation "<拼写>"` 只编译那一份并一起链接。两条纪律：
+
+- **裸类弱、特化强**——特化必须由这次实例化发射为强符号，否则只 import `.hje` 的客户端会为同一特化发一个空弱桩，弱合并可能选中它，槽位留 NULL（实测 rc=139）。
+- **模板 TU 用与库相同的 `surface` 编译**，公共段与 `__sig` 因此与归档一致；否则先撞 R3 而不是链接成功。
+
+没有清单时行为不变：归档里固定的那组特化就是客户端能用的全部。清单只被读，永不被改写；拼写跨进程只以字符串传递，子进程派生出的新 demand 走 worklist 闭包继续解析。
+
+**二、冻结槽位（`lib<name>.slots`）——库如何容忍客户端自带类。**
+
+`struct jeti_vtable` 是**每个 TU 一份统一布局**：所有类的槽位偏移在同一个 TU 内一致，selector 的先后顺序来自该 TU 见到的声明集合。归档把顺序固定在自己的构建里，而客户端的头文件会插入新 selector——于是库类的槽位被推后，启动校验当场 abort：
+
+```text
+jeti: fatal: vtable layout mismatch across translation units.
+```
+
+这正是 R3 在报告真实的布局分歧。解决方式是把库的 selector→槽位分配也随包冻结：`tools/build-foundation-lib.sh` 用 `--slots` 编译每个 Foundation TU，并在 `.a` 旁产出 `libjetifoundation.slots`（当前 135 条 selector，每次重建、不留陈旧顺序）。驱动在 `-L`／自动链接目录发现 `lib<name>.slots` 后，把它作为本次构建的**只读种子**（`--slots-seed`）注入主 TU 与所有子 TU（兄弟 TU、模板实例子进程）——客户端零旗标，用户代码里也没有任何顺序规则：
+
+```bash
+# 冻结你自己库的布局，让客户端能自带类
+jetic -rewrite-jeti mylib.jeti --slots <libjetifoundation.slots 的副本> -o mylib.c
+```
+
+语义要点：
+
+- 种子是**冻结前缀**，客户端新增的 selector 一律追加在其后；`__sig` 只覆盖"清单 ∩ 本 TU 公共段"，所以追加的尾部 selector 不制造误报。
+- 回写只发生在你自己传 `--slots` 的路径（清单是 append-only 原地更新）；安装位的 `.slots` 属于库，`slots_seed` 只读、永不写回。
+- 只在你没有自备 `--slots` 时才会参考归档清单。
+- 边界要说清：归档**完全没有**清单、客户端又确实新增了 selector 时仍会启动 abort——这是 R3 的正常工作，不是误报。`tests/multi_tu/19_ptr_layout/` 的反向对照（抽掉 `PIN_SLOTS`）依然通过，因为客户端新增的 selector 总是追加在库 selector 之后、而共享前缀已被归档钉住；真正无种子的 abort 由 `tests/multi_tu/10_slots_manifest/` 与 `probes/x6_lib_template/` 守护（抽掉 `.slots` → rc=134，补回 → `boxed=hi`）。
+
+这套代价来自"静态派发 + 每 TU 统一布局"本身：C++ 的每类独立 vtable 没有这个放大效应，ObjC 靠运行期按名查表绕开。Jeti 选择保持静态派发，于是把一致性要求显式化成随包清单——**冻结 ABI 是分发预编译库的前提**，不是实现缺陷。仍然存在的 R3 边界：客户端只 import `.hje` 却往公开段新增类方法（而不是新增类），段差异照旧会 abort。
 
 ### Hello World
 

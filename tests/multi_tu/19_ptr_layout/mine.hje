@@ -1,0 +1,16 @@
+#import <Foundation/Foundation.jeti>
+
+// The client's OWN class — declared and implemented entirely on the client
+// side. The selector name is deliberately chosen: `aaaLocalMark` sorts BEFORE
+// the library's `count`/`greet`, so an unpinned client would insert it ahead of
+// them and shift the library class's slot indices. That is the exact failure the
+// archive's shipped `lib19_ptr_layout.slots` prevents: the manifest is a frozen
+// prefix, and this client-only selector lands after it instead of inside it.
+@interface Local : NPObject {
+@public
+    int _v;
+}
+
+- (int)aaaLocalMark;
+
+@end
