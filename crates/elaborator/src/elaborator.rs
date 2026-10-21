@@ -255,7 +255,15 @@ impl Elaborator {
                                 // monomorphized clone by it. `name` stays the
                                 // bare base: the checker's substitution and
                                 // every consumer reading `.name` pair it with
-                                // `.type_args` themselves.
+                                // `.type_args` themselves. A param-keyed
+                                // spelling (`ChainArray<T>` inside ChainBox's
+                                // body) bakes the parameter names into the
+                                // marker flat (`ChainArray_T`) — the closure
+                                // cloner's rewrite anchor: template bodies
+                                // dispatch through it (forwarders delegate to
+                                // the base), clones rewrite it to the real
+                                // specialization.
+                                let _ = &cls;
                                 at.class_ref = Some(format!("{}{}", cls.name.clone(), args_suffix));
                             }
                         }

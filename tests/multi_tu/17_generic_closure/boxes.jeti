@@ -1,0 +1,16 @@
+#import "model.hje"
+
+/* Owner of ChainBox<T>. The body names the inner template param-keyed
+ * (`ChainArray<T>`), which is what derives the `ChainArray<int *>` demand once
+ * this TU clones `ChainBox<int *>`. */
+@implementation ChainBox : NPObject
+- (void)put:(T)v {
+    if (!_inner) {
+        _inner = [[ChainArray<T> alloc] init];
+    }
+    [_inner set:v];
+}
+- (T)roundtrip {
+    return [_inner get];
+}
+@end

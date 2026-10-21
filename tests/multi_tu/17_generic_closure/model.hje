@@ -1,0 +1,33 @@
+#import <Foundation/Foundation.jeti>
+
+/* Cross-TU generic CLOSURE — the point of this case.
+ *
+ * Two templates live in two DIFFERENT translation units:
+ *   arrays.jeti owns ChainArray<T>
+ *   boxes.jeti  owns ChainBox<T>   (whose body names ChainArray<T>)
+ *
+ * main.jeti only ever spells `ChainBox<int *>`. `ChainArray<int *>` appears in
+ * NO source file: it is *derived* while boxes.jeti clones ChainBox<int *> and
+ * sees the param-keyed inner use `ChainArray<T>`. arrays.jeti — the TU that
+ * owns the inner template and must emit it — cannot see that spelling at all.
+ *
+ * The driver closes it by having each TU publish what it demanded
+ * (`--emit-generic-demands`) and feeding the union back as
+ * `--generic-instantiation` until the set stops growing. Without that loop the
+ * clone in boxes.jeti dispatches `ChainArray_int_ptr_set_`, which nobody emits,
+ * and the link fails. */
+@interface ChainArray<T> : NPObject {
+    @public
+    T _slot;
+}
+- (void)set:(T)v;
+- (T)get;
+@end
+
+@interface ChainBox<T> : NPObject {
+    @public
+    ChainArray<T> *_inner;
+}
+- (void)put:(T)v;
+- (T)roundtrip;
+@end

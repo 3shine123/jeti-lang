@@ -178,6 +178,71 @@ fn vtable_layout_sig(method_names: &[String]) -> u64 {
     h
 }
 
+/// FNV-1a over an arbitrary signature text — same function and offsets as
+/// [`vtable_layout_sig`], kept separate because that one hashes a method list.
+fn text_layout_sig(text: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in text.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Canonical text for one class's ivar section — the payload of the cross-TU
+/// `__layout_sig` check (R4, the layout twin of R3's `__sig`).
+///
+/// A `.hje` and the TU that owns the class must agree on the ivar section: the
+/// emitted `struct <Class>` is a flat C struct with every ancestor's ivars
+/// inlined in declaration order, so a stale header silently reinterprets every
+/// field past the divergence and the bug surfaces as garbage reads instead of a
+/// diagnostic. Both sides are spelled here in source order — superclass name
+/// first, then each `(type, name)` pair — which is exactly what the struct
+/// emitter consumes, and the per-class fingerprint travels in that class's
+/// vtable instance (see the `__layout_sig` member), so the two TUs compare only
+/// head-to-head instead of over a global class set.
+///
+/// Listing the class's OWN ivars is enough: an ancestor's ivars are compared
+/// through the ancestor's own entry, and a class visible in two TUs can only
+/// name a superclass that both of them import. A class that no other TU
+/// links (a header-only data class, a TU-local helper) has nothing to compare
+/// against and therefore cannot produce a false alarm.
+fn class_layout_text(cm: &CgClassMeta) -> String {
+    let mut s = String::new();
+    s.push_str(&name_flat(&cm.class_name));
+    match cm.super_name {
+        Some(ref sup) => {
+            s.push_str(" < ");
+            s.push_str(&name_flat(sup));
+        }
+        None => s.push_str(" < (root)"),
+    }
+    for (ty, name) in cm.ivar_types.iter().zip(cm.ivar_names.iter()) {
+        s.push_str(" | ");
+        s.push_str(ty);
+        s.push(' ');
+        s.push_str(name);
+    }
+    s
+}
+
+/// C string literal for a generated diagnostic payload (quotes and backslashes
+/// are the only characters a class/type spelling can plausibly carry).
+fn c_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// R3: the `__sig` fingerprint must cover only the segment that has to agree
 /// across TUs — the public segment (R1 keeps its slot indices identical
 /// everywhere and R2 keeps private dispatch local to the owning TU). A
@@ -704,6 +769,15 @@ pub struct CgUnit {
     /// docs/plans/categories_protocol_plan.md) so `conformsToProtocol:` can answer
     /// from metadata. Owner-only emission (strong) follows the R2 rule.
     pub protocols: Vec<(String, Vec<String>, Vec<String>, Vec<String>)>,
+    /// Every generic specialization this unit asked for, as a rendered
+    /// `Base<Args>` spelling — the manifest a multi-TU driver feeds back as
+    /// `--generic-instantiation`. It holds the **derived** demands too: cloning
+    /// `ChainBox<NPString *>` discovers `ChainArray<T>` inside its body and
+    /// demands `ChainArray<NPString *>`, which may be owned by a sibling TU.
+    /// Driving these to a fixed point across TUs is what closes the transitive
+    /// instantiation chain in multi-TU builds (Cfront-style manifest
+    /// iteration); single-TU builds close it inside the worklist below.
+    pub generic_demands: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1006,6 +1080,107 @@ fn split_trailing_ptrs(base: &str) -> (String, usize) {
 // Mangle a single generic type argument like `QuantumToken *` → `QuantumToken_ptr`.
 // Handles nested generics: `Box<Node*>` → `Box_Node_ptr`,
 // `Box<Box<Node*>>` → `Box_Box_Node_ptr_ptr`.
+/// Are every type argument in the spelling `Base<a1, a2>` one of the
+/// template's declared type parameters? Param-keyed spellings (`ChainArray<T>`
+/// inside ChainBox's body) are the erased template itself, not an
+/// instantiation. Bare identifiers only: a concrete specialization
+/// (`Box<NPString *>`, `Box<Array<int> *>`) never matches.
+fn spelling_args_are_template_params(name: &str, params: &[String]) -> bool {
+    let Some(lt) = name.find('<') else { return false };
+    let Some(gt) = name.rfind('>') else { return false };
+    if gt < lt { return false; }
+    let args_str = &name[lt + 1..gt];
+    let mut depth = 0usize;
+    let mut cur = String::new();
+    let mut saw_any = false;
+    let check = |arg: &str| -> bool {
+        let a = arg.trim().trim_end_matches('*').trim();
+        !a.is_empty() && params.iter().any(|p| p == a)
+    };
+    for ch in args_str.chars() {
+        match ch {
+            '<' => { depth += 1; cur.push(ch); }
+            '>' => { if depth == 0 { return false; } depth -= 1; cur.push(ch); }
+            ',' if depth == 0 => {
+                saw_any = true;
+                if !check(&cur) { return false; }
+                cur.clear();
+            }
+            _ => cur.push(ch),
+        }
+    }
+    // Last (or only) argument — a single-arg spelling never sees a comma.
+    check(&cur)
+}
+
+/// AstType-level twin of [`spelling_args_are_template_params`]: the collector
+/// carries structured args (`TypePrim::Param`, or `Named("T")` from the raw
+/// spelling parse), whose RENDERED form (`NPObject * /*T*/`) can never match
+/// a parameter name textually — decide on the semantics instead.
+fn ast_args_are_template_params(args: &[AstType], params: &[String]) -> bool {
+    if args.is_empty() { return false; }
+    let name_matches = |n: &str| params.iter().any(|p| p == n);
+    args.iter().all(|a| {
+        if (a.prim == TypePrim::Param || a.prim == TypePrim::Named)
+            && a.name.as_deref().map(&name_matches).unwrap_or(false)
+        {
+            return true;
+        }
+        if let Some(ref s) = a.subtype {
+            if s.prim == TypePrim::Param && s.name.as_deref().map(&name_matches).unwrap_or(false) {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+/// R2 ownership for a class spelling, cloning included.
+///
+/// `owned_classes` holds the names the TU's MAIN file implements
+/// (`@implementation ChainBox`), so a clone spelled `ChainBox<int *>` is never
+/// in it — yet its metadata has exactly one authoritative home: the TU that
+/// owns the template. Falling back to the base name makes the owner emit strong
+/// clone metadata, which is what keeps the weak copies in client TUs from
+/// winning the linker merge (a client's vtable slots are NULL — that dispatch
+/// ends at address 0).
+fn class_is_owned(unit: &CgUnit, class_name: &str) -> bool {
+    unit.owned_classes.contains(class_name)
+        || class_name
+            .split('<')
+            .next()
+            .map_or(false, |base| base != class_name && unit.owned_classes.contains(base))
+}
+
+
+/// Render a type argument the way the elaborator bakes it into class_ref
+/// spellings (`ast_type_render_args` twin): a type parameter renders as its
+/// bare name (`T`), a pointer gains ` *`, nested generics recurse. The
+/// closure machinery keys marker flats on this — the collection side and
+/// the clone-time rewrite must produce IDENTICAL spellings.
+fn ast_type_to_argname(t: &AstType) -> String {
+    let base = t.name.clone().unwrap_or_else(|| match t.prim {
+        TypePrim::Void => "void".into(),
+        TypePrim::Char => "char".into(),
+        TypePrim::Int => "int".into(),
+        TypePrim::Long => "long".into(),
+        TypePrim::LongLong => "long long".into(),
+        TypePrim::Float => "float".into(),
+        TypePrim::Double => "double".into(),
+        TypePrim::Bool => "BOOL".into(),
+        TypePrim::Unsigned => "unsigned".into(),
+        _ => "id".into(),
+    });
+    let inner_args = if t.type_args.is_empty() {
+        String::new()
+    } else {
+        let rendered = t.type_args.iter().map(ast_type_to_argname).collect::<Vec<_>>().join(", ");
+        format!("<{}>", rendered)
+    };
+    let stars = if t.is_pointer { " *" } else { "" };
+    format!("{}{}{}", base, inner_args, stars)
+}
+
 fn mangle_one_arg(arg: &str) -> String {
     let trimmed = arg.trim();
     let mut s = String::new();
@@ -1299,7 +1474,11 @@ pub fn ast_type_to_c_str(t: &AstType) -> String {
                     .any(|a| a.prim == TypePrim::Param
                         || a.subtype.as_ref().map(|s| s.prim == TypePrim::Param).unwrap_or(false));
                 let flat = if t.type_args.is_empty() || contains_param_arg {
-                    name_flat(type_name)
+                    // `type_name` may be the class_ref spelling with the args
+                    // baked in (`ChainArray<T>`); a Param argument means the
+                    // ERASED template — mangle the base only, never the
+                    // parameter name (`ChainArray_T` fabricates a symbol).
+                    name_flat(type_name.split('<').next().unwrap_or(type_name))
                 } else {
                     let args_str = t.type_args.iter()
                         .map(ast_type_to_c_str)
@@ -1982,6 +2161,18 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                             let base = name.split('<').next().unwrap_or(name);
                             if let Some(info) = class_infos.get(&name_flat(base)) {
                                 if let Some(idx) = info.method_names.iter().position(|n| n == &sel) {
+                                    // Param-keyed spellings (`ChainArray<T>` inside
+                                    // ChainBox's body) dispatch through the MARKER
+                                    // flat (`ChainArray_T`): a per-spelling symbol
+                                    // that closure cloning rewrites to the real
+                                    // specialization (`ChainArray_NPString_ptr`) in
+                                    // the clone body; template-mode calls land on
+                                    // forwarders delegating to the base template.
+                                    // The marker string is unique to param-keyed
+                                    // sites, so the clone-time rewrite is
+                                    // unambiguous (bare erased uses keep the base
+                                    // flat; concrete inner instantiations mangle
+                                    // their own args).
                                     vtable_class = Some(name.clone());
                                     effective_is_class = info.is_class_methods[idx];
                                 }
@@ -2031,8 +2222,20 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                                 let mut resolved: Option<&str> = None;
                                 if let Some(info) = class_infos.get(&flat_rc) {
                                     resolved = Some(info.class_name.as_str());
-                                } else {
-                                    // Search by suffix match (short name → FQN)
+                                } else if rc.contains('<') {
+                                    // Param-keyed spelling (`ChainArray<T>` inside
+                                    // ChainBox's body): the cloner skips param-keyed
+                                    // demands, so no `ChainArray_T` clone exists —
+                                    // the class address must reference the base
+                                    // template (erasure semantics).
+                                    let base = rc.split('<').next().unwrap_or(&rc);
+                                    if let Some(info) = class_infos.get(&name_flat(base)) {
+                                        if spelling_args_are_template_params(&rc, &info.type_params) {
+                                            resolved = Some(info.class_name.as_str());
+                                        }
+                                    }
+                                }
+                                if resolved.is_none() {
                                     let search_suffix = format!("::{}", rc);
                                     for (_, info) in class_infos.iter() {
                                         if info.class_name == rc
@@ -5485,17 +5688,29 @@ pub fn ast_to_cg_unit_with_slots_ext(
             _ => {}
         }
     }
+    // Route ① transitive closure: param-keyed inner uses per template
+    // (enclosing flat, inner base, inner args). `ChainArray<T>` inside
+    // `ChainBox<T>`'s body dispatches through the marker flat
+    // (`ChainArray_T`); cloning ChainBox<NPString *> must re-specialize
+    // ChainArray with the OUTER arguments and rewrite the clone's marker
+    // dispatch to the new clone.
+    let mut inner_uses: Vec<(String, String, Vec<AstType>)> = Vec::new();
     for d in &ast.decls {
         if d.kind == AstDeclKind::Class {
             if let AstDeclData::Class { methods, ivars, .. } = &d.data {
+                let enc_flat = name_flat(d.name.as_deref().unwrap_or(""));
                 for m in methods {
                     if let AstDeclData::Method { body, .. } = &m.data {
-                        if let Some(b) = body { walk_stmt_for_inst(b, &mut generic_instantiations, &collect_instantiations_expr); }
+                        if let Some(b) = body {
+                            walk_stmt_for_inst(b, &mut generic_instantiations, &collect_instantiations_expr);
+                            collect_inner_stmt(b, &enc_flat, &mut inner_uses);
+                        }
                     }
                 }
                 for iv in ivars {
                     if let AstDeclData::Ivar { ivar_type, .. } = &iv.data {
                         if let Some(t) = ivar_type {
+                            collect_inner_type(t, &enc_flat, &mut inner_uses);
                             if !t.type_args.is_empty() {
                                 generic_instantiations.push((t.name.clone().unwrap_or_default(), t.type_args.clone()));
                             }
@@ -5531,16 +5746,70 @@ pub fn ast_to_cg_unit_with_slots_ext(
     generic_instantiations.dedup_by(|a, b| {
         a.0 == b.0 && a.1.iter().map(ast_type_to_c_str).collect::<String>() == b.1.iter().map(ast_type_to_c_str).collect::<String>()
     });
-    // Clone generic classes per instantiation with substituted types.
+    // Clone generic classes per instantiation with substituted types — as a
+    // WORKLIST: cloning `Box<NPString *>` discovers its param-keyed inner
+    // uses (`ChainArray<T>` → demand `ChainArray<NPString *>`) and pushes
+    // them back; the loop runs to a fixed point, closing the transitive
+    // instantiation chain (C++-template semantics). Demand dedup by mangled
+    // name is the cycle guard (`Box<Self>` chains stop, like rustc's).
     // Substitute T → concrete type in ivar_types/method return types/params by
     // string replacement (rendered C strings use `NPObject *` for TypePrim::Param).
-    for (base, args) in &generic_instantiations {
+    let mut clone_queue: Vec<(String, Vec<AstType>)> = generic_instantiations;
+    // Demand manifest of the whole worklist (direct + derived). This is the
+    // cross-TU contract: a sibling TU that owns one of the *derived* templates
+    // cannot see the demand from source text (the spelling is param-keyed
+    // there), so the driver echoes this list back as `--generic-instantiation`.
+    let mut generic_demands: Vec<String> = Vec::new();
+    let mut qi = 0usize;
+    while qi < clone_queue.len() {
+        let (base, args) = clone_queue[qi].clone();
+        qi += 1;
         let mangled = format!("{}<{}>", base, args.iter().map(ast_type_to_c_str).collect::<Vec<_>>().join(", "));
         let mangled_flat = name_flat(&mangled);
         if class_infos.contains_key(&mangled_flat) { continue; }
         // Find the generic class template to clone (by base name, flat).
-        let base_flat = name_flat(base);
+        let base_flat = name_flat(&base);
         if let Some(template) = class_infos.get(&base_flat).cloned() {
+            // A spelling whose arguments are all the template's own type
+            // parameters (`ChainArray<T>` collected from inside ChainBox's
+            // body) is the erased template, not an instantiation: cloning it
+            // would fabricate `ChainArray_T` symbols (a duplicate keyed on the
+            // parameter name) and the `T → "T"` no-op substitution poisons
+            // substituted return types into invalid C (`(T){0}`).
+            if ast_args_are_template_params(&args, &template.type_params) {
+                continue;
+            }
+            // Recorded only past that gate: the manifest is fed back to sibling
+            // TUs as `--generic-instantiation`, so an erased or param-keyed
+            // spelling in it would fabricate garbage specializations there.
+            generic_demands.push(mangled.clone());
+            // Route ①: close the chain. Every param-keyed inner use of this
+            // template gets the OUTER concrete arguments substituted into the
+            // inner spelling, producing a NEW demand for the inner clone plus
+            // a marker rewrite (`ChainArray_T` → `ChainArray_NPString_ptr`)
+            // applied to this clone's method bodies.
+            let mut inner_rewrites: Vec<(String, String)> = Vec::new();
+            for (enc, ibase, iargs) in &inner_uses {
+                if name_flat(enc) != base_flat { continue; }
+                let inner_args: Vec<AstType> = iargs.iter().map(|a| {
+                    let n = a.name.as_deref().map(|n| n.trim_end_matches('*').trim()).unwrap_or("");
+                    match template.type_params.iter().position(|p| p == n) {
+                        Some(idx) => args.get(idx).cloned().unwrap_or_else(|| a.clone()),
+                        None => a.clone(),
+                    }
+                }).collect();
+                let marker_spelling = format!("{}<{}>", ibase,
+                    iargs.iter().map(ast_type_to_argname).collect::<Vec<_>>().join(", "));
+                let marker_flat = name_flat(&marker_spelling);
+                let inner_mangled = format!("{}<{}>", ibase,
+                    inner_args.iter().map(ast_type_to_c_str).collect::<Vec<_>>().join(", "));
+                let inner_flat = name_flat(&inner_mangled);
+                if marker_flat == inner_flat { continue; }
+                if !class_infos.contains_key(&inner_flat) {
+                    clone_queue.push((ibase.clone(), inner_args.clone()));
+                }
+                inner_rewrites.push((marker_flat, inner_flat));
+            }
             // Build (sentinel → concrete) pairs from the template's declared
             // type params: `NPDictionary<K, V>` with args [NPString*, NPNumber*]
             // pairs (`NPObject * /*K*/` → `NPString *`) and
@@ -5588,7 +5857,7 @@ pub fn ast_to_cg_unit_with_slots_ext(
                 let ret_type = sub_info.method_return_types.get(i).cloned().unwrap_or_else(|| "NPObject *".into());
                 let params = sub_info.method_params_list.get(i).cloned().unwrap_or_default();
                 let base_fn_name = format!("{}_{}", base_flat, mname);
-                let body = sub_info.method_bodies.get(i)
+                let mut body = sub_info.method_bodies.get(i)
                     .and_then(|b| b.as_ref().map(|b| Box::new(b.as_ref().clone())))
                     .or_else(|| {
                         decls.iter().find(|d| d.name == base_fn_name).and_then(|d| {
@@ -5603,6 +5872,15 @@ pub fn ast_to_cg_unit_with_slots_ext(
                             } else { None }
                         })
                     });
+                // Route ①: point the clone's param-keyed inner dispatch at the
+                // real inner specialization (marker flat → inner clone flat).
+                if !inner_rewrites.is_empty() {
+                    if let Some(ref mut b) = body {
+                        for (from, to) in &inner_rewrites {
+                            rewrite_inner_dispatch_stmt(b, from, to);
+                        }
+                    }
+                }
                 decls.push(CgDecl {
                     kind: CgDeclKind::Function, name: fn_name,
                     data: CgDeclData::Function {
@@ -5616,6 +5894,62 @@ pub fn ast_to_cg_unit_with_slots_ext(
 });
             }
             class_infos.insert(mangled_flat, sub_info);
+        }
+    }
+    // Route ①: marker forwarders. A template body dispatches param-keyed
+    // spellings through the marker flat (`ChainArray_T_first`); in template
+    // (erased) mode those symbols must exist — emit one delegating function
+    // per marker × method. Weak: two templates in different TUs may share a
+    // marker, and the duplicates must fold at link time.
+    for (_enc, ibase, iargs) in &inner_uses {
+        let base_flat = name_flat(ibase);
+        let Some(template) = class_infos.get(&base_flat).cloned() else { continue };
+        let marker_spelling = format!("{}<{}>", ibase,
+            iargs.iter().map(ast_type_to_argname).collect::<Vec<_>>().join(", "));
+        let marker_flat = name_flat(&marker_spelling);
+        if marker_flat == base_flat || class_infos.contains_key(&marker_flat) { continue; }
+        for (i, mname) in template.method_names.iter().enumerate() {
+            let has_body = template.method_bodies.get(i).map_or(false, |b| b.is_some());
+            if !has_body { continue; }
+            let fwd_name = format!("{}_{}", marker_flat, mname);
+            if decls.iter().any(|dd| dd.name == fwd_name) { continue; }
+            let target = format!("{}_{}", base_flat, mname);
+            let ret = template.method_return_types.get(i).cloned().unwrap_or_else(|| "NPObject *".into());
+            let params = template.method_params_list.get(i).cloned().unwrap_or_default();
+            let arg_exprs: Vec<CgExpr> = params.iter().map(|(_, n)| CgExpr {
+                kind: CgExprKind::Ident, type_str: None, line: 0, col: 0,
+                data: CgExprData::Ident(n.clone()),
+            }).collect();
+            let call = CgExpr {
+                kind: CgExprKind::Call, type_str: Some(ret.clone()), line: 0, col: 0,
+                data: CgExprData::Call {
+                    name: target, args: arg_exprs,
+                    vtable_class: None, alt_vtable_classes: Vec::new(),
+                    is_class_method: false, is_super: false,
+                    sel_const_name: None, method_index: None,
+                    direct_specialized: false,
+                },
+            };
+            decls.push(CgDecl {
+                kind: CgDeclKind::Function, name: fwd_name,
+                data: CgDeclData::Function {
+                    return_type: ret, params,
+                    // Body is a compound wrapping the delegating return —
+                    // emit_stmt renders non-compound bodies without braces.
+                    body: Some(Box::new(CgStmt {
+                        kind: CgStmtKind::Compound, line: 0, col: 0,
+                        data: CgStmtData::Compound(vec![CgStmt {
+                            kind: CgStmtKind::Return, line: 0, col: 0,
+                            data: CgStmtData::Return(Some(Box::new(call))),
+                        }]),
+                    })),
+                    is_variadic: false, is_objc_class: true,
+                },
+                // The definition emitter adds `__attribute__((weak))` for any
+                // body-carrying function that isn't internal_linkage — cross-TU
+                // duplicate markers fold at link time. No explicit attribute.
+                attributes: Vec::new(),
+            });
         }
     }
     // Helper to walk statements for expressions containing instantiations.
@@ -5673,6 +6007,173 @@ pub fn ast_to_cg_unit_with_slots_ext(
         }
     }
 
+    // ── Route ① closure walkers ─────────────────────────────────────────
+    // Collect param-keyed inner uses (decl types, ivar types, and class-name
+    // receiver spellings) with their enclosing class, and rewrite marker
+    // dispatch in clone bodies to the real inner specialization.
+    type InnerUse = (String, String, Vec<AstType>);
+    fn collect_inner_expr(e: &AstExpr, enc: &str, out: &mut Vec<InnerUse>) {
+        match &e.data {
+            AstExprData::VarRef { name, .. } => {
+                if name.contains('<') {
+                    if let Some((base, args)) = parse_generic_type_string(name) {
+                        out.push((enc.to_string(), base, args));
+                    }
+                }
+            }
+            AstExprData::MsgSend { receiver, args, .. } => {
+                collect_inner_expr(receiver, enc, out);
+                for a in args { collect_inner_expr(a, enc, out); }
+            }
+            AstExprData::FuncCall { callee, args, .. } => {
+                if let Some(ce) = callee { collect_inner_expr(ce, enc, out); }
+                for a in args { collect_inner_expr(a, enc, out); }
+            }
+            AstExprData::Assign { target, value } => {
+                collect_inner_expr(target, enc, out);
+                collect_inner_expr(value, enc, out);
+            }
+            AstExprData::Binary { left, right, .. } => {
+                collect_inner_expr(left, enc, out);
+                collect_inner_expr(right, enc, out);
+            }
+            AstExprData::Unary { operand, .. } => collect_inner_expr(operand, enc, out),
+            AstExprData::Paren(inner) => collect_inner_expr(inner, enc, out),
+            AstExprData::Cast { expr, .. } => collect_inner_expr(expr, enc, out),
+            AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => {
+                collect_inner_expr(obj, enc, out);
+            }
+            _ => {}
+        }
+    }
+    fn collect_inner_stmt(s: &AstStmt, enc: &str, out: &mut Vec<InnerUse>) {
+        match &s.data {
+            AstStmtData::Expr(e) => collect_inner_expr(e, enc, out),
+            AstStmtData::Decl(d) => collect_inner_decl(d, enc, out),
+            AstStmtData::If { then, else_, .. } => {
+                collect_inner_stmt(then, enc, out);
+                if let Some(eb) = else_ { collect_inner_stmt(eb, enc, out); }
+            }
+            AstStmtData::While { body, .. } | AstStmtData::Do { body, .. } => collect_inner_stmt(body, enc, out),
+            AstStmtData::For { init, cond, incr, body, .. } => {
+                if let Some(i) = init { collect_inner_stmt(i, enc, out); }
+                if let Some(c) = cond { collect_inner_expr(c, enc, out); }
+                if let Some(u) = incr { collect_inner_expr(u, enc, out); }
+                collect_inner_stmt(body, enc, out);
+            }
+            AstStmtData::Compound(stmts) => { for st in stmts { collect_inner_stmt(st, enc, out); } }
+            AstStmtData::Autoreleasepool(body) | AstStmtData::NoArc(body) => collect_inner_stmt(body, enc, out),
+            _ => {}
+        }
+    }
+    fn collect_inner_decl(d: &AstDecl, enc: &str, out: &mut Vec<InnerUse>) {
+        match &d.data {
+            AstDeclData::Variable { var_type, init, next, .. } => {
+                if let Some(t) = var_type { collect_inner_type(t, enc, out); }
+                if let Some(e) = init { collect_inner_expr(e, enc, out); }
+                if let Some(n) = next { collect_inner_decl(n, enc, out); }
+            }
+            AstDeclData::Function { body, .. } | AstDeclData::Method { body, .. } => {
+                if let Some(b) = body { collect_inner_stmt(b, enc, out); }
+            }
+            _ => {}
+        }
+    }
+    fn collect_inner_type(t: &AstType, enc: &str, out: &mut Vec<InnerUse>) {
+        if !t.type_args.is_empty() {
+            if let Some(n) = &t.name {
+                out.push((enc.to_string(), n.clone(), t.type_args.clone()));
+            }
+        }
+        if let Some(ref s) = t.subtype { collect_inner_type(s, enc, out); }
+        for a in &t.type_args { collect_inner_type(a, enc, out); }
+        if let Some(ref n) = t.next { collect_inner_type(n, enc, out); }
+    }
+    fn rewrite_inner_dispatch_expr(e: &mut CgExpr, from: &str, to: &str) {
+        match &mut e.data {
+            CgExprData::Call { vtable_class, alt_vtable_classes, args, .. } => {
+                for a in args.iter_mut() { rewrite_inner_dispatch_expr(a, from, to); }
+                // The marker appears ONLY in the vtable-class fields (types
+                // stay erased, class addresses route to the base template),
+                // so the rewrite cannot touch unrelated spellings.
+                if let Some(vc) = vtable_class {
+                    if name_flat(vc) == from { *vc = to.to_string(); }
+                }
+                for alt in alt_vtable_classes.iter_mut() {
+                    if name_flat(alt) == from { *alt = to.to_string(); }
+                }
+            }
+            CgExprData::Unary { operand, .. } => rewrite_inner_dispatch_expr(operand, from, to),
+            CgExprData::Binary { left, right, .. } => {
+                rewrite_inner_dispatch_expr(left, from, to);
+                rewrite_inner_dispatch_expr(right, from, to);
+            }
+            CgExprData::Assign { target, value } => {
+                rewrite_inner_dispatch_expr(target, from, to);
+                rewrite_inner_dispatch_expr(value, from, to);
+            }
+            CgExprData::Cast { expr, .. } => rewrite_inner_dispatch_expr(expr, from, to),
+            CgExprData::Paren(inner) => rewrite_inner_dispatch_expr(inner, from, to),
+            CgExprData::Comma(exprs) => { for x in exprs.iter_mut() { rewrite_inner_dispatch_expr(x, from, to); } }
+            CgExprData::Member { obj, .. } | CgExprData::Arrow { obj, .. } => rewrite_inner_dispatch_expr(obj, from, to),
+            CgExprData::Index { arr, index } => {
+                rewrite_inner_dispatch_expr(arr, from, to);
+                rewrite_inner_dispatch_expr(index, from, to);
+            }
+            CgExprData::Ternary { cond, then, else_ } => {
+                rewrite_inner_dispatch_expr(cond, from, to);
+                rewrite_inner_dispatch_expr(then, from, to);
+                rewrite_inner_dispatch_expr(else_, from, to);
+            }
+            _ => {}
+        }
+    }
+    fn rewrite_inner_dispatch_stmt(s: &mut CgStmt, from: &str, to: &str) {
+        match &mut s.data {
+            CgStmtData::Expr(e) => rewrite_inner_dispatch_expr(e, from, to),
+            CgStmtData::Compound(stmts) => {
+                for st in stmts.iter_mut() { rewrite_inner_dispatch_stmt(st, from, to); }
+            }
+            CgStmtData::If { cond, then, else_ } => {
+                rewrite_inner_dispatch_expr(cond, from, to);
+                rewrite_inner_dispatch_stmt(then, from, to);
+                if let Some(eb) = else_ { rewrite_inner_dispatch_stmt(eb, from, to); }
+            }
+            CgStmtData::While { cond, body } => {
+                rewrite_inner_dispatch_expr(cond, from, to);
+                rewrite_inner_dispatch_stmt(body, from, to);
+            }
+            CgStmtData::Do { body, cond } => {
+                rewrite_inner_dispatch_stmt(body, from, to);
+                rewrite_inner_dispatch_expr(cond, from, to);
+            }
+            CgStmtData::For { init, cond, incr, body, .. } => {
+                if let Some(i) = init { rewrite_inner_dispatch_stmt(i, from, to); }
+                if let Some(c) = cond { rewrite_inner_dispatch_expr(c, from, to); }
+                if let Some(u) = incr { rewrite_inner_dispatch_expr(u, from, to); }
+                rewrite_inner_dispatch_stmt(body, from, to);
+            }
+            CgStmtData::Return(v) => { if let Some(e) = v { rewrite_inner_dispatch_expr(e, from, to); } }
+            CgStmtData::Switch { expr, body } => {
+                rewrite_inner_dispatch_expr(expr, from, to);
+                rewrite_inner_dispatch_stmt(body, from, to);
+            }
+            CgStmtData::Case { value, body } => {
+                rewrite_inner_dispatch_expr(value, from, to);
+                rewrite_inner_dispatch_stmt(body, from, to);
+            }
+            CgStmtData::Default(b) => rewrite_inner_dispatch_stmt(b, from, to),
+            CgStmtData::Decl { init, next, .. } => {
+                if let Some(e) = init { rewrite_inner_dispatch_expr(e, from, to); }
+                for (_, _, io) in next.iter_mut() { if let Some(e) = io { rewrite_inner_dispatch_expr(e, from, to); } }
+            }
+            CgStmtData::ForIn { collection, body, .. } => {
+                rewrite_inner_dispatch_expr(collection, from, to);
+                rewrite_inner_dispatch_stmt(body, from, to);
+            }
+            _ => {}
+        }
+    }
     for (flat, info) in std::mem::take(&mut class_infos) {
         // Record which `Owner_method` function bodies actually exist. A vtable
         // slot can exist without an implementation — a method a class declares
@@ -5967,7 +6468,11 @@ method_names: info.method_names,
         }
     }
     collect_protocols(&ast.decls, &mut protocol_table);
-    let mut unit = CgUnit { decls, filename: ast.filename.clone(), c_headers: Vec::new(), selectors, classes, global_instance_method_names, struct_eq_tags: Vec::new(), no_arc: false, owned_classes: std::collections::HashSet::new(), vtable_sig_names, kvc: false, protocols: protocol_table };
+    // Stable manifest for the driver: sorted + deduped so two TUs that demand
+    // the same specializations compare equal and the fixed-point loop stops.
+    generic_demands.sort();
+    generic_demands.dedup();
+    let mut unit = CgUnit { decls, filename: ast.filename.clone(), c_headers: Vec::new(), selectors, classes, global_instance_method_names, struct_eq_tags: Vec::new(), no_arc: false, owned_classes: std::collections::HashSet::new(), vtable_sig_names, kvc: false, protocols: protocol_table, generic_demands };
     // The authoritative record of which method function bodies exist: every
     // `CgDeclData::Function` with a body. This covers paths that do not go
     // through `ClassInfo::method_bodies` — notably @property-synthesised
@@ -7991,8 +8496,42 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             let _ = write!(out, "        __builtin_trap();\n");
         }
         let _ = write!(out, "    }}\n}}\n\n");
+        // R4: ivar-section counterpart of the check above. `winner_text` is the
+        // layout that won the linker's weak merge (i.e. what the other TU
+        // compiled the struct from), `mine_text` is this TU's own — printing
+        // both turns "my reads return garbage" into a diff the user can act on.
+        let _ = write!(out, "__attribute__((weak)) void jeti_verify_layout_sig(unsigned long long winner, unsigned long long mine, const char *winner_text, const char *mine_text) {{\n");
+        let _ = write!(out, "    if (winner != mine) {{\n");
+        if has_stdio {
+            let _ = write!(out, "        fprintf(stderr,\n");
+            let _ = write!(out, "            \"jeti: fatal: class ivar layout mismatch across translation units.\\n\"\n");
+            let _ = write!(out, "            \"  linked layout sig %016llx, this translation unit sig %016llx\\n\"\n");
+            let _ = write!(out, "            \"\\n\"\n");
+            let _ = write!(out, "            \"Every class struct inlines its ancestors' ivars in declaration order, so\\n\"\n");
+            let _ = write!(out, "            \"two TUs that saw different ivar sections write and read different\\n\"\n");
+            let _ = write!(out, "            \"offsets for the same field — silently, as garbage values. The usual\\n\"\n");
+            let _ = write!(out, "            \"cause is a stale `.hje`: one TU was compiled against an older copy of\\n\"\n");
+            let _ = write!(out, "            \"the header that declares this class (an ivar was added, removed or\\n\"\n");
+            let _ = write!(out, "            \"retyped after that TU was linked in).\\n\"\n");
+            let _ = write!(out, "            \"\\n\"\n");
+            let _ = write!(out, "            \"  linked side : %s\\n\"\n");
+            let _ = write!(out, "            \"  this TU     : %s\\n\",\n");
+            let _ = write!(out, "            (unsigned long long)winner, (unsigned long long)mine,\n");
+            let _ = write!(out, "            winner_text ? winner_text : \"?\", mine_text ? mine_text : \"?\");\n");
+            let _ = write!(out, "        abort();\n");
+        } else {
+            let _ = write!(out, "        (void)winner; (void)mine; (void)winner_text; (void)mine_text;\n");
+            let _ = write!(out, "        __builtin_trap();\n");
+        }
+        let _ = write!(out, "    }}\n}}\n\n");
         let _ = write!(out, "struct jeti_vtable {{\n");
         let _ = write!(out, "    unsigned long long __sig;\n");
+        // R4: the ivar-layout twin of __sig. It travels INSIDE the instance for
+        // the same reason — the linker weak-merges the per-class instances, so
+        // each TU reads back the layout that actually won and can compare it
+        // with the one it compiled against.
+        let _ = write!(out, "    unsigned long long __layout_sig;\n");
+        let _ = write!(out, "    const char *__layout_text;\n");
         for mname in &unit.global_instance_method_names {
             let (_, ptr_type) = METHOD_METADATA.get().unwrap().get(mname.as_str()).unwrap();
             // ptr_type is "return_type (*)(params)". Insert mname after the "*".
@@ -8130,12 +8669,15 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             let _ = writeln!(out, "/* VTable instance: {} */", cm.class_name);
         }
         // R2: the TU that owns the @implementation emits strong metadata.
-        let cw = if unit.owned_classes.contains(&cm.class_name) { "" } else { "__attribute__((weak)) " };
+        let cw = if class_is_owned(unit, &cm.class_name) { "" } else { "__attribute__((weak)) " };
         let _ = write!(out, "{}struct jeti_vtable {} = {{\n", cw, meta_symbol("VTABLE_", &flat_cn));
         // Stamp the layout signature this instance was built for, so whichever
         // copy of this instance wins the linker's weak merge also carries the
         // layout it was actually initialized against.
         let _ = write!(out, "    .__sig = 0x{:016x}ULL,\n", vtable_sig);
+        let layout_text = class_layout_text(cm);
+        let _ = write!(out, "    .__layout_sig = 0x{:016x}ULL,\n", text_layout_sig(&layout_text));
+        let _ = write!(out, "    .__layout_text = {},\n", c_string_literal(&layout_text));
         for mname in &unit.global_instance_method_names {
             if let Some(pos) = cm.method_names.iter().position(|n| n == mname) {
                 if !cm.is_class_methods[pos] {
@@ -8191,7 +8733,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
         if comments {
             let _ = writeln!(out, "/* Meta vtable instance: {} */", cm.class_name);
         }
-        let cw = if unit.owned_classes.contains(&cm.class_name) { "" } else { "__attribute__((weak)) " };
+        let cw = if class_is_owned(unit, &cm.class_name) { "" } else { "__attribute__((weak)) " };
         let flat = name_flat(&cm.class_name);
         let _ = write!(out, "{}struct {} {}_inst = {{\n", cw, meta_symbol("META_VTABLE_", &flat), meta_symbol("META_VTABLE_", &flat));
         for (mname, owner) in &class_entries {
@@ -8222,7 +8764,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
         if comments {
             let _ = writeln!(out, "/* +getClass for {} */", cm.class_name);
         }
-        let cw = if unit.owned_classes.contains(&cm.class_name) { "" } else { "__attribute__((weak)) " };
+        let cw = if class_is_owned(unit, &cm.class_name) { "" } else { "__attribute__((weak)) " };
         let _ = write!(out, "{}NPClass * {}(NPClass * self, SEL _cmd) {{\n", cw, meta_symbol("GETCLASS_", &name_flat(&cm.class_name)));
         out.push_str("    (void)_cmd;\n");
         out.push_str("    return self;\n");
@@ -8262,7 +8804,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             // are NULL stubs (R2 decl-only client) and the method symbols this
             // TU could reference do not exist. Owner classes and inline-
             // implementation TUs (self-contained mode) both qualify.
-            let mut any_body = unit.owned_classes.contains(&cm.class_name);
+            let mut any_body = class_is_owned(unit, &cm.class_name);
             if !any_body {
                 for (j, mname) in cm.method_names.iter().enumerate() {
                     if !cm.is_class_methods[j] && method_is_emitted(cm.method_owners.get(j).map(|s| s.as_str()).unwrap_or(&flat), mname) {
@@ -8489,7 +9031,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     // metadata initialization; the runtime merges them idempotently into the
     // owner's NPClass table. Declaration-only clients do not register anything.
     for cm in &unit.classes {
-        if !cm.has_category_impl || unit.owned_classes.contains(&cm.class_name) { continue; }
+        if !cm.has_category_impl || class_is_owned(unit, &cm.class_name) { continue; }
         let known = known_protocols(cm);
         if known.is_empty() { continue; }
         let flat = name_flat(&cm.class_name);
@@ -8500,7 +9042,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     for cm in &unit.classes {
         let flat = name_flat(&cm.class_name);
         let sym = meta_symbol("CLASS_", &flat);
-        let owned = unit.owned_classes.contains(&cm.class_name);
+        let owned = class_is_owned(unit, &cm.class_name);
         if !owned {
             let _ = write!(out, "NPClass {};\n", sym);
             continue;
@@ -8579,6 +9121,9 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             let vt_sym = meta_symbol("VTABLE_", &name_flat(&cm.class_name));
             let _ = write!(out, "    jeti_verify_vtable_sig((&{})->__sig, 0x{:016x}ULL, \"{} | class {} | tu {}\");\n",
                 vt_sym, vtable_sig, method_list.join(" "), cm.class_name, unit.filename);
+            let layout_text = class_layout_text(cm);
+            let _ = write!(out, "    jeti_verify_layout_sig((&{})->__layout_sig, 0x{:016x}ULL, (&{})->__layout_text, {});\n",
+                vt_sym, text_layout_sig(&layout_text), vt_sym, c_string_literal(&layout_text));
         }
         let _ = write!(out, "}}\n\n");
     }
@@ -9016,6 +9561,7 @@ mod vtable_sig_tests {
             owned_classes: std::collections::HashSet::new(),
             kvc: false,
             protocols: Vec::new(),
+            generic_demands: Vec::new(),
             global_instance_method_names: vec![
                 "dealloc".into(), "init".into(), "ping".into(), "release".into(), "retain".into(),
             ],
@@ -9042,6 +9588,107 @@ mod vtable_sig_tests {
             "the layout check must live in a per-TU constructor, not in weak-merged jeti_metaInit"
         );
         assert!(c.contains("jeti_verify_vtable_sig"), "the verifier must be emitted");
+    }
+
+    /// R4: the ivar-section twin of `__sig`. A stale `.hje` must change the
+    /// fingerprint, and the emitter must carry the payload (both spellings) in
+    /// the vtable instance so the startup check can print the actual diff.
+    #[test]
+    fn differing_ivar_sections_produce_differing_layout_signatures() {
+        let mut cm = CgClassMeta {
+            class_name: "Widget".to_string(),
+            super_name: Some("NPObject".to_string()),
+            method_names: vec!["sum".to_string()],
+            method_sel_names: vec!["sum".to_string()],
+            is_class_methods: vec![false],
+            method_return_types: vec!["int".to_string()],
+            method_params_list: vec![vec![]],
+            method_variadic: vec![false],
+            method_owners: vec!["Widget".to_string()],
+            category_method_names: std::collections::HashSet::new(),
+            has_category_impl: false,
+            vtable_indices: vec![2],
+            ivar_types: vec!["int".into(), "int".into()],
+            ivar_names: vec!["_a".into(), "_b".into()],
+            ivar_weak: vec![false, false],
+            properties: Vec::new(),
+            has_impl: true,
+            protocols: Vec::new(),
+        };
+        let fresh = class_layout_text(&cm);
+        assert_eq!(fresh, "Widget < NPObject | int _a | int _b");
+        let fresh_sig = text_layout_sig(&fresh);
+
+        // The stale header a client still carries: one ivar retyped, one added.
+        cm.ivar_types = vec!["short".into(), "int".into(), "int".into()];
+        cm.ivar_names = vec!["_a".into(), "_b".into(), "_c".into()];
+        cm.ivar_weak = vec![false, false, false];
+        let stale = class_layout_text(&cm);
+        assert_ne!(fresh_sig, text_layout_sig(&stale), "a retyped/added ivar must change the sig");
+
+        // Reordering matters too: the struct is emitted in declaration order,
+        // so a swapped pair is a real layout change, not a cosmetic one.
+        cm.ivar_types = vec!["int".into(), "int".into()];
+        cm.ivar_names = vec!["_b".into(), "_a".into()];
+        cm.ivar_weak = vec![false, false];
+        assert_ne!(fresh_sig, text_layout_sig(&class_layout_text(&cm)));
+    }
+
+    #[test]
+    fn layout_check_is_emitted_per_class() {
+        let unit = CgUnit {
+            decls: Vec::new(),
+            filename: "probe.jeti".to_string(),
+            c_headers: vec!["#include <stdio.h>".to_string()],
+            selectors: Vec::new(),
+            classes: vec![CgClassMeta {
+                class_name: "Probe".to_string(),
+                super_name: Some("NPObject".to_string()),
+                method_names: vec!["ping".to_string()],
+                method_sel_names: vec!["ping".to_string()],
+                is_class_methods: vec![false],
+                method_return_types: vec!["void".to_string()],
+                method_params_list: vec![vec![]],
+                method_variadic: vec![false],
+                method_owners: vec!["Probe".to_string()],
+                category_method_names: std::collections::HashSet::new(),
+                has_category_impl: false,
+                vtable_indices: vec![2],
+                ivar_types: vec!["int".to_string()],
+                ivar_names: vec!["_grade".to_string()],
+                ivar_weak: vec![false],
+                properties: Vec::new(),
+                has_impl: true,
+                protocols: Vec::new(),
+            }],
+            struct_eq_tags: Vec::new(),
+            no_arc: false,
+            owned_classes: std::collections::HashSet::new(),
+            kvc: false,
+            protocols: Vec::new(),
+            generic_demands: Vec::new(),
+            global_instance_method_names: vec![
+                "dealloc".into(), "init".into(), "ping".into(), "release".into(), "retain".into(),
+            ],
+            vtable_sig_names: vec!["dealloc".into(), "init".into(), "ping".into(), "release".into(), "retain".into()],
+        };
+        let _ = METHOD_METADATA.set(HashMap::from([
+            ("dealloc".to_string(), (0usize, "void (*)(NPObject *, SEL)".to_string())),
+            ("init".to_string(), (0usize, "NPObject * (*)(NPObject *, SEL)".to_string())),
+            ("ping".to_string(), (0usize, "void (*)(NPObject *, SEL)".to_string())),
+            ("release".to_string(), (0usize, "void (*)(NPObject *, SEL)".to_string())),
+            ("retain".to_string(), (0usize, "NPObject * (*)(NPObject *, SEL)".to_string())),
+        ]));
+        let headers = unit.c_headers.clone();
+        let c = emit_unit_with_headers(&unit, &headers, &[], false, Backend::Clang, false, false);
+        assert!(c.contains("unsigned long long __layout_sig;"), "vtable struct must carry the layout sig");
+        assert!(c.contains("const char *__layout_text;"), "the payload must travel with the instance");
+        assert!(c.contains("jeti_verify_layout_sig"), "the layout verifier must be emitted");
+        assert!(
+            c.contains(".\"__layout_text\"") || c.contains(".__layout_text = \"Probe < NPObject | int _grade\""),
+            "each instance must stamp its own ivar spelling, got: {}",
+            c.lines().find(|l| l.contains("__layout_text =")).unwrap_or("<none>")
+        );
     }
 
     /// R3: a TU-local private method must not change the fingerprint. A legal
@@ -9128,6 +9775,7 @@ mod eh_runtime_include_tests {
             owned_classes: std::collections::HashSet::new(),
             kvc: false,
             protocols: Vec::new(),
+            generic_demands: Vec::new(),
             vtable_sig_names: Vec::new(),
         }
     }

@@ -1,0 +1,23 @@
+#import "model.hje"
+#include <stdio.h>
+
+/* Client TU. The ONLY generic spelling here is ChainBox<int *>; the inner
+ * ChainArray<int *> is never named, in any TU. */
+int main() {
+    int a = 42, b = 7;
+    ChainBox<int *> *x = [[ChainBox<int *> alloc] init];
+    [x put:&a];
+    int *rx = [x roundtrip];
+    printf("x=%d\n", *rx);
+
+    /* A second box must get its own inner array — pins that the closure emits
+     * a real allocatable class, not a shared/erased stub. */
+    ChainBox<int *> *y = [[ChainBox<int *> alloc] init];
+    [y put:&b];
+    int *ry = [y roundtrip];
+    printf("y=%d\n", *ry);
+
+    jeti_release(x);
+    jeti_release(y);
+    return 0;
+}

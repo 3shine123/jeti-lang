@@ -107,6 +107,12 @@ pub struct Pipeline {
     /// (only when [`Pipeline::jeti_map`] is set). `generated.path` is left
     /// empty here — the CLI driver fills in the real `.c` output location.
     pub last_source_map: Option<jeti_cst::source_map_file::SourceMapFile>,
+    /// Generic specializations the last [`Pipeline::transpile`] demanded, as
+    /// rendered `Base<Args>` spellings (sorted, deduped). Includes the
+    /// transitive demands derived while cloning a template body, so a multi-TU
+    /// driver can echo them back to sibling TUs as `--generic-instantiation`
+    /// and iterate to a fixed point (Cfront-style manifest closure).
+    pub last_generic_demands: Vec<String>,
 }
 
 impl Pipeline {
@@ -136,6 +142,7 @@ impl Pipeline {
             line_directives: true,
             jeti_map: false,
             last_source_map: None,
+            last_generic_demands: Vec::new(),
         }
     }
 
@@ -691,6 +698,9 @@ impl Pipeline {
         // Struct tags whose `==`/`!=` the checker rewrote to value-comparison
         // calls; codegen emits one field-wise `jeti_struct_eq_<tag>` per tag.
         cg.struct_eq_tags = struct_eq_tags;
+        // Cross-TU generic-closure manifest (see CgUnit::generic_demands): the
+        // CLI driver reads it to decide whether another multi-TU round is due.
+        self.last_generic_demands = cg.generic_demands.clone();
         cg.no_arc = self.no_arc;
         cg.owned_classes = owned_classes;
         // 阶段 2: `-line-directives` emits `#line` at user-statement positions

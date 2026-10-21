@@ -81,7 +81,7 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 - 链接时库/owner 的强表胜出，客户端弱桩被合并掉——这就是"纯声明客户端保持弱，正是正确"的原因。
 - **不需要任何手动旗标**：`-fstrong-metadata` 已从编译器删除，归属由"谁的 main 文件持有 `@implementation`"自动推导。
 
-## 5. vtable 公共段、私有段与 `__sig`（R1/R3，已完成）
+## 5. vtable 公共段、私有段与 `__sig` / `__layout_sig`（R1/R3/R4，已完成）
 
 每个类一个 uniform `struct jeti_vtable`（函数指针数组），布局分两段：
 
@@ -93,7 +93,10 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 - **R1**（字段顺序）：公共段内任意方法的槽位偏移在所有 TU 中一致；私有段只影响自己 TU 的尾部。
 - **私有方法**只能在 owner TU 内派发（跨 TU 没有槽位）——把要跨 TU 调的方法写进共享 `.hje`。
 - **R3**（`__sig` 校验）：启动期签名校验只覆盖**公共段**（本 TU 见到的声明集），允许尾部私有段差异。签名不一致（例如某 TU 的 `.hje` 过期）会大声 abort 并打印双方方法集，而不是静默读错槽位。类别新增协议通过 category TU 的幂等注册合并进 owner 的 `NPClass`；类别方法声明仍必须出现在共享 `.hje`。
-- **R2**（实例归属）见 §4。三条均已落地并由 `tests/multi_tu/`（13 用例）守护。
+- **R4**（`__layout_sig` 校验，ivar 段）：每个类的 vtable 实例额外携带该类的 ivar 段指纹与原始拼写（`. __layout_sig` / `.__layout_text`，结构体里紧跟在 `__sig` 后）。`struct <Class>` 是**扁平** C 结构体（祖先 ivar 按声明顺序内联），所以某个 TU 用过期 `.hje` 编译时，同一个字段在两边偏移不同、读出来是垃圾值。启动期校验把"链接胜出的实例指纹"与"本 TU 编译时的指纹"逐类比较，不一致即 abort 并打印两边的 ivar 列表（如 `Widget < NPObject | int _a | int _b` vs `... | short _a | int _b | int _c`）。
+  - 该检查刻意是**运行期**而非链接期：Jeti 允许"只声明、无任何 `@implementation`"的纯数据类（`tests/golden/01_basics/hello.jeti` 的 `Student`），链接期无法区分"链接里没有 owner"与"头过期"，会误报；逐类比较只发生在同一个类被两个 TU 同时链接时，因此零误报。
+  - 只比较自身 ivar 段 + 超类拼写：祖先的 ivar 由祖先自己的条目比较（能同时见到某个类，就必然同时见到它的超类）。泛型实例同样逐类参与，只被一个 TU 实例化时不产生比较。
+- **R2**（实例归属）见 §4。R1/R2/R3/R4 均已落地：多 TU 行为由 `tests/multi_tu/`（17 用例）与 `probes/x5_layout/` 守护，R4 的指纹/发射另有 codegen 单测覆盖。
 
 ## 6. class metadata：静态初始化
 

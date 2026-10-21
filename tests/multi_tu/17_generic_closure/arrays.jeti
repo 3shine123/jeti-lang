@@ -1,0 +1,13 @@
+#import "model.hje"
+
+/* Owner of ChainArray<T>. Deliberately mentions NO instantiation: nothing in
+ * this file says `ChainArray<int *>`, so the only way this TU can learn that
+ * it must mint the specialization is the driver's manifest round. */
+@implementation ChainArray : NPObject
+- (void)set:(T)v {
+    _slot = v;
+}
+- (T)get {
+    return _slot;
+}
+@end

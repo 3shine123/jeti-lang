@@ -1,0 +1,3 @@
+Drives jetic's own multi-input mode: the closure driver only exists on that
+path (the per-TU `-rewrite-jeti` loop the other cases use has no cross-TU
+manifest exchange at all).

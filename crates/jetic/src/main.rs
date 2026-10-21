@@ -42,6 +42,111 @@ fn scan_generic_instantiations(source: &str) -> Vec<String> {
     }
     out
 }
+/// Transpile-affecting flags forwarded to a per-TU `jetic` subprocess.
+///
+/// One process per translation unit is required: codegen's method-metadata
+/// tables are process-global (`OnceLock`), so a second in-process transpile is
+/// not possible. Link-only flags (-L/-l/-asm/-framework) are not needed by the
+/// transpile step and are deliberately absent.
+struct TuPass<'a> {
+    exe: &'a str,
+    include_dirs: &'a [String],
+    no_arc: bool,
+    no_checker: bool,
+    werror: bool,
+    eh_checked: bool,
+    slots_manifest: Option<&'a String>,
+    backend: Option<&'a String>,
+    arch: Option<&'a String>,
+    no_libc: bool,
+    nostdinc: bool,
+    no_comments: bool,
+    verbose: bool,
+}
+
+impl TuPass<'_> {
+    /// Transpile one TU in a child `jetic`, writing the generated C to `out_c`
+    /// and this unit's specialization manifest to `out_demands`. Returns the
+    /// manifest (empty when the child wrote none).
+    ///
+    /// `capture` swallows the child's stderr on success: used for the main
+    /// TU's manifest-only pre-pass, whose diagnostics the in-process transpile
+    /// reports anyway.
+    fn run(&self, tu: &str, out_c: &str, out_demands: &str, forced: &[String], capture: bool) -> Vec<String> {
+        let mut cmd: Vec<String> = vec![
+            self.exe.to_string(),
+            "-rewrite-jeti".into(), tu.to_string(),
+            "-o".into(), out_c.to_string(),
+            "--emit-generic-demands".into(), out_demands.to_string(),
+        ];
+        for d in self.include_dirs {
+            cmd.push("-I".into());
+            cmd.push(d.clone());
+        }
+        if self.no_arc { cmd.push("-fno-jeti-arc".into()); }
+        if self.no_checker { cmd.push("-fno-checker".into()); }
+        if self.werror { cmd.push("-Werror".into()); }
+        cmd.push("-eh".into());
+        cmd.push(if self.eh_checked { "checked".into() } else { "legacy".into() });
+        if let Some(slots) = self.slots_manifest {
+            cmd.push("--slots".into());
+            cmd.push(slots.clone());
+        }
+        for inst in forced {
+            cmd.push("--generic-instantiation".into());
+            cmd.push(inst.clone());
+        }
+        if let Some(b) = self.backend {
+            cmd.push("-backend".into());
+            cmd.push(b.clone());
+        }
+        if let Some(a) = self.arch {
+            cmd.push("-arch".into());
+            cmd.push(a.clone());
+        }
+        if self.no_libc { cmd.push("-ffreestanding".into()); }
+        if self.nostdinc { cmd.push("-nostdinc".into()); }
+        if self.no_comments { cmd.push("-no-comments".into()); }
+        if self.verbose { cmd.push("-v".into()); }
+        if self.verbose {
+            eprintln!("[jetic] transpiling TU: {}", tu);
+        }
+        let mut child = Command::new(&cmd[0]);
+        let running = child.args(&cmd[1..]);
+        let ok = if capture {
+            match running.output() {
+                Ok(out) => {
+                    if !out.status.success() {
+                        // The child's diagnostics ARE the user's: forwarding the
+                        // captured stderr is what makes a pre-pass failure look
+                        // exactly like the in-process one.
+                        let _ = std::io::stderr().write_all(&out.stderr);
+                    }
+                    out.status.success()
+                }
+                Err(e) => {
+                    eprintln!("error: failed to spawn jetic for {}: {}", tu, e);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            match running.status() {
+                Ok(st) => st.success(),
+                Err(e) => {
+                    eprintln!("error: failed to spawn jetic for {}: {}", tu, e);
+                    std::process::exit(1);
+                }
+            }
+        };
+        if !ok {
+            eprintln!("error: transpiling {} failed", tu);
+            std::process::exit(1);
+        }
+        fs::read_to_string(out_demands)
+            .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default()
+    }
+}
 use clap::{Command as ClapCommand, Arg};
 use clap_complete::{Shell, generate};
 use jetic::pipeline::{Pipeline, DEFAULT_EH_CHECKED};
@@ -913,6 +1018,9 @@ fn main() {
     let mut slots_manifest: Option<String> = None; // --slots <file> (stable cross-TU vtable layout)
     // Internal multi-TU transport for true-generic specialization demands.
     let mut forced_generic_instantiations: Vec<String> = Vec::new();
+    // Internal multi-TU transport: where to write this TU's demand manifest
+    // (`--emit-generic-demands`). Only the driver inside jetic sets it.
+    let mut generic_demands_out: Option<String> = None;
 
     // Check for "run" subcommand: look for `run` that is not preceded by a flag
     // (i.e. not `-o run` or `-I run`)
@@ -991,6 +1099,13 @@ fn main() {
                     forced_generic_instantiations.push(v);
                 } else {
                     eprintln!("error: --generic-instantiation expects Class<Args>");
+                    std::process::exit(1);
+                }
+            } else if nj == "--emit-generic-demands" {
+                generic_demands_out = inline_val.map(|s| s.to_string())
+                    .or_else(|| if j + 1 < pos { Some(args[j + 1].clone()) } else { None });
+                if generic_demands_out.is_none() {
+                    eprintln!("error: --emit-generic-demands expects a file path");
                     std::process::exit(1);
                 }
             }
@@ -1155,6 +1270,12 @@ fn main() {
         } else if normalized == "-emit-bridge-header" && i + 1 < args.len() {
             bridge_header = Some(args[i + 1].clone());
             i += 2;
+        } else if normalized == "--emit-generic-demands" && i + 1 < args.len() {
+            // Internal multi-TU transport: write the specialization manifest
+            // this TU demands (direct + transitively derived) so the driver can
+            // feed it back to the sibling TUs.
+            generic_demands_out = Some(args[i + 1].clone());
+            i += 2;
         } else if input.is_none() {
             input = Some(args[i].clone());
             i += 1;
@@ -1214,6 +1335,91 @@ fn main() {
         all.sort();
         all.dedup();
         forced_generic_instantiations = all;
+    }
+
+    // ── Multi-TU specialization closure (Cfront-style manifest iteration) ──
+    //
+    // Direct demand (`ChainBox<NPString *>` spelled in a source file) is found
+    // by the text scan above. Transitive demand is not: cloning
+    // `ChainBox<NPString *>` inside its owner TU discovers `ChainArray<T>` in
+    // the body and demands `ChainArray<NPString *>`, while the sibling TU that
+    // owns `ChainArray` spells it param-keyed — invisible to any text scan.
+    //
+    // So each TU publishes what it demanded (`--emit-generic-demands`) and the
+    // driver feeds the union back as `--generic-instantiation` until the set
+    // stops growing. Only spellings travel between processes; the type
+    // substitution stays inside the compiler, so every specialization still has
+    // exactly one authoritative definition (R2).
+    //
+    // The main TU takes part in the loop too — a closure demand can land on a
+    // template IT owns — so it runs as a child as well; its own C output is
+    // still produced by the in-process transpile below (the child pass only
+    // contributes its manifest).
+    let mut extra_c_files: Vec<String> = Vec::new();
+    if !extra_inputs.is_empty() {
+        let exe = std::env::current_exe().unwrap_or_else(|e| {
+            eprintln!("error: cannot locate jetic for multi-TU transpile: {}", e);
+            std::process::exit(1);
+        });
+        let exe = exe.to_string_lossy().to_string();
+        let pass = TuPass {
+            exe: &exe,
+            include_dirs: &include_dirs,
+            no_arc,
+            no_checker,
+            werror,
+            eh_checked,
+            slots_manifest: slots_manifest.as_ref(),
+            backend: backend.as_ref(),
+            arch: arch.as_ref(),
+            no_libc,
+            nostdinc,
+            no_comments,
+            verbose,
+        };
+        let tmp_base = |tag: &str| {
+            let mut p = std::env::temp_dir();
+            p.push(format!("{}-{}-jetic", tag, std::process::id()));
+            p.to_string_lossy().to_string()
+        };
+        for (n, tu) in extra_inputs.iter().enumerate() {
+            let stem = Path::new(tu).file_stem().and_then(|s| s.to_str()).unwrap_or("tu");
+            extra_c_files.push(format!("{}-{}-{}.c", tmp_base(stem), n, stem));
+        }
+        // Nothing to close without a single concrete demand: keep the plain
+        // one-pass transpile (no extra child runs at all).
+        let closure = !forced_generic_instantiations.is_empty();
+        let mut forced = forced_generic_instantiations.clone();
+        // Fixed point: each round transcribes every TU with the current set and
+        // unions what they demand. Monotone growth over a finite spelling space
+        // guarantees termination; the cap only guards a pathological input.
+        let mut rounds = if closure { 8 } else { 1 };
+        while rounds > 0 {
+            rounds -= 1;
+            let mut next: Vec<String> = forced.clone();
+            if closure {
+                next.extend(pass.run(
+                    &input_path,
+                    &format!("{}-main.c", tmp_base("main")),
+                    &format!("{}-main.demands", tmp_base("main")),
+                    &forced,
+                    true,
+                ));
+            }
+            for (n, tu) in extra_inputs.iter().enumerate() {
+                let demands = format!("{}-{}.demands", tmp_base("tu"), n);
+                // stderr stays connected: an extra TU's warnings are the user's
+                // and were visible before the closure loop existed.
+                next.extend(pass.run(tu, &extra_c_files[n], &demands, &forced, false));
+            }
+            next.sort();
+            next.dedup();
+            if next == forced {
+                break;
+            }
+            forced = next;
+        }
+        forced_generic_instantiations = forced;
     }
 
     let self_dir = resolve_bundle_root();
@@ -1277,75 +1483,25 @@ fn main() {
         }
     };
 
+    // Internal multi-TU transport: publish what this TU demanded (direct +
+    // transitively derived) so the driver can close the specialization chain
+    // across sibling TUs. Not part of the public CLI surface.
+    if let Some(ref path) = generic_demands_out {
+        let mut manifest = pipeline.last_generic_demands.join("\n");
+        if !manifest.is_empty() { manifest.push('\n'); }
+        if let Err(e) = fs::write(path, manifest) {
+            eprintln!("error: cannot write generic demands to {}: {}", path, e);
+            std::process::exit(1);
+        }
+    }
+
     if trace_refcount {
         println!("{}", c_code);
         return;
     }
 
-    // Multi-TU mode: transpile each extra .jeti in its own jetic subprocess.
-    // One process per TU is required: codegen's method-metadata tables are
-    // process-global (OnceLock), so a second in-process transpile is not
-    // possible. Transpile-affecting flags are forwarded; link-only flags
-    // (-L/-l/-asm/-framework) are not needed by the transpile step.
-    let mut extra_c_files: Vec<String> = Vec::new();
-    if !extra_inputs.is_empty() {
-        let exe = std::env::current_exe().unwrap_or_else(|e| {
-            eprintln!("error: cannot locate jetic for multi-TU transpile: {}", e);
-            std::process::exit(1);
-        });
-        for (n, tu) in extra_inputs.iter().enumerate() {
-            let stem = Path::new(tu).file_stem().and_then(|s| s.to_str()).unwrap_or("tu");
-            let mut tmp = std::env::temp_dir();
-            tmp.push(format!("{}-{}-jetic-{}.c", stem, std::process::id(), n));
-            let mut cmd: Vec<String> = vec![
-                exe.to_string_lossy().to_string(),
-                "-rewrite-jeti".into(), tu.clone(),
-                "-o".into(), tmp.to_string_lossy().to_string(),
-            ];
-            for d in &include_dirs {
-                cmd.push("-I".into());
-                cmd.push(d.clone());
-            }
-            if no_arc { cmd.push("-fno-jeti-arc".into()); }
-            if no_checker { cmd.push("-fno-checker".into()); }
-            if werror { cmd.push("-Werror".into()); }
-            cmd.push("-eh".into());
-            cmd.push(if eh_checked { "checked".into() } else { "legacy".into() });
-            if let Some(slots) = &slots_manifest {
-                cmd.push("--slots".into());
-                cmd.push(slots.clone());
-            }
-            for inst in &forced_generic_instantiations {
-                cmd.push("--generic-instantiation".into());
-                cmd.push(inst.clone());
-            }
-            if let Some(b) = &backend {
-                cmd.push("-backend".into());
-                cmd.push(b.clone());
-            }
-            if let Some(a) = &arch {
-                cmd.push("-arch".into());
-                cmd.push(a.clone());
-            }
-            if no_libc { cmd.push("-ffreestanding".into()); }
-            if nostdinc { cmd.push("-nostdinc".into()); }
-            if no_comments { cmd.push("-no-comments".into()); }
-            if verbose { cmd.push("-v".into()); }
-            if verbose {
-                println!("[jetic] transpiling extra TU: {}", tu);
-            }
-            let status = Command::new(&cmd[0]).args(&cmd[1..]).status()
-                .unwrap_or_else(|e| {
-                    eprintln!("error: failed to spawn jetic for {}: {}", tu, e);
-                    std::process::exit(1);
-                });
-            if !status.success() {
-                eprintln!("error: transpiling extra TU {} failed", tu);
-                std::process::exit(1);
-            }
-            extra_c_files.push(tmp.to_string_lossy().to_string());
-        }
-    }
+    // Multi-TU extra TUs were transpiled above by the closure driver, which
+    // also owns their output paths (`extra_c_files`).
 
     // Does any TU in this binary inline Foundation implementations? Checked
     // at the SOURCE level (see tu_imports_foundation_impl) across the main

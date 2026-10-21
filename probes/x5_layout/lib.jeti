@@ -1,0 +1,9 @@
+#import "lib.hje"
+
+@implementation Widget
+- (int)sum {
+    _a = 1;
+    _b = 2;
+    return _a + _b;
+}
+@end

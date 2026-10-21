@@ -1,0 +1,6 @@
+@interface Widget {
+    int _a;
+    int _b;
+}
+- (int)sum;
+@end
