@@ -1,0 +1,11 @@
+#import "lib.hje"
+#include <stdio.h>
+
+// Client TU: `secretShrink` is not visible here (private to the owner TU).
+// Expect: compile-time error, never a NULL vtable slot.
+int main() {
+    Widget *w = [[Widget alloc] init];
+    printf("size=%d\n", [w size]);
+    printf("secret=%d\n", [w secretShrink]);
+    return 0;
+}

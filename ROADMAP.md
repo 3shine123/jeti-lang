@@ -54,7 +54,7 @@
 
 ## Checker known limitations (accepted, not scheduled)
 
-- **Undeclared selector is a warning, not an error** — receiver-type resolution is unreliable under the self-contained umbrella (e.g. `[other count]` inside `NPMutableArray.jeti` misresolves `NPArray *` as `NPString *`), so an error would break Foundation itself. Consequence: calling an undeclared selector on a statically typed receiver still segfaults at runtime (NULL vtable slot); the warning is the only compile-time guard.
+- **Undeclared selector is a compile-time error on the static paths** (no longer a warning). A statically typed receiver whose class chain does not declare the selector is rejected — that send would dispatch through a NULL vtable slot and segfault; ObjC rejects the same shape. Three shape-based escapes keep established idiom alive: selectors that never dispatch through the receiver slot (`respondsToSelector:`, `conformsToProtocol:`, root methods), `[obj ivar]` (C field access via the bracket form, never a send), and senders typed as an ancestor where some subclass in the TU declares the selector (`NPObject *o; [o speak]` with `Dog : NPObject` — the guarded `respondsToSelector:` idiom and `NPObject<P> *` receivers). `id` / `instancetype` receivers have no class chain, so they only reject a selector declared *nowhere* in the unit. Private cross-TU methods are caught by the same rule: a method absent from the shared `.hje` is invisible in the client TU.
 
 ## Tooling
 

@@ -1,0 +1,19 @@
+// Probe A: single TU, statically-typed receiver, selector declared nowhere.
+// Expect: compile-time error (NULL vtable slot), not a warning + segfault.
+#include <stdio.h>
+
+@interface Widget : NPObject
+- (int)size;
+@end
+
+@implementation Widget : NPObject
+- (int)size { return 7; }
+@end
+
+int main() {
+    Widget *w = [[Widget alloc] init];
+    printf("size=%d\n", [w size]);
+    // `shrink` is declared on no class in this TU — should be rejected.
+    printf("shrink=%d\n", [w shrink]);
+    return 0;
+}

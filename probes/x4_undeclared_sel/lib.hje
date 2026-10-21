@@ -1,0 +1,8 @@
+#ifndef X4_LIB_HJE
+#define X4_LIB_HJE
+
+@interface Widget : NPObject
+- (int)size;
+@end
+
+#endif

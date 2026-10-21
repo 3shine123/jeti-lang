@@ -657,6 +657,90 @@ impl Checker {
         Some(false)
     }
 
+    /// Is `selector` declared anywhere in this unit — on any class (via the
+    /// per-class table, which the binder also fills with protocol methods
+    /// propagated into `@interface`) or in any `@protocol`? This is the last
+    /// resort for receivers that have no static class chain to walk (`id`,
+    /// `instancetype`, `id<P>`, forward-declared types). Only a selector that
+    /// is declared *nowhere* is reported: with no class to consult, anything
+    /// weaker would turn legal code into a false positive.
+    fn selector_declared_anywhere(&self, selector: &str) -> bool {
+        if self.method_param_decls.contains_key(selector) {
+            return true;
+        }
+        // Protocol symbols store the binder's canonical selector spelling —
+        // external parameter names concatenated, i.e. every colon dropped
+        // (`taskAction:` → `taskAction`). Normalize before comparing; a
+        // colon-stripped comparison also covers zero-parameter selectors,
+        // which carry no colon in the first place.
+        let flat: String = selector.chars().filter(|c| *c != ':').collect();
+        if let Some(ref st) = self.symtab {
+            for sym in &st.global.symbols {
+                if let SymbolData::Protocol { required_methods, optional_methods, .. } = &sym.data {
+                    if required_methods.iter().any(|m| *m == flat)
+                        || optional_methods.iter().any(|m| *m == flat)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Is `selector` really an ivar name on some class in this unit? Jeti keeps
+    /// the C bracket form usable for field access — `[obj _bodyX]` yields the
+    /// ivar (an array there, whose `[0]` the next bracket subscripts). Such a
+    /// send never dispatches through a vtable slot, so the receiver-visibility
+    /// checks must not judge it by method visibility.
+    fn selector_is_known_ivar(&self, selector: &str) -> bool {
+        if let Some(ref st) = self.symtab {
+            for sym in &st.global.symbols {
+                if let SymbolData::Class { ivars, .. } = &sym.data {
+                    if ivars.iter().any(|i| i == selector) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Is `selector` declared on some class that derives from `class_name`?
+    /// This is the downcast-safe-dispatch allowance: the receiver is typed as
+    /// an ancestor, but a subclass in this unit derives from it *and* declares
+    /// the selector — `NPObject *o; [o speak]` with `Dog : NPObject` declaring
+    /// `speak` (the guarded `respondsToSelector:` idiom, and the
+    /// protocol-qualified root receivers written `NPObject<P> *`). Sibling
+    /// classes never qualify, so a `Mute *` sending `Talker`'s method stays an
+    /// error — that shape is a bug, not dynamic dispatch.
+    fn a_subclass_declares_selector(&self, class_name: &str, selector: &str) -> bool {
+        let st = match self.symtab.as_ref() {
+            Some(st) => st,
+            None => return false,
+        };
+        for (decl_class, methods) in &self.method_params_by_class {
+            if !methods.contains_key(selector) {
+                continue;
+            }
+            let mut cur = decl_class.clone();
+            for _ in 0..32 {
+                if cur == class_name {
+                    return true;
+                }
+                let sup = st.find_class(&cur).and_then(|c| match &c.data {
+                    SymbolData::Class { superclass: Some(s), .. } if !s.is_empty() => Some(s.clone()),
+                    _ => None,
+                });
+                match sup {
+                    Some(s) => cur = s,
+                    None => break,
+                }
+            }
+        }
+        false
+    }
+
     /// Selectors exempt from the receiver-class visibility check because they
     /// never dispatch through the receiver's own vtable slot:
     /// `respondsToSelector:` is a compiler pseudo-method lowered to a
@@ -666,6 +750,7 @@ impl Checker {
     fn is_vtable_exempt_selector(selector: &str) -> bool {
         matches!(selector,
             "respondsToSelector:"
+            | "conformsToProtocol:"
             | "init" | "copy" | "mutableCopy" | "retain" | "release"
             | "autorelease" | "dealloc" | "class" | "description")
     }
@@ -3202,24 +3287,51 @@ impl Checker {
                 if let Some(ref cn) = recv_class {
                     if !*is_class_method {
                         if let Some(false) = self.class_declares_selector(cn, selector) {
-                            // Exemptions beyond Foundation-source silence:
-                            // 1. selectors that never dispatch through the
-                            //    receiver's own vtable slot (see
-                            //    `is_vtable_exempt_selector`);
-                            // 2. a selector declared by ANY class in this TU has a
-                            //    slot in the uniform vtable — cross-class guarded
-                            //    sends ([o respondsToSelector:…]; [o speak]) are
-                            //    established jeti idiom (foundation_dispatch,
-                            //    vfs_event_bus) and were allowed at baseline.
+                            // Two exemptions only: Foundation sources (their own
+                            // inlining quirks are not user errors) and selectors
+                            // that never dispatch through the receiver's vtable
+                            // slot (`respondsToSelector:` plus the synthesized root
+                            // methods). A selector declared on SOME OTHER class in
+                            // this TU used to be exempt too, on the theory that the
+                            // uniform vtable has a slot for the name — it does, but
+                            // the receiver's own class initializes it to NULL, so
+                            // the send segfaulted at runtime (probe: `Mute *m;
+                            // [m speak]` with `speak` declared on Talker only).
+                            // ObjC rejects the same shape at compile time.
+                            // Two shape-based escapes remain besides Foundation:
+                            // a subclass that declares the selector makes the
+                            // send downcast-safe (see
+                            // `a_subclass_declares_selector`), and `[obj ivar]`
+                            // is C field access, not a send (see
+                            // `selector_is_known_ivar`).
                             if !self.is_foundation_source(e.line)
                                 && !Self::is_vtable_exempt_selector(selector)
-                                && !self.method_param_decls.contains_key(selector)
+                                && !self.selector_is_known_ivar(selector)
+                                && !self.a_subclass_declares_selector(cn, selector)
                             {
                                 self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                                     "no visible method '{}' on receiver type '{} *' — static dispatch would hit a NULL vtable slot; declare it on '{}' (or a superclass) or type the receiver as 'id'",
                                     selector, cn, cn));
                             }
                         }
+                    }
+                } else if !*is_class_method {
+                    // No static class to walk: `id` / `instancetype` / a
+                    // protocol-qualified receiver / an unresolved chain. The only
+                    // thing provable here is the absolute absence of a
+                    // declaration in this unit, which leaves codegen with no
+                    // vtable member to name at all — it emitted `o->shrink` and
+                    // clang rejected it with "no member named 'shrink' in 'struct
+                    // NPObject'". Report that as a Jeti diagnostic instead of
+                    // letting it surface as broken generated C.
+                    if !self.is_foundation_source(e.line)
+                        && !Self::is_vtable_exempt_selector(selector)
+                        && !self.selector_is_known_ivar(selector)
+                        && !self.selector_declared_anywhere(selector)
+                    {
+                        self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
+                            "no visible method '{}' — no class or protocol in this translation unit declares it, so there is no vtable slot to dispatch through; declare it in a shared header",
+                            selector));
                     }
                 }
                 let param_types = recv_class

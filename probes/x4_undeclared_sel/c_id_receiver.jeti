@@ -1,0 +1,22 @@
+// Probe C: `id` receiver + a selector declared on NO class in this TU.
+// `recv_class` is None for `id`, so the static-dispatch check never runs.
+// ObjC rejects this too ("no visible @interface declares the selector").
+#include <stdio.h>
+#import <Foundation/Foundation.hje>
+
+@interface Widget : NPObject
+- (int)size;
+@end
+
+@implementation Widget : NPObject
+- (int)size { return 7; }
+@end
+
+int main() {
+    Widget *w = [[Widget alloc] init];
+    id o = w;
+    printf("size=%d\n", [o size]);
+    // `shrink` exists nowhere — expected to be rejected, not silently NULL.
+    printf("shrink=%d\n", [o shrink]);
+    return 0;
+}

@@ -1,0 +1,30 @@
+// Probe D: cross-class exemption. `speak` is declared on Talker only;
+// sending it to a `Mute *` is allowed today because SOME class in the TU
+// declares the selector (uniform vtable name exists). ObjC rejects it:
+// "no visible @interface for 'Mute' declares the selector 'speak'".
+#include <stdio.h>
+#import <Foundation/Foundation.hje>
+
+@interface Talker : NPObject
+- (int)speak;
+@end
+
+@implementation Talker : NPObject
+- (int)speak { return 1; }
+@end
+
+@interface Mute : NPObject
+- (int)silence;
+@end
+
+@implementation Mute : NPObject
+- (int)silence { return 2; }
+@end
+
+int main() {
+    Mute *m = [[Mute alloc] init];
+    printf("silence=%d\n", [m silence]);
+    // Not guarded by respondsToSelector: — dispatch hits Mute's NULL slot.
+    printf("speak=%d\n", [m speak]);
+    return 0;
+}

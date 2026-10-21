@@ -1,0 +1,8 @@
+#import "lib.hje"
+
+@implementation Widget : NPObject
+- (int)size { return 7; }
+
+// Private helper: declared only here, NOT in lib.hje.
+- (int)secretShrink { return 3; }
+@end
