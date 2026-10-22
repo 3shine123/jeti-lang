@@ -1,0 +1,48 @@
+#ifndef NPTIMER_NH
+#define NPTIMER_NH
+
+#include <stdint.h>
+#include "jeti/runtime.h"
+
+#import <Foundation/NPObject.hje>
+
+// NPTimer —— 定时器（对应 ObjC 的 block 形态 NSTimer）。
+//
+// 时间单位与 ObjC 对齐：NSTimeInterval = double 秒。底层是运行期 timer 注册表
+// （include/jeti/runtime.h 的 timer scheduling layer）——单调毫秒时钟 + 按
+// deadline 排序的链表，由 jeti_sched_poll / jeti_sched_run 泵驱动。
+//
+// 与 ObjC 的差异（诚实边界）：
+// - 没有 run loop mode：Jeti 只有一条全局队列，scheduled* 排进的就是它。
+// - 排程中的 timer 不会被运行期 retain：排程期间调用方必须持有对象
+//   （与 ObjC 相同的实践——scheduledTimer 的返回值总要存进变量）。
+// - 重复 timer 错过的拍不补发：回调被耽误后从当前时刻重排下一拍
+//   （NSTimer 的取舍一致）。
+// - 挂钟来源 hosted 有默认（单调时钟）；-ffreestanding 下须注入
+//   jeti_sched_set_clock，未注入时 timer 永不到期。
+@interface NPTimer : NPObject {
+@public
+    double _timeInterval;              // 秒（NSTimeInterval 对齐）
+    int _repeats;
+    // 已知解析器缺口（NPNotificationCenter.hje 同款）：块指针 ivar 形态
+    // `void (^)(…)` 会被 codegen 从结构体里丢弃，故存 id、调用点强转
+    // （clang 块语义下合法）。
+    id _block;                         // 实际类型 void (^)(NPTimer *)
+    jeti_timer _handle;                // 运行期注册表句柄；NULL = 未排程
+}
+// 创建但不排程（对应 +timerWithTimeInterval:...：须再排程才走；Jeti v1 的
+// 排程入口就是 scheduled*，本工厂给"先建后配"的形态留位）。
++ (NPTimer *)timerWithTimeInterval:(double)seconds repeats:(int)repeats block:(void (^)(NPTimer *))block;
+// 创建并排程（对应 +scheduledTimerWithTimeInterval:repeats:block:）。
++ (NPTimer *)scheduledTimerWithTimeInterval:(double)seconds repeats:(int)repeats block:(void (^)(NPTimer *))block;
+// 立即触发一次 block（不改排程节奏；对已失效的 timer 是 no-op，ObjC 对齐）。
+- (void)fire;
+// 取消排程；之后 isValid 为 0。对一次性 timer 的重复 invalidate 幂等。
+- (void)invalidate;
+// 已排程（或正在回调中）为 1；一次性 fire 完、被 invalidate、或从未排程为 0。
+- (int)isValid;
+// 排程间隔（秒），与创建时传入的 seconds 一致。
+- (double)timeInterval;
+@end
+
+#endif

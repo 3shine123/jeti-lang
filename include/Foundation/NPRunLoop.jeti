@@ -1,0 +1,28 @@
+#import <Foundation/NPRunLoop.hje>
+#import <Foundation/NPObject.jeti>
+
+// 进程级单例：`+mainRunLoop` 的返回值。惰性创建，永不释放（与 NSRunLoop 的
+// 主 run loop 同寿命）。
+static NPRunLoop *g_mainRunLoop = 0;
+
+@implementation NPRunLoop
+
++ (NPRunLoop *)mainRunLoop {
+    if (!g_mainRunLoop) {
+        g_mainRunLoop = [[NPRunLoop alloc] init];
+    }
+    return g_mainRunLoop;
+}
+
+- (void)run {
+    // 机制层的阻塞泵：deadline 之间睡眠，timer 注册表与就绪队列同时排空
+    // 即返回。-ffreestanding 无此符号——裸机主循环自己泵（机制层文档已注）。
+    jeti_sched_run_loop();
+}
+
+- (void)poll {
+    // 非阻塞一泵：先到期 timer（回调可入队任务），再清一次就绪队列。
+    jeti_sched_run();
+}
+
+@end

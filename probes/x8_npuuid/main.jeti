@@ -1,0 +1,69 @@
+/* NPUUID 探针（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * A1 形状：36 字符、横线在 8/13/18/23、全十六进制、version=='4'、variant∈[89AB]
+ * A2 唯一性：两次 +UUID 不同
+ * A3 往返：initWithUUIDString:(UUIDString) → UUIDString 恒等；小写输入可解析
+ * A4 值相等：isEqual: 按值比较；跨对象不同 UUID 不等
+ * A5 非法输入：空串/短串/错位横线/坏十六进制/超长 → nil
+ * 期望输出：A1..A5 各一行 "ok"，失败行打印原因。
+ */
+
+#import <Foundation/Foundation.hje>
+#import <Foundation/NPUUID.hje>
+#include <stdio.h>
+#include <string.h>
+
+static int is_hex(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static int shape_ok(const char *s) {
+    static const int dashes[4] = { 8, 13, 18, 23 };
+    if (strlen(s) != 36) { return 0; }
+    for (int d = 0; d < 4; d++) { if (s[dashes[d]] != '-') { return 0; } }
+    for (int i = 0; i < 36; i++) { if (s[i] != '-' && !is_hex(s[i])) { return 0; } }
+    if (s[14] != '4') { return 0; }
+    if (s[19] != '8' && s[19] != '9' && s[19] != 'A' && s[19] != 'B') { return 0; }
+    return 1;
+}
+
+int main(void) {
+    /* A1 形状 */
+    NPUUID *u = [NPUUID UUID];
+    NPString *ustr = [u UUIDString];
+    const char *s = [ustr UTF8String];
+    if (shape_ok(s)) { printf("A1 ok\n"); } else { printf("A1 FAIL str=%s\n", s); }
+
+    /* A2 唯一性 */
+    NPUUID *u2 = [NPUUID UUID];
+    NPString *u2str = [u2 UUIDString];
+    if (strcmp(s, [u2str UTF8String]) != 0) { printf("A2 ok\n"); } else { printf("A2 FAIL same\n"); }
+
+    /* A3 往返 + 小写输入 */
+    NPUUID *rt = [[NPUUID alloc] initWithUUIDString:ustr];
+    char lowered[64];
+    for (size_t i = 0; i <= strlen(s) && i < 40; i++) {
+        char c = s[i];
+        lowered[i] = (c >= 'A' && c <= 'F') ? (char)(c + 32) : c;
+    }
+    NPMutableString *lower = [NPMutableString stringWithUTF8String:lowered];
+    NPUUID *rt2 = [[NPUUID alloc] initWithUUIDString:lower];
+    NPString *rtstr = [rt UUIDString];
+    NPString *rt2str = [rt2 UUIDString];
+    if (rt && strcmp([rtstr UTF8String], s) == 0) { printf("A3a ok\n"); } else { printf("A3a FAIL roundtrip\n"); }
+    if (rt2 && strcmp([rt2str UTF8String], s) == 0) { printf("A3b ok (lowercase accepted)\n"); } else { printf("A3b FAIL lowercase\n"); }
+
+    /* A4 值相等 */
+    if ([u isEqual:rt] && u != rt && ![u isEqual:u2]) { printf("A4 ok\n"); } else { printf("A4 FAIL isEqual\n"); }
+
+    /* A5 非法输入 → nil */
+    int bad_ok = 1;
+    const char *bads[5] = { "", "12345678", "1234567-1234-1234-1234-123456789012",
+                            "12345678-1234-1234-1234-12345678901G", "12345678-1234-1234-1234-1234567890123" };
+    for (int i = 0; i < 5; i++) {
+        NPUUID *bad = [[NPUUID alloc] initWithUUIDString:[NPString stringWithUTF8String:bads[i]]];
+        if (bad) { bad_ok = 0; printf("A5 FAIL accepted: '%s'\n", bads[i]); }
+    }
+    if (bad_ok) { printf("A5 ok\n"); }
+    return 0;
+}

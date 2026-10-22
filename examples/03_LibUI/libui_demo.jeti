@@ -4,9 +4,16 @@
  * Every widget is a class, every callback is a block, every piece of state
  * is an object. No structs, no casts, no callback-context pointers — the
  * wrapper (include/LibUI.jeti) keeps the C in C.
+ *
+ * This demo also shows off the newer language surface:
+ *   • async/await   — async methods, `[NPTask blockOn:async ^… ]` bridge
+ *   • switch patterns — comparison arms (`case > 66`, ranges), `when` guards
+ *   • @defer        — Go-style scope-exit cleanup
+ *   • for-in        — collection iteration (parser-desugared, nil safe)
+ *   • boxing        — @8, @16, … produce real NPNumber objects
  * ───────────────────────────────────────────────────────────────────────── */
 
-#import <Foundation/Foundation.jeti>
+#import <Foundation/Foundation.hje>
 #import <LibUI.hje>
 /* Single-TU build: the wrapper's implementation is inlined into this same
  * translation unit. (jetic's uniform-vtable layout is currently per-TU, so
@@ -36,10 +43,72 @@
 - (void)reset { _value = 0; }
 @end
 
-/* ── The label the counter widgets all update. ── */
+/* ── Loader: an async model. `async int` means "suspends, produces an int";
+ * the body returns the business type directly and every call site must
+ * `await` it. The only sync→async bridge is [NPTask blockOn:<async block>],
+ * so the button handler enters through that. ── */
+
+@interface Loader : NPObject
+- (async int)fetchChunk:(int)n;
+- (async NPString *)loadReport;
+- (void)saveReport:(const char *)text;
+@end
+
+@implementation Loader : NPObject
+- (async int)fetchChunk:(int)n {
+    int raw = await n;                    /* a real suspension point */
+    return raw * 2;                       /* body returns T, not a task */
+}
+
+- (async NPString *)loadReport {
+    /* Boxing literals: each @n is a real NPNumber. All-same-type array
+     * literals infer their element type, so no annotation is needed. */
+    NPArray<NPNumber *> *chunks = @[ @8, @16, @32, @64 ];
+
+    int total = 0;
+    for (NPNumber *c in chunks) {         /* for-in: evaluated once, nil safe */
+        int got = await [self fetchChunk:[c intValue]];
+        total += got;
+    }
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "loaded %d units (async/await)", total);
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (void)saveReport:(const char *)text {
+    FILE *f = fopen("/tmp/jeti_libui_demo.log", "w");
+    if (!f) return;
+    @defer { fclose(f); }                 /* runs on EVERY exit of this block */
+    fputs(text, f);
+}
+@end
+
+/* ── The labels the counter and loader widgets all update. Blocks in an
+ * async block may only capture parameters + self (phase-3 limitation), so
+ * widget references the async block touches live in file scope. ── */
 
 static Label *g_countLabel = 0;
 static Slider *g_countSlider = 0;
+static Label *g_moodLabel = 0;
+static Label *g_statusLabel = 0;
+static Progress *g_progress = 0;
+
+/* Widget references the async block touches live in file scope: an async
+ * block may only capture parameters + self (phase-3 limitation), so statics
+ * are the sanctioned channel — and the button callback calls this plain
+ * helper rather than bridging inline. */
+static void run_load_demo(void) {
+    [g_statusLabel setText:"loading…"];
+    [g_progress setValue:0];
+    [NPTask blockOn:async ^ void {
+        Loader *loader = [[Loader alloc] init];
+        NPString *report = await [loader loadReport];
+        [loader saveReport:[report UTF8String]];
+        [g_statusLabel setText:[report UTF8String]];
+        [g_progress setValue:100];
+    }];
+}
 
 static void counter_show(int value) {
     char buf[64];
@@ -48,11 +117,28 @@ static void counter_show(int value) {
     [g_countSlider setValue:value];
 }
 
+/* switch patterns on a scalar subject: comparison arms only (a constant arm
+ * like `case 0:` cannot mix with pattern arms in M1). */
+static void mood_show(int value) {
+    if (!g_moodLabel) return;
+    switch (value) {
+        case > 66:
+            [g_moodLabel setText:"mood: hot"];
+            break;
+        case > 0 && <= 66:                /* a range arm */
+            [g_moodLabel setText:"mood: warm"];
+            break;
+        case <= 0:
+            [g_moodLabel setText:"mood: cold"];
+            break;
+    }
+}
+
 int main() {
     @autoreleasepool {
         [App start];
 
-        Window *win = [Window windowWithTitle:"Jeti + libui-ng" width:600 height:400];
+        Window *win = [Window windowWithTitle:"Jeti + libui-ng" width:600 height:440];
         [win onClosing:^int {
             [App quit];
             return 1;
@@ -116,33 +202,52 @@ int main() {
         [row append:reset stretch:1];
 
         g_countSlider = [Slider sliderWithMin:-100 max:100];
+        g_moodLabel = [Label labelWithText:"mood: zero"];
         [g_countSlider onChanged:^{
-            counter_show([g_countSlider value]);   /* dragging feeds the model */
+            int v = [g_countSlider value];
+            counter_show(v);
+            mood_show(v);                 /* switch patterns classify it */
         }];
         [controls append:g_countSlider stretch:0];
+        [controls append:g_moodLabel stretch:0];
 
-        /* ── Tab 2: About — editable log, checkbox, progress ── */
+        [controls append:[Separator horizontalSeparator] stretch:0];
+
+        /* ── Tab 1 ends: the async loader. The handler is a plain sync
+         * block; it enters async land through the one sanctioned bridge. ── */
+        Box *loadRow = [Box horizontalBox];
+        [loadRow setPadded:1];
+        [controls append:loadRow stretch:0];
+
+        g_statusLabel = [Label labelWithText:"idle"];
+        g_progress = [Progress progressBar];
+
+        Button *load = [Button buttonWithTitle:"Simulate load"];
+        [load onClicked:^{
+            run_load_demo();              /* enter async land via the helper */
+        }];
+        [loadRow append:load stretch:1];
+        [loadRow append:g_statusLabel stretch:1];
+
+        [controls append:g_progress stretch:0];
+
+        /* ── Tab 2: About — editable log, checkbox ── */
         Box *about = [Box verticalBox];
         [about setPadded:1];
 
         MultilineEntry *log = [MultilineEntry multilineEntry];
-        [log setText:"Jeti + libui-ng\n\n- Every widget is a class.\n- Every callback is a block.\n- The C never leaves the wrapper."];
+        [log setText:"Jeti + libui-ng\n\n- Every widget is a class.\n- Every callback is a block.\n- async/await drives the loader.\n- switch patterns, @defer, for-in, boxing everywhere."];
         [about append:log stretch:1];
 
         Checkbox *like = [Checkbox checkboxWithTitle:"I like Jeti"];
         [like onToggled:^{
+            /* Object-literal + when-guard patterns would also work here;
+             * the checkbox state is a plain BOOL, so a ternary is honest. */
             [log appendText:[like state] ? "\n+1" : "\n:("];
         }];
         [about append:like stretch:0];
 
-        Progress *bar = [Progress progressBar];
-        [about append:bar stretch:0];
-
-        [log onChanged:^{
-            int n = (int)strlen([log text]);
-            if (n > 100) n = 100;
-            [bar setValue:n];
-        }];
+        [about append:[Label labelWithText:"(the log mirrors this file — every construct compiles)"] stretch:0];
 
         /* ── Assemble ── */
         Tab *tabs = [Tab tab];

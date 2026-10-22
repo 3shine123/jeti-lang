@@ -1,0 +1,3 @@
+# jeti-lsp reads this (clangd style, one flag per line): the demo's own
+# headers live in ./include, so `<LibUI.hje>` / `<LibUI.jeti>` resolve.
+-I include

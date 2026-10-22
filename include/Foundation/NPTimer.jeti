@@ -1,0 +1,68 @@
+#import <Foundation/NPTimer.hje>
+#import <Foundation/NPObject.jeti>
+
+// Blocks handed to the runtime registry outlive the creating frame (the
+// callback may fire long after the scheduled* call returned), so the ivar
+// stores a heap copy — same discipline as the LibUI wrapper's callbacks.
+extern void *_Block_copy(const void *src);
+
+// Runtime callback → block invocation. `user` is the NPTimer itself; the
+// registry detached the node before firing, so -invalidate inside the block
+// is a no-op on this timer (already out of the schedule), matching ObjC.
+// (`self` is a keyword in Jeti — the local here is `timer`.)
+static void NPTimer_trampoline(void *user) {
+    NPTimer *timer = (NPTimer *)user;
+    void (^blk)(NPTimer *) = (void (^)(NPTimer *))timer->_block;
+    if (blk) blk(timer);
+}
+
+@implementation NPTimer
+
++ (NPTimer *)timerWithTimeInterval:(double)seconds repeats:(int)repeats block:(void (^)(NPTimer *))block {
+    NPTimer *self = [[NPTimer alloc] init];
+    if (self) {
+        self->_timeInterval = seconds;
+        self->_repeats = repeats;
+        self->_block = (id)_Block_copy((const void *)block);
+        self->_handle = 0;
+    }
+    return self;
+}
+
++ (NPTimer *)scheduledTimerWithTimeInterval:(double)seconds repeats:(int)repeats block:(void (^)(NPTimer *))block {
+    NPTimer *self = [NPTimer timerWithTimeInterval:seconds repeats:repeats block:block];
+    if (self) {
+        uint64_t delay_ms = (uint64_t)(seconds * 1000.0);
+        // A repeating timer with a 0 ms period would read as one-shot in the
+        // registry's period==0 sentinel — clamp to 1 ms so `repeats` wins.
+        uint64_t period_ms = repeats ? (delay_ms ? delay_ms : 1u) : 0u;
+        self->_handle = jeti_sched_add_timer(delay_ms, period_ms, NPTimer_trampoline, self);
+    }
+    return self;
+}
+
+- (void)fire {
+    // ObjC parity: an invalid timer does not fire (one-shot already spent,
+    // or invalidated, or never scheduled).
+    if (![self isValid]) return;
+    void (^blk)(NPTimer *) = (void (^)(NPTimer *))self->_block;
+    if (blk) blk(self);
+}
+
+- (void)invalidate {
+    if (_handle) {
+        jeti_sched_cancel_timer(_handle);
+    }
+    _handle = 0;
+    self->_block = 0;   // the copy is released with the object by ARC
+}
+
+- (int)isValid {
+    return _handle ? jeti_sched_timer_valid(_handle) : 0;
+}
+
+- (double)timeInterval {
+    return _timeInterval;
+}
+
+@end

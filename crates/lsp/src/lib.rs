@@ -847,10 +847,19 @@ impl Server {
             // hover highlight, and cmd+click to the resolved file.
             "textDocument/documentLink" => {
                 let uri = request_uri(message);
+                // The link target resolves through the same effective search
+                // path the diagnostics ran with — a project's compile_flags.txt
+                // `-I` dirs must reach the resolver too, or a header the
+                // analysis accepts shows no underline (probe-verified:
+                // `LibUI.hje` under `examples/03_LibUI/compile_flags.txt`).
                 let links = self
                     .docs
                     .get(uri)
-                    .map(|doc| self.document_links(uri, &doc.text))
+                    .map(|doc| (doc.path.clone(), doc.text.clone()))
+                    .map(|(path, text)| {
+                        let dirs = self.effective_options(&path).search_dirs;
+                        self.document_links(uri, &text, &dirs)
+                    })
                     .unwrap_or_default();
                 vec![response(id, Value::Array(links))]
             }
@@ -1196,7 +1205,7 @@ impl Server {
     /// the target is the resolved file when the search path — project dirs,
     /// then the C driver's system dirs — finds one. A path nothing resolves
     /// still gets its range, without a target.
-    fn document_links(&self, uri: &str, text: &str) -> Vec<Value> {
+    fn document_links(&self, uri: &str, text: &str, search_dirs: &[String]) -> Vec<Value> {
         let doc_dir = self
             .docs
             .get(uri)
@@ -1212,7 +1221,7 @@ impl Server {
                     end: LspPosition { line: i as u32, character: end as u32 },
                 }),
             });
-            if let Some(path) = self.resolve_header(&raw, doc_dir.as_deref()) {
+            if let Some(path) = self.resolve_header(&raw, doc_dir.as_deref(), search_dirs) {
                 link["target"] = json!(file_uri(&path));
             }
             links.push(link);
@@ -1221,14 +1230,16 @@ impl Server {
     }
 
     /// First existing `dir / raw` across the document's own directory, the
-    /// configured `--include` search path, and the C driver's system
-    /// directories — project paths shadow system paths, clangd's precedence.
-    fn resolve_header(&self, raw: &str, doc_dir: Option<&str>) -> Option<String> {
+    /// document's effective search path (server flags plus the project's
+    /// configuration file — the same dirs the analysis ran with), and the C
+    /// driver's system directories — project paths shadow system paths,
+    /// clangd's precedence.
+    fn resolve_header(&self, raw: &str, doc_dir: Option<&str>, search_dirs: &[String]) -> Option<String> {
         let mut dirs: Vec<String> = Vec::new();
         if let Some(d) = doc_dir {
             dirs.push(d.to_string());
         }
-        dirs.extend(self.options.search_dirs.iter().cloned());
+        dirs.extend(search_dirs.iter().cloned());
         dirs.extend(system_include_dirs().iter().cloned());
         for dir in &dirs {
             let candidate = std::path::Path::new(dir).join(raw);
@@ -3005,6 +3016,37 @@ int main(void) { return 0; }
         // the clangd-parity behavior — so the miss case needs a real miss.)
         let unresolved = &links[1];
         assert!(unresolved.get("target").is_none(), "{unresolved:?}");
+    }
+
+    /// The project's `compile_flags.txt` reaches the link resolver, not just
+    /// the diagnostics: a header found only through the flags file's `-I` dir
+    /// still gets a target (the LibUI-demo regression — the import analyzed
+    /// clean while the underline was missing).
+    #[test]
+    fn a_flags_file_include_dir_reaches_document_links() {
+        let dir = std::env::temp_dir().join("jeti_lsp_unit_links_flags");
+        std::fs::create_dir_all(dir.join("include")).unwrap();
+        std::fs::write(dir.join("include/helper.hje"), "// helper\n").unwrap();
+        // One flag per line; the relative dir resolves against this file's
+        // own directory, clangd's rule.
+        std::fs::write(dir.join("compile_flags.txt"), "-I include\n").unwrap();
+        let src = "#import <helper.hje>\n";
+        let mut server = Server::new(AnalysisOptions::default());
+        let uri = path_to_uri(&dir.join("links.jeti").to_string_lossy());
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+            }},
+        }));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 51, "method": "textDocument/documentLink",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        let links = out[0]["result"].as_array().expect("links array");
+        assert_eq!(links.len(), 1, "{links:?}");
+        let target = links[0]["target"].as_str().expect("target via flags file");
+        assert!(target.ends_with("include/helper.hje"), "{target}");
     }
 
     #[test]

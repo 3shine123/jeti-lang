@@ -1,0 +1,36 @@
+#ifndef NPUUID_NH
+#define NPUUID_NH
+
+#include <stdint.h>
+
+#import <Foundation/NPObject.hje>
+
+// NPUUID —— RFC 4122 UUID（对应 ObjC 的 NSUUID）。
+//
+// 128 位以两个 uint64 存储（_hi/_lo），避免数组 ivar 的解析边界。
+// 字符串形态是 ObjC 对齐的大写规范形：8-4-4-4-12，小写横线。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - `+UUID` / `-init` 生成 v4 随机 UUID：hosted 从 /dev/urandom 取熵；
+//   -ffreestanding 无熵源，退化为"静态计数器 xorshift + 地址混合"——
+//   形状合法（v4 位段齐全）但**可预测**，需要真随机的裸机程序须自备熵源。
+// - `-initWithUUIDString:` 只接受规范 36 字符形（8-4-4-4-12，横线必须有，
+//   十六进制大小写均可）；非法输入返回 nil（ObjC 对齐）。
+// - `-UUIDString` 输出大写规范形；`-description` 同形（ObjC 对齐）。
+// - `-isEqual:` 按值比较 128 位（ObjC 对齐）；`-hash` 后置。
+@interface NPUUID : NPObject {
+@public
+    uint64_t _hi;   // 字节 0..7（网络序读入后按大端拼装）
+    uint64_t _lo;   // 字节 8..15
+}
+// 新的随机 v4 UUID（ObjC +uuid 对齐）。
++ (NPUUID *)UUID;
+// 新的随机 v4 UUID（ObjC -init 对齐：alloc init 即随机）。
+- (id)init;
+// 解析 36 字符规范形；非法输入返回 nil（ObjC -initWithUUIDString: 对齐）。
+- (id)initWithUUIDString:(NPString *)str;
+// 大写规范形字符串。
+- (id)UUIDString;
+@end
+
+#endif

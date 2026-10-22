@@ -300,20 +300,34 @@ fn vtable_sig_segment(
 /// business type T of `async T`. Plain methods keep their bare name, so their
 /// fingerprints are unchanged. (The old `!` failable mark died with the
 /// second-batch try-await design, plan §9.5.)
-fn async_sig_marks(ast: &AstUnit) -> HashMap<String, String> {
-    let mut marks: HashMap<String, String> = HashMap::new();
+///
+/// Every declaration of a selector contributes a mark (`None` = declared
+/// synchronously), and the caller only stamps the fingerprint when all of
+/// them agree. A private-tail `- (async void)run` next to Foundation's
+/// synchronous `-run` is a *different method* that happens to share the slot
+/// name; letting either stamp the other's fingerprint makes two TUs that
+/// agree on the shared segment disagree on `__sig` (that was the NPRunLoop
+/// `-run` R3 abort). On disagreement the name goes in bare — a missed guard,
+/// never a false report.
+fn async_sig_marks(ast: &AstUnit) -> HashMap<String, Vec<Option<String>>> {
+    let mut marks: HashMap<String, Vec<Option<String>>> = HashMap::new();
     for d in &ast.decls {
         if let AstDeclData::Class { methods, .. } = &d.data {
             for m in methods {
-                if let (AstDeclData::Method { async_marker: true, return_type, .. }, Some(sel)) =
+                if let (AstDeclData::Method { async_marker, return_type, .. }, Some(sel)) =
                     (&m.data, &m.name)
                 {
-                    let mut mark = String::from("|async");
-                    if let Some(t) = return_type.as_deref().and_then(business_return_type) {
-                        mark.push(':');
-                        mark.push_str(&ast_type_to_c_str(t));
-                    }
-                    marks.insert(sanitize_sel_name(sel), mark);
+                    let mark = if *async_marker {
+                        let mut mk = String::from("|async");
+                        if let Some(t) = return_type.as_deref().and_then(business_return_type) {
+                            mk.push(':');
+                            mk.push_str(&ast_type_to_c_str(t));
+                        }
+                        Some(mk)
+                    } else {
+                        None
+                    };
+                    marks.entry(sanitize_sel_name(sel)).or_default().push(mark);
                 }
             }
         }
@@ -339,6 +353,22 @@ static METHOD_METADATA: OnceLock<HashMap<String, (usize, String)>> = OnceLock::n
 // Two classes may share a selector (e.g. get:) with DIFFERENT signatures, so
 // dispatch must cast the vtable member using the receiver's static class.
 static CLASS_METHOD_METADATA: OnceLock<HashMap<String, HashMap<String, (usize, String)>>> = OnceLock::new();
+
+/// Local variable declarations seen during body conversion: name → flat class
+/// name (only class-typed locals are recorded). The dispatch cast must use the
+/// RECEIVER's static class, but lowering passes (async state machines, block
+/// thunks) rebuild receiver expressions and drop the checker-stamped
+/// `expr_type` — without this table an ordinary `Svc *s` fell through to the
+/// any-class-with-this-selector guess, which let an unrelated class's
+/// signature (e.g. NPRunLoop's `- (void)run`) be cast onto a send whose
+/// receiver class declares `- (async void)run`. Last-writer-wins on shadowing;
+/// a stale entry is harmless because the lookup still walks class_infos and
+/// falls back when the recorded class never declared the selector.
+static LOCAL_VAR_CLASS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn local_var_class() -> std::sync::MutexGuard<'static, HashMap<String, String>> {
+    LOCAL_VAR_CLASS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap()
+}
 
 fn get_vtable_param_type(method_name: &str, param_index: usize) -> Option<String> {
     METHOD_METADATA.get()
@@ -2117,10 +2147,30 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                         }
                     }
                 }
-                vtable_class = vtable_class.or_else(|| receiver.expr_type.as_ref()
-                    .and_then(|t| t.class_ref.as_ref())
+                vtable_class = vtable_class.or_else(|| {
+                    receiver.expr_type.as_ref()
+                    .and_then(|t| {
+                        // The receiver's static class: prefer the
+                        // elaborator-resolved `class_ref` (generic-aware), then
+                        // the plain named-pointer spelling the checker stamps
+                        // on every typed receiver (`Svc *s`). Without the
+                        // second source only generic receivers resolved, and
+                        // an ordinary `Svc *s` fell through to the
+                        // any-class-with-this-selector guess — letting an
+                        // unrelated class's signature (e.g. NPRunLoop's
+                        // `- (void)run`) be cast onto a send whose receiver
+                        // class declares `- (async void)run`.
+                        if let Some(cr) = t.class_ref.as_ref() {
+                            return Some(cr.clone());
+                        }
+                        if t.is_pointer && t.prim == TypePrim::Named {
+                            return t.name.as_deref()
+                                .map(|n| n.split('<').next().unwrap_or(n).to_string());
+                        }
+                        None
+                    })
                     .and_then(|cr| {
-                        let flat = name_flat(cr);
+                        let flat = name_flat(&cr);
                         class_infos.get(&flat).and_then(|info| {
                             if info.method_names.iter().any(|n| n == &sel) {
                                 Some(info.class_name.clone())
@@ -2144,11 +2194,22 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                                 None
                             }
                         })
-                    }));
+                    })
+                });
                 // If the receiver is a concrete class variable, use its type.
                 if vtable_class.is_none() {
                     if let AstExprData::VarRef { name, .. } = &receiver.data {
-                        let flat = name_flat(name);
+                        // A local variable naming a class is a class receiver
+                        // (`[NPString string]`); anything else may be a local
+                        // object recorded by the Decl arm above — its declared
+                        // class is the receiver's static class.
+                        let lookup = if class_infos.contains_key(&name_flat(name)) {
+                            name.clone()
+                        } else {
+                            LOCAL_VAR_CLASS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().get(name).cloned()
+                                .unwrap_or_else(|| name.clone())
+                        };
+                        let flat = name_flat(&lookup);
                         if let Some(info) = class_infos.get(&flat) {
                             // Check if this class (or its superclass chain) has the method
                             let mut cur = info.class_name.clone();
@@ -3094,6 +3155,33 @@ fn convert_stmt(as_: &AstStmt, class_infos: &std::collections::BTreeMap<String, 
         AstStmtData::Case { value, body } => CgStmt { kind: CgStmtKind::Case, line, col, data: CgStmtData::Case { value: Box::new(convert_expr(value, &class_infos)), body: Box::new(convert_stmt(body, &class_infos)) } },
         AstStmtData::Default(body) => CgStmt { kind: CgStmtKind::Default, line, col, data: CgStmtData::Default(Box::new(convert_stmt(body, &class_infos))) },
         AstStmtData::Decl(d) => {
+            // Record class-typed locals for dispatch-cast resolution (see
+            // LOCAL_VAR_CLASS). Declared-before-use keeps the entry ahead of
+            // the sends that need it; multi-var chains arrive via `next`.
+            {
+                let mut map = local_var_class();
+                let mut cur: Option<&AstDecl> = Some(d);
+                while let Some(decl) = cur {
+                    if let (Some(name), AstDeclData::Variable { var_type, next, .. }) =
+                        (&decl.name, &decl.data)
+                    {
+                        match var_type.as_deref() {
+                            Some(vt) if vt.is_pointer && vt.prim == TypePrim::Named => {
+                                if let Some(n) = vt.name.as_deref() {
+                                    let base = n.split('<').next().unwrap_or(n);
+                                    map.insert(name.clone(), base.to_string());
+                                }
+                            }
+                            // A redeclaration with a non-class type must not
+                            // leave the old class entry behind.
+                            _ => { map.remove(name); }
+                        }
+                        cur = next.as_deref();
+                    } else {
+                        cur = None;
+                    }
+                }
+            }
             let decls = convert_decl(d, &class_infos);
             if let Some(decl_cg) = decls.into_iter().next() {
                 match decl_cg.data {
@@ -6391,7 +6479,26 @@ method_names: info.method_names,
         vtable_sig_segment(slots_manifest, public_methods, &global_instance_method_names)
             .into_iter()
             .map(|name| match sig_marks.get(&name) {
-                Some(mark) => format!("{}{}", name, mark),
+                Some(decls) => {
+                    // Unanimity rule (see `async_sig_marks`): stamp the mark
+                    // only when every declaration of this selector agrees on
+                    // it. A same-named synchronous declaration means the shared
+                    // slot is not what the async one describes — keep the bare
+                    // name rather than making agreeing TUs disagree.
+                    let mut distinct: Vec<&String> = Vec::new();
+                    let mut has_sync = false;
+                    for m in decls {
+                        match m {
+                            Some(mk) => { if !distinct.contains(&mk) { distinct.push(mk); } }
+                            None => has_sync = true,
+                        }
+                    }
+                    if distinct.len() == 1 && !has_sync {
+                        format!("{}{}", name, distinct[0])
+                    } else {
+                        name
+                    }
+                }
                 None => name,
             })
             .collect();
@@ -7645,7 +7752,11 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
                 let _ = write!(out, "{}    void *__isa;\n", ind);
                 let _ = write!(out, "{}    struct {} *__forwarding;\n", ind, byref_name);
                 let _ = write!(out, "{}    int __flags;\n", ind);
-                let _ = write!(out, "{}    {} __value;\n", ind, decl_type);
+                // __value keeps the declared array shape (`size_t __value[4]`) —
+                // dropping the suffix made the cell a scalar and every captured
+                // subscript inside the block failed to compile
+                // ("subscripted value is not an array").
+                let _ = write!(out, "{}    {} __value{};\n", ind, decl_type, array_suffix.as_deref().unwrap_or(""));
                 let _ = write!(out, "{}}};\n", ind);
                 let _ = write!(out, "{}struct {} {} = {{\n", ind, byref_name, name);
                 let _ = write!(out, "{}    .__forwarding = &{},\n", ind, name);
@@ -7927,7 +8038,13 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
                 out.push_str("    void *__isa;\n");
                 let _ = write!(out, "    struct {} *__forwarding;\n", byref_name);
                 out.push_str("    int __flags;\n");
-                let _ = write!(out, "    {} __value;\n", var_type);
+                // Array capture: var_type carries the `[N]` suffix — keep it on
+                // __value so captured subscripts inside the block compile.
+                let (vbase, vsuffix) = match var_type.find('[') {
+                    Some(p) => (&var_type[..p], &var_type[p..]),
+                    None => (var_type.as_str(), ""),
+                };
+                let _ = write!(out, "    {} __value{};\n", vbase, vsuffix);
                 let _ = write!(out, "}} {};\n", byref_name);
                 let _ = write!(out, "struct {} {} = {{\n", byref_name, d.name);
                 let _ = write!(out, "    .__forwarding = &{},\n", d.name);
@@ -8410,7 +8527,13 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
                 out.push_str("    void *__isa;\n");
                 let _ = write!(out, "    struct {} *__forwarding;\n", byref_name);
                 out.push_str("    int __flags;\n");
-                let _ = write!(out, "    {} __value;\n", var_type);
+                // Array capture: var_type carries the `[N]` suffix — keep it on
+                // __value so captured subscripts inside the block compile.
+                let (vbase, vsuffix) = match var_type.find('[') {
+                    Some(p) => (&var_type[..p], &var_type[p..]),
+                    None => (var_type.as_str(), ""),
+                };
+                let _ = write!(out, "    {} __value{};\n", vbase, vsuffix);
                 let _ = write!(out, "}} {};\n", byref_name);
                 let _ = write!(out, "struct {} {} = {{\n", byref_name, decl.name);
                 let _ = write!(out, "    .__forwarding = &{},\n", decl.name);

@@ -1623,6 +1623,32 @@ Notes:
 - **`jeti_metaInit()`** is only *required* for umbrella builds that reach implementations through `#import "*.jeti"` (single-TU builds where no TU owns the metadata). With the precompiled library — and with every normal `jetic` workflow — metadata is statically initialized at load time and the call is an idempotent no-op.
 - Re-implementing a library class in a client is standard C override semantics against the archive (the library's member stays dormant unless referenced) — but slots for methods you do not implement stay NULL, so implement everything you dispatch.
 
+### Timers — NPTimer
+
+`NPTimer` is the block-shaped `NSTimer` port, on a new timer layer in the runtime (`include/jeti/runtime.h`): deadlined callbacks in a sorted list beside the task ready queue — mechanism only, no locks, no libc, freestanding-safe.
+
+```jeti
+#import <Foundation/Foundation.hje>
+
+int main() {
+    @autoreleasepool {
+        [NPTimer scheduledTimerWithTimeInterval:0.5 repeats:1 block:^(NPTimer *t) {
+            printf("tick\n");
+            if ([t timeInterval] > 0 && rand() % 2) [t invalidate];
+        }];
+        [NPTimer scheduledTimerWithTimeInterval:2.0 repeats:0 block:^(NPTimer *t) {
+            printf("done\n");
+        }];
+        [[NPRunLoop mainRunLoop] run];   // blocks, ticks, returns when everything drains
+    }
+    return 0;
+}
+```
+
+API is ObjC-aligned: `+scheduledTimerWithTimeInterval:repeats:block:` (schedule), `+timerWithTimeInterval:repeats:block:` (create only), `-fire`, `-invalidate`, `-isValid`, `-timeInterval` (seconds — `NSTimeInterval` parity). Semantics too: a one-shot reads invalid once fired; `-fire` never disturbs the schedule; a repeating timer that misses beats coalesces them into one late fire and never drifts.
+
+The pump is explicit, like ObjC's run loop — but it lives in `NPRunLoop`, not in your code: `[[NPRunLoop mainRunLoop] run]` sleeps between deadlines and returns when the timer registry and the task ready queue both empty — the `[[NSRunLoop mainRunLoop] run]` shape (`NPRunLoop` also has `-poll`, the one legal home for GUI/embedded hosts that pump once per event-loop turn; applications never need it). Same-name selectors on user classes (`- (async void)run`, `+ (void)run`) coexist legally: the `+`/`-` kind and the dispatch-cast signature resolve along the receiver's own class chain, so a Foundation `-run` never pollutes a user class's `-run`. The `jeti_sched_*` C API underneath is the mechanism layer — freestanding has no built-in clock and no blocking pump: inject a tick source with `jeti_sched_set_clock` and pump from your main loop (`jeti_sched_run()`); until a clock is injected, no timer ever comes due. The clock hook doubles as the test seam — golden `tests/golden/13_foundation/13_timer/` drives the whole semantics table on a virtual clock.
+
 ### Hello World
 
 ```jeti

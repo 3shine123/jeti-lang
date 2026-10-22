@@ -17,7 +17,7 @@
 10_edge_cases/      边界情况（nil、instancetype、@class、@selector 等）
 11_multi_file_union/多文件 #import 联合（故意失败样本用 -F 后缀标记）
 12_namespace/       @namespace / @using
-13_foundation/      Foundation 容器（NPString / NPArray / NPMutableArray / NPLog / description）
+13_foundation/      Foundation 系列（按类分子目录）：01_npobject…07_npmutablearray 容器基础（NPString / NPArray / NPMutableArray / NPLog / description）、08_dispatch isKindOfClass: / respondsToSelector: / isEqual:、09_extras 字典键下标 `d[@"k"]` 读（objectForKey:）/写（setObject:forKey:）+ NPAssert + 数组下标回归、10_values NPNull / NPValue / NPDate / NPData·NPMutableData / NPEnumerator、11_io NPProcessInfo / NPFileManager / NPData 文件读写（连带修复 C 八进制字面量被当十进制的编译器 Bug）、12_notify NPNotificationCenter / NPCountedSet / NPCache（连带记录 `(^ *` 块指针类型解析死循环缺口）、13_timer NPTimer + 运行期 timer 层（虚拟时钟驱动整张语义表）
 14_generics/        泛型单态化
 15_exceptions/      @try / @catch / @finally / @throw
 16_control_flow/    控制流（if / while / for / switch）
@@ -34,7 +34,6 @@
 29_block_array/     Block + 数组组合
 30_for_in/          for (T x in coll) 遍历
 31_proto_conformance/ 协议一致性检查 + 协议组合 P & Q
-32_foundation_dispatch/ isKindOfClass: / respondsToSelector: / isEqual:
 33_struct_eq/       struct == / != 值比较
 34_async/           await 状态机（async 调用唯一形态 await；sync main 经 blockOn 桥进入）
 35_variadic_method/ 真 variadic 方法（va_list）
@@ -54,10 +53,6 @@
 49_soft_keywords/   软关键字矩阵：async/await/throws/when/in/nullable/nonnull 七词 × 字段/局部/ivar/方法名/选择子位 + 关键字位 + `id` 各名字位（README 含三列消歧表）
 50_blockon_paren_async/ 括号包裹的 blockOn 实参：`[NPTask blockOn:(async ^…)]` 三种拼写（裸/括号/括号+体内 await）均过桥执行（2026-10-15 M3 回归）
 51_block_return_suffix/ 整数后缀返回类型推导：块字面量省略返回时 `7L`/`7LL`/`7U`/十六进制后缀落正确宽度（2026-10-15 P0 回归，lexer int_suffix → parser expr_type → checker 保留）
-52_foundation_extras/ Foundation 补全：字典键下标 `d[@"k"]` 读（objectForKey:）/写（setObject:forKey:）重写、NPAssert 断言宏、数组下标回归（2026-10-16）
-53_foundation_values/ Foundation 批次1 值/数据核心：NPNull（单例占位）/ NPValue（装箱标量+Range，类型标签判等）/ NPDate（时间点）/ NPData·NPMutableData（二进制缓冲区）/ NPEnumerator（枚举适配）（2026-10-16）
-54_foundation_io/ Foundation 批次2 I/O 与进程：NPProcessInfo（pid/环境变量/主机名）/ NPFileManager（目录递归创建·列举·删除·拷贝·移动）/ NPData 文件读写（带 NPError 变体、原子写）（2026-10-16，连带修复 C 八进制字面量被当十进制的编译器 Bug）
-55_foundation_notify/ Foundation 批次3 通知与容器扩展：NPNotificationCenter（块回调总线，通配+倒序投递）/ NPCountedSet（多重集合计数，自含移除）/ NPCache（countLimit + LRU 淘汰）（2026-10-16，连带记录 `(^ *` 块指针类型解析死循环缺口）
 ```
 
 > 每个目录的 `README.md` 记录该特性的**实现要点、判据表、M1 限制与踩过的坑**——排查问题时先看它，比读 `.jeti` 快得多。

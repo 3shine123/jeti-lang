@@ -1,0 +1,94 @@
+/* NPIndexSet 探针（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * A1 构造：空集 first/last=NPNotFound、count=0；单索引；区间构造
+ * A2 查询：containsIndex 命中/边界/未命中；count 是元素数不是区间数
+ * A3 相邻合并：add [0,3) 后 add [3,5) 合成一段 [0,5)；隔空加产生两段
+ * A4 跨区间切割：remove 中段把区间一分为二；remove 全段清空
+ * A5 枚举：升序全量枚举，块回调逐个触发
+ * A6 isEqual：区间表同形相等；不同形不等
+ * A7 intersects：相交/相邻不相交/空区间
+ * 期望输出：A1..A7 各一行 ok。
+ */
+
+#import <Foundation/Foundation.hje>
+#import <Foundation/NPIndexSet.hje>
+#include <stdio.h>
+
+int main(void) {
+    /* A1 构造 */
+    NPIndexSet *empty = [NPIndexSet indexSet];
+    NPIndexSet *single = [NPIndexSet indexSetWithIndex:7];
+    NPRange r05;
+    r05.location = 0; r05.length = 5;
+    NPIndexSet *rng = [NPIndexSet indexSetWithIndexesInRange:r05];
+    int a1 = [empty count] == 0 && [empty firstIndex] == NPNotFound && [empty lastIndex] == NPNotFound
+          && [single count] == 1 && [single firstIndex] == 7 && [single lastIndex] == 7
+          && [rng count] == 5 && [rng firstIndex] == 0 && [rng lastIndex] == 4;
+    printf("A1 %s\n", a1 ? "ok" : "FAIL");
+
+    /* A2 查询 */
+    int a2 = [rng containsIndex:0] && [rng containsIndex:4] && ![rng containsIndex:5] && ![rng containsIndex:99];
+    printf("A2 %s\n", a2 ? "ok" : "FAIL");
+
+    /* A3 相邻合并 */
+    NPMutableIndexSet *m = [[NPMutableIndexSet alloc] init];
+    NPRange r03, r35, r10_12;
+    r03.location = 0; r03.length = 3;
+    r35.location = 3; r35.length = 2;
+    r10_12.location = 10; r10_12.length = 2;
+    [m addIndexesInRange:r03];
+    [m addIndexesInRange:r35];          // 相邻 → 合并成 [0,5)
+    [m addIndexesInRange:r10_12];       // 隔空 → 新段
+    int a3 = [m count] == 7 && [m firstIndex] == 0 && [m lastIndex] == 11 && [m containsIndex:4] && [m containsIndex:10];
+    printf("A3 %s\n", a3 ? "ok" : "FAIL");
+
+    /* A4 跨区间切割 */
+    NPRange r13, r68;
+    r13.location = 1; r13.length = 3;   // 去 {1,2,3} → {0} ∪ {4}
+    [m removeIndexesInRange:r13];
+    NPRange r67;
+    r67.location = 6; r67.length = 2;   // 去 {6,7}（6 不在，7 在）→ {4} ∪ {10,11}
+    [m removeIndexesInRange:r67];
+    int a4 = [m containsIndex:0] && [m containsIndex:4] && ![m containsIndex:1] && ![m containsIndex:7] && [m containsIndex:10] && [m count] == 4;
+    printf("A4 %s\n", a4 ? "ok" : "FAIL");
+
+    /* A5 枚举升序 */
+    NPIndexSet *enumSet = [NPIndexSet indexSetWithIndexesInRange:r03];
+    NPRange r10;
+    r10.location = 10; r10.length = 1;
+    NPMutableIndexSet *em = [[NPMutableIndexSet alloc] init];
+    [em addIndexesInRange:r03];
+    [em addIndexesInRange:r10];          // {0,1,2,10}
+    __block int seq_ok = 1;
+    __block size_t expect[4]; expect[0] = 0; expect[1] = 1; expect[2] = 2; expect[3] = 10;
+    __block int ei = 0;
+    [em enumerateUsingBlock:^(size_t idx) {
+        if (ei >= 4 || idx != expect[ei]) { seq_ok = 0; }
+        ei++;
+    }];
+    int a5 = seq_ok && ei == 4;
+    printf("A5 %s\n", a5 ? "ok" : "FAIL");
+
+    /* A6 isEqual */
+    NPRange r02;
+    r02.location = 0; r02.length = 2;
+    NPIndexSet *s1 = [NPIndexSet indexSetWithIndexesInRange:r02];
+    NPMutableIndexSet *s2 = [[NPMutableIndexSet alloc] init];
+    [s2 addIndex:0];
+    [s2 addIndex:1];
+    NPMutableIndexSet *s3 = [[NPMutableIndexSet alloc] init];
+    [s3 addIndex:0];
+    [s3 addIndex:2];
+    int a6 = [s1 isEqual:s2] && (NPObject *)s1 != (NPObject *)s2 && ![s1 isEqual:s3] && ![s1 isEqual:rng];
+    printf("A6 %s\n", a6 ? "ok" : "FAIL");
+
+    /* A7 intersects */
+    NPRange r20_22, r22_24, r30_32;
+    r20_22.location = 20; r20_22.length = 2;   // {20,21}
+    r22_24.location = 22; r22_24.length = 2;   // {22,23} 相邻不相交
+    r30_32.location = 30; r30_32.length = 0;   // 空
+    NPIndexSet *i1 = [NPIndexSet indexSetWithIndexesInRange:r20_22];
+    int a7 = [i1 intersectsIndexesInRange:r20_22] && ![i1 intersectsIndexesInRange:r22_24] && ![i1 intersectsIndexesInRange:r30_32];
+    printf("A7 %s\n", a7 ? "ok" : "FAIL");
+    return 0;
+}

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 // ─── JETI_CLASS_$_jeti_root (defined weak; codegen's jeti_metaInit fills it) ──
 
@@ -500,6 +501,10 @@ void jeti_task_mark_ready(NPTask *task) {
 }
 
 void jeti_sched_run(void) {
+    /* due timers first: a timer callback may enqueue tasks, and the queue
+     * below is what carries them; timers added during that queue run wait
+     * for the next pump */
+    jeti_sched_poll();
     while (sched_head) {
         NPTask *t = sched_head;
         sched_head = t->parent;
@@ -542,6 +547,122 @@ void *jeti_task_await(NPTask *task) {
         return NULL;
     }
     return task->result;
+}
+
+// ─── Timer scheduling layer (Foundation/NPTimer) ─────────────────────────────
+// Deadlined callbacks beside the ready queue: a sorted intrusive singly-linked
+// list, no locks, no allocation beyond the timer nodes. The clock defaults to
+// the host's monotonic clock; jeti_sched_set_clock(NULL) restores it, any
+// other function replaces it (tests use a virtual clock this way).
+
+static uint64_t (*timer_clock)(void) = NULL;
+
+static uint64_t jeti_host_clock_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+void jeti_sched_set_clock(uint64_t (*fn)(void)) {
+    timer_clock = fn ? fn : jeti_host_clock_ms;
+}
+
+struct jeti_timer_s {
+    uint64_t deadline;              /* absolute ms in the clock's domain */
+    uint64_t period;                /* 0 = one-shot */
+    jeti_timer_fn fn;
+    void *user;
+    int valid;                      /* 0 once fired (one-shot) or cancelled */
+    struct jeti_timer_s *next;
+};
+
+static struct jeti_timer_s *timer_head = NULL;
+
+static void timer_insert(struct jeti_timer_s *t) {
+    /* sorted by deadline; equal deadlines keep insertion order (FIFO) */
+    struct jeti_timer_s **link = &timer_head;
+    while (*link && (*link)->deadline <= t->deadline) link = &(*link)->next;
+    t->next = *link;
+    *link = t;
+    t->valid = 1;
+}
+
+jeti_timer jeti_sched_add_timer(uint64_t delay_ms, uint64_t period_ms,
+                                jeti_timer_fn fn, void *user) {
+    if (!fn) return NULL;
+    struct jeti_timer_s *t = malloc(sizeof(*t));
+    if (!t) return NULL;
+    t->deadline = timer_clock() + delay_ms;
+    t->period = period_ms;
+    t->fn = fn;
+    t->user = user;
+    t->next = NULL;
+    timer_insert(t);
+    return t;
+}
+
+void jeti_sched_cancel_timer(jeti_timer timer) {
+    if (!timer || !timer->valid) return;
+    struct jeti_timer_s **link = &timer_head;
+    while (*link && *link != timer) link = &(*link)->next;
+    if (*link) {
+        *link = timer->next;
+        timer->next = NULL;
+    }
+    timer->valid = 0;   /* the node outlives the schedule: isValid stays answerable */
+}
+
+int jeti_sched_timer_valid(jeti_timer timer) {
+    return timer ? timer->valid : 0;
+}
+
+void jeti_sched_poll(void) {
+    if (!timer_clock) return;   /* no time source: nothing is ever due */
+    uint64_t now = timer_clock();
+    while (timer_head && timer_head->deadline <= now) {
+        /* detach BEFORE firing: the callback may add or cancel freely, and
+         * cancelling itself must be a no-op on the firing timer */
+        struct jeti_timer_s *t = timer_head;
+        timer_head = t->next;
+        t->next = NULL;
+        t->valid = 0;
+        t->fn(t->user);
+        if (t->period) {
+            /* repeating: re-arm on the ORIGINAL cadence — missed beats
+             * coalesce to the one late fire just delivered, and the schedule
+             * does not drift (NSTimer's model: never burst-compensate) */
+            uint64_t now2 = timer_clock();
+            do { t->deadline += t->period; } while (t->deadline <= now2);
+            timer_insert(t);
+        }
+    }
+}
+
+int jeti_sched_has_work(void) {
+    return sched_head != NULL || timer_head != NULL;
+}
+
+/* HOSTED ONLY: the NSRunLoop-run shape. Sleeps until the nearest deadline
+ * (bounded so a wake-up race still re-polls promptly), pumps timers and the
+ * ready queue, exits when both drain. Freestanding has no definition — the
+ * bare-metal owner owns the wait. */
+void jeti_sched_run_loop(void) {
+    for (;;) {
+        jeti_sched_poll();
+        jeti_sched_run();
+        if (!jeti_sched_has_work()) return;
+        uint64_t now = timer_clock();
+        uint64_t deadline = timer_head ? timer_head->deadline : now;
+        if (deadline > now) {
+            uint64_t sleep_ms = deadline - now;
+            if (sleep_ms > 100u) sleep_ms = 100u;   /* new timers still get seen */
+            struct timespec ts = {
+                .tv_sec = (time_t)(sleep_ms / 1000u),
+                .tv_nsec = (long)(sleep_ms % 1000u) * 1000000L,
+            };
+            nanosleep(&ts, NULL);
+        }
+    }
 }
 
 // ─── Logging ─────────────────────────────────────────────────────────────────

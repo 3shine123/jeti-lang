@@ -129,6 +129,15 @@ pub struct Checker {
     /// for that selector, since the receiver's class isn't statically known
     /// here — this mirrors ObjC's dynamic dispatch (bug #5).
     pub method_kinds: HashMap<String, Vec<bool>>,
+    /// Selector → is_class_method, scoped to the declaring class.
+    /// `method_kinds` above is keyed by selector name alone, so two unrelated
+    /// classes sharing a selector (`NPRunLoop -run` vs `Circle +run`) feed
+    /// each other's flags and the receiver-kind check fires a false positive
+    /// on a send that is perfectly legal for its receiver. The receiver's
+    /// static class is what decides whether a `+/–` mismatch is real, so the
+    /// kind must be looked up along that class's chain — never globally —
+    /// whenever the receiver's class is statically known.
+    pub method_kinds_by_class: HashMap<String, HashMap<String, bool>>,
     /// Names declared as locals/params inside the current method body. Used to
     /// detect when a local `self` shadows the implicit class-method self.
     pub shadowed_locals: Vec<String>,
@@ -363,6 +372,7 @@ impl Checker {
             has_quoted_c_include: false,
             in_clone_eval: 0,
             method_kinds: HashMap::new(),
+            method_kinds_by_class: HashMap::new(),
             shadowed_locals: Vec::new(),
             struct_eq_tags: Vec::new(),
             struct_alias_tags: HashMap::new(),
@@ -600,6 +610,57 @@ impl Checker {
         t.is_pointer = true;
         t.type_args = args.iter().map(|a| render(a)).collect();
         Some(t)
+    }
+
+    /// `+`/`-` kinds of `selector` as declared by `class_name` or its
+    /// superclass chain. None when no class in the chain declares it — the
+    /// caller must stay silent then, never fall back to the global
+    /// selector-keyed table (that is exactly the cross-class confusion this
+    /// table exists to end).
+    fn method_kinds_along_chain(&self, class_name: &str, selector: &str) -> Option<Vec<bool>> {
+        let mut kinds = Vec::new();
+        let mut cur = class_name.to_string();
+        for _ in 0..32 {
+            if let Some(k) = self.method_kinds_by_class.get(&cur).and_then(|m| m.get(selector)) {
+                kinds.push(*k);
+            }
+            let sup = self.symtab.as_ref()
+                .and_then(|st| st.find_class(&cur))
+                .and_then(|c| match &c.data {
+                    SymbolData::Class { superclass: Some(s), .. } if !s.is_empty() => Some(s.clone()),
+                    _ => None,
+                });
+            match sup {
+                Some(s) => cur = s,
+                None => break,
+            }
+        }
+        if kinds.is_empty() { None } else { Some(kinds) }
+    }
+
+    /// The receiver's static class when it is statically known: a typed
+    /// expression, a typed local/param, or (for a `+` send) a class-name
+    /// receiver. None for `id` / protocol-qualified / unresolved receivers,
+    /// where every class-scoped judgement must stay silent.
+    fn receiver_static_class(&self, receiver: &AstExpr, is_class_method: bool) -> Option<String> {
+        if let Some(t) = receiver.expr_type.as_ref() {
+            if let Some(c) = Self::named_class_of(t) {
+                return Some(c);
+            }
+        }
+        if let AstExprData::VarRef { name, .. } = &receiver.data {
+            if is_class_method
+                && self.symtab.as_ref().and_then(|st| st.find_class(name)).is_some()
+            {
+                return Some(name.clone());
+            }
+            if let Some(t) = self.lookup_scope_var_type(name) {
+                if let Some(c) = Self::named_class_of(&t) {
+                    return Some(c);
+                }
+            }
+        }
+        None
     }
 
     /// Param types for `selector` as declared by `class_name` or its
@@ -2199,6 +2260,10 @@ impl Checker {
                                     .entry(cn.clone())
                                     .or_default()
                                     .insert(sel.clone(), v.clone());
+                                self.method_kinds_by_class
+                                    .entry(cn.clone())
+                                    .or_default()
+                                    .insert(sel.clone(), *is_class_method);
                             }
                             self.method_param_decls.entry(sel.clone()).or_default().push(v);
                         }
@@ -2226,6 +2291,9 @@ impl Checker {
                             self.method_params.insert(pname.to_string(), vec![]);
                             self.method_returns.insert(pname.to_string(), pt.clone());
                             self.method_kinds.entry(pname.to_string()).or_default().push(false);
+                            self.method_kinds_by_class
+                                .entry(cn.clone()).or_default()
+                                .insert(pname.to_string(), false);
                             class_table.insert(pname.to_string(), vec![]);
                             self.method_param_decls.entry(pname.to_string()).or_default().push(vec![]);
                         }
@@ -2239,6 +2307,9 @@ impl Checker {
                                 self.method_params.insert(setter.clone(), vec![pt.clone()]);
                                 self.method_returns.insert(setter.clone(), None);
                                 self.method_kinds.entry(setter.clone()).or_default().push(false);
+                                self.method_kinds_by_class
+                                    .entry(cn.clone()).or_default()
+                                    .insert(setter.clone(), false);
                                 class_table.insert(setter.clone(), vec![pt.clone()]);
                                 self.method_param_decls.entry(setter.clone()).or_default().push(vec![pt]);
                             }
@@ -3216,10 +3287,24 @@ impl Checker {
                 // `+` class methods, an instance only `-` instance methods.  In
                 // ObjC these are runtime "unrecognized selector" crashes; Jeti
                 // (static) rejects them at compile time.
-                if let Some(kinds) = self.method_kinds.get(selector) {
-                    // Enforce only when every declaration of this selector
-                    // agrees on its +/- kind; otherwise the receiver's class is
-                    // not statically resolvable and the check must stay silent.
+                //
+                // Resolved along the receiver's OWN class chain. The old global
+                // selector-keyed lookup mixed declarations from unrelated
+                // classes (`NPRunLoop -run` + `Circle +run`), so a legal send
+                // could be rejected because some distant class gave the shared
+                // name the other kind. The `+`/`-` kind belongs to the class
+                // that declares it, not to the selector name.
+                let recv_kind_class = self.receiver_static_class(receiver, *is_class_method);
+                let receiver_kinds: Option<Vec<bool>> = match &recv_kind_class {
+                    // Class known but its chain never declares the selector:
+                    // stay silent here — the "no visible method" check below
+                    // owns that case.
+                    Some(cn) => self.method_kinds_along_chain(cn, selector),
+                    // `id` / anchor-class receiver: only the global table can
+                    // say anything, and only when every declaration agrees.
+                    None => self.method_kinds.get(selector).cloned(),
+                };
+                if let Some(kinds) = receiver_kinds {
                     let all_class = kinds.iter().all(|&k| k);
                     let any_class = kinds.iter().any(|&k| k);
                     if all_class != any_class && !all_class && *is_class_method {

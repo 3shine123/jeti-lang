@@ -1,0 +1,91 @@
+/* NPTimer 探针（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * A 部分：虚拟时钟（jeti_sched_set_clock 注入）+ jeti_sched_poll —— 确定性验证
+ *   一次性到期/不提前/不重发、重复 timer 计数、invalidate 停拍、fire 语义。
+ * B 部分：真实时钟 + jeti_sched_run_loop —— 阻塞泵跑到排空。
+ * 期望输出（逐行核对 expected.txt）：
+ *   A1 one-shot due=1 valid=1 → advance+poll → fired=1 valid=0 → poll again fired=1
+ *   A2 repeat ticks=3 → invalidate → advance+poll → ticks=3 valid=0
+ *   A3 fire manual=1 valid=1 → advance+poll manual=2 valid=0
+ *   A4 unscheduled isValid=0 fire=no-op
+ *   B run-loop fired before drain
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+/* ── 虚拟时钟注入（C 机制层 API 直接可达：runtime.h 已在伞头里）──
+ * 注入/推进/恢复包成 C 桥函数：从 Jeti 侧裸传函数名，代码生成会当成调用
+ * （返回值当指针），取址语义须在纯 C 里落。 */
+static unsigned long long g_fake_now = 0;
+static unsigned long long fake_clock(void) { return g_fake_now; }
+static void probe_use_virtual_clock(void) { jeti_sched_set_clock(&fake_clock); }
+static void probe_advance(int ms) { g_fake_now += (unsigned long long)ms; }
+static void probe_restore_clock(void) { jeti_sched_set_clock(0); }
+
+/* ── 计数器（块捕获标量是 const 拷贝，跨回调累加用文件级全局）── */
+static int g_oneshot_fired = 0;
+static int g_repeat_ticks = 0;
+static int g_manual_fired = 0;
+static int g_runloop_fired = 0;
+
+int main() {
+    @autoreleasepool {
+        probe_use_virtual_clock();          /* A 部分：虚拟时钟 */
+
+        /* A1: 一次性 —— 不提前、到点一次、fire 后 isValid 归 0、不重发 */
+        NPTimer *once = [NPTimer scheduledTimerWithTimeInterval:0.1 repeats:0 block:^(NPTimer *t) {
+            g_oneshot_fired++;
+        }];
+        jeti_sched_poll();
+        printf("A1 early fired=%d valid=%d\n", g_oneshot_fired, [once isValid]);
+        probe_advance(100);
+        jeti_sched_poll();
+        printf("A1 due fired=%d valid=%d\n", g_oneshot_fired, [once isValid]);
+        jeti_sched_poll();
+        printf("A1 again fired=%d\n", g_oneshot_fired);
+
+        /* A2: 重复 —— 每拍一计，invalidate 停拍，isValid 归 0 */
+        NPTimer *rep = [NPTimer scheduledTimerWithTimeInterval:0.05 repeats:1 block:^(NPTimer *t) {
+            g_repeat_ticks++;
+        }];
+        probe_advance(50);
+        jeti_sched_poll();
+        probe_advance(50);
+        jeti_sched_poll();
+        probe_advance(50);
+        jeti_sched_poll();
+        printf("A2 ticks=%d valid=%d\n", g_repeat_ticks, [rep isValid]);
+        [rep invalidate];
+        probe_advance(150);
+        jeti_sched_poll();
+        printf("A2 after-invalidate ticks=%d valid=%d\n", g_repeat_ticks, [rep isValid]);
+
+        /* A3: fire —— 手动触发不改排程节奏（block 跑了但未来拍仍在） */
+        NPTimer *later = [NPTimer scheduledTimerWithTimeInterval:0.5 repeats:0 block:^(NPTimer *t) {
+            g_manual_fired++;
+        }];
+        [later fire];
+        printf("A3 manual=%d valid=%d\n", g_manual_fired, [later isValid]);
+        probe_advance(500);
+        jeti_sched_poll();
+        printf("A3 after-schedule manual=%d valid=%d\n", g_manual_fired, [later isValid]);
+
+        /* A4: 未排程 —— isValid 0，fire 是 no-op（ObjC 对齐） */
+        NPTimer *idle = [NPTimer timerWithTimeInterval:0.01 repeats:0 block:^(NPTimer *t) {
+            g_manual_fired += 100;
+        }];
+        [idle fire];
+        printf("A4 idle valid=%d manual-still=%d\n", [idle isValid], g_manual_fired);
+
+        /* 回到真实时钟，B 部分验证阻塞泵（排空即返回） */
+        probe_restore_clock();   /* NULL = 恢复 hosted 默认单调时钟 */
+        [NPTimer scheduledTimerWithTimeInterval:0.05 repeats:0 block:^(NPTimer *t) {
+            g_runloop_fired++;
+            printf("B run-loop fired\n");
+        }];
+        [[NPRunLoop mainRunLoop] run];   /* 用户面：阻塞泵，排空即返回 */
+        printf("B drained fired=%d\n", g_runloop_fired);
+    }
+    return 0;
+}

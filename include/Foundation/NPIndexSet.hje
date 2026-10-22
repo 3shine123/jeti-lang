@@ -1,0 +1,71 @@
+#ifndef NPINDEXSET_NH
+#define NPINDEXSET_NH
+
+#include <stdint.h>
+#include <stddef.h>
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+
+// NPNotFound —— 与 ObjC 的 NSNotFound 同值同义：查询落空时的返回。
+#ifndef NPNOTFOUND
+#define NPNotFound ((size_t)-1)
+#endif
+
+// NPIndexSet —— 无符号整数集合（对应 ObjC 的 NSIndexSet）。
+//
+// 内部是**排序、互不重叠的区间表**（starts/lens 两条平行数组），count 是
+// 区间数而非元素数——语义对齐 ObjC：`-count` 返回**元素个数**（区间长度
+// 之和）。空集 firstIndex/lastIndex 返回 NPNotFound。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 区间以 NPRange（location + length，半开 [location, location+length)）
+//   传入，ObjC 的 NSRange 同形。
+// - v1 提供 ascending 枚举（-enumerateUsingBlock:）；reverse 枚举、
+//   -enumerateIndexesInRange:、NSIndexSet 的谓词版枚举待需求出现再加。
+// - 元素量级：区间表按需倍增，零散单索引会退化成 O(n) 区间——大批量散点
+//   请用 NPMutableArray + NPSet。
+@interface NPIndexSet : NPObject {
+@protected
+    size_t *_starts;   // 排序互不重叠区间的起点
+    size_t *_lens;     // 对应区间长度（≥1）
+    size_t _rcount;    // 区间数
+    size_t _rcap;      // 区间表容量
+}
+// 空集。
++ (NPIndexSet *)indexSet;
+// 单索引集合。
++ (NPIndexSet *)indexSetWithIndex:(size_t)index;
+// 区间集合（半开 [range.location, range.location+range.length)）；length 0 = 空集。
++ (NPIndexSet *)indexSetWithIndexesInRange:(NPRange)range;
+// 元素个数（区间长度之和，ObjC -count 对齐）。
+- (size_t)count;
+// 是否包含 index。
+- (BOOL)containsIndex:(size_t)index;
+// 最小元素；空集返回 NPNotFound。
+- (size_t)firstIndex;
+// 最大元素；空集返回 NPNotFound。
+- (size_t)lastIndex;
+// 是否与给定区间有交集。
+- (BOOL)intersectsIndexesInRange:(NPRange)range;
+// 升序枚举全部元素；block 返回后继续（ObjC 的 enumerateIndexesUsingBlock: 对齐，
+// 无 stop 参数——Jeti v1 不支持提前停止，需要提前停就用 containsIndex: 自查）。
+- (void)enumerateUsingBlock:(void (^)(size_t))block;
+@end
+
+// NPMutableIndexSet —— 可变版（对应 NSMutableIndexSet）。
+@interface NPMutableIndexSet : NPIndexSet {
+}
+// 加入单个索引（已存在则 no-op）。
+- (void)addIndex:(size_t)index;
+// 加入区间（半开）；与既有区间自动合并。
+- (void)addIndexesInRange:(NPRange)range;
+// 移除单个索引（不存在则 no-op）。
+- (void)removeIndex:(size_t)index;
+// 移除区间（半开）；跨区间切割。
+- (void)removeIndexesInRange:(NPRange)range;
+// 清空。
+- (void)removeAllIndexes;
+@end
+
+#endif

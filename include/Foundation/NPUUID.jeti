@@ -1,0 +1,140 @@
+#import <Foundation/NPUUID.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPObject.jeti>
+
+#include <stdio.h>
+#include <string.h>
+
+#ifndef __JETI_FREESTANDING
+// hosted：熵源是 /dev/urandom。只在此处打开——失败时退到 freestanding 回退，
+// 与裸机共用同一条"形状合法但可预测"的诚实边界。
+static int np_uuid_read_urandom(unsigned char out[16]) {
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (!f) { return 0; }
+    size_t got = fread(out, 1, 16, f);
+    fclose(f);
+    return got == 16;
+}
+#endif
+
+// freestanding 回退熵源：静态计数器 xorshift + 地址混合。形状合法、可预测
+// （见 NPUUID.hje 的诚实边界）；裸机程序要真随机须自备熵源后注入。
+static uint64_t np_uuid_freestanding_state = 0x9E3779B97F4A7C15ull;
+
+static void np_uuid_fill_fallback(unsigned char out[16]) {
+    uint64_t s = np_uuid_freestanding_state;
+    s ^= s << 13; s ^= s >> 7; s ^= s << 17;
+    s ^= (uint64_t)(uintptr_t)&np_uuid_freestanding_state;
+    np_uuid_freestanding_state = s;
+    for (int i = 0; i < 8; i++) { out[i] = (unsigned char)(s >> (i * 8)); }
+    for (int i = 0; i < 8; i++) { out[8 + i] = (unsigned char)(np_uuid_freestanding_state >> (i * 8)); }
+}
+
+// 取 16 字节熵并烙上 v4 位段（version 0100，variant 10xx）。
+static void np_uuid_random_bytes(unsigned char b[16]) {
+    int ok = 0;
+#ifndef __JETI_FREESTANDING
+    ok = np_uuid_read_urandom(b);
+#endif
+    if (!ok) { np_uuid_fill_fallback(b); }
+    b[6] = (unsigned char)((b[6] & 0x0F) | 0x40);  // version 4
+    b[8] = (unsigned char)((b[8] & 0x3F) | 0x80);  // variant 10xx
+}
+
+// 16 字节 → 两个 u64（大端拼装，字符串形即按此序展开）。
+static void np_uuid_bytes_to_halves(const unsigned char b[16], uint64_t *hi, uint64_t *lo) {
+    *hi = 0; *lo = 0;
+    for (int i = 0; i < 8; i++) { *hi = (*hi << 8) | b[i]; }
+    for (int i = 0; i < 8; i++) { *lo = (*lo << 8) | b[8 + i]; }
+}
+
+// 大写规范形：8-4-4-4-12。
+static void np_uuid_format(uint64_t hi, uint64_t lo, char out[37]) {
+    sprintf(out, "%08llX-%04llX-%04llX-%04llX-%012llX",
+            (unsigned long long)(hi >> 32),
+            (unsigned long long)((hi >> 16) & 0xFFFFull),
+            (unsigned long long)(hi & 0xFFFFull),
+            (unsigned long long)(lo >> 48),
+            (unsigned long long)(lo & 0xFFFFFFFFFFFFull));
+}
+
+static int uuid_hex_nibble(char c) {
+    if (c >= '0' && c <= '9') { return c - '0'; }
+    if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
+    if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
+    return -1;
+}
+
+// 严格规范形解析：8-4-4-4-12，横线必须有，十六进制大小写均可。
+static int np_uuid_parse_canonical(const char *s, uint64_t *hi, uint64_t *lo) {
+    static const int dashes[4] = { 8, 13, 18, 23 };
+    for (int d = 0; d < 4; d++) {
+        if (s[dashes[d]] != '-') { return 0; }
+    }
+    if (s[36] != '\0') { return 0; }
+    unsigned char b[16];
+    int bi = 0;
+    for (int i = 0; i < 36; i++) {
+        if (s[i] == '-') { continue; }
+        int h = uuid_hex_nibble(s[i]);
+        if (h < 0) { return 0; }
+        int l = uuid_hex_nibble(s[i + 1]);
+        if (l < 0) { return 0; }
+        b[bi++] = (unsigned char)((h << 4) | l);
+        i++;
+    }
+    *hi = 0; *lo = 0;
+    np_uuid_bytes_to_halves(b, hi, lo);
+    return 1;
+}
+
+@implementation NPUUID
+
++ (NPUUID *)UUID {
+    unsigned char b[16];
+    np_uuid_random_bytes(b);
+    NPUUID *u = [[NPUUID alloc] init];
+    if (!u) { return NULL; }
+    np_uuid_bytes_to_halves(b, &u->_hi, &u->_lo);
+    return u;
+}
+
+- (id)init {
+    self = [super init];
+    if (self) {
+        unsigned char b[16];
+        np_uuid_random_bytes(b);
+        np_uuid_bytes_to_halves(b, &_hi, &_lo);
+    }
+    return self;
+}
+
+- (id)initWithUUIDString:(NPString *)str {
+    self = [super init];
+    if (self) {
+        const char *s = [str UTF8String];
+        if (!s || !np_uuid_parse_canonical(s, &_hi, &_lo)) {
+            return NULL;  // ObjC 对齐：非法输入返回 nil
+        }
+    }
+    return self;
+}
+
+- (id)UUIDString {
+    char buf[37];
+    np_uuid_format(_hi, _lo, buf);
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (id)description {
+    return [self UUIDString];
+}
+
+- (BOOL)isEqual:(id)object {
+    if (self == object) { return 1; }
+    if (![object isKindOfClass:[NPUUID class]]) { return 0; }
+    NPUUID *o = object;
+    return _hi == o->_hi && _lo == o->_lo;
+}
+
+@end

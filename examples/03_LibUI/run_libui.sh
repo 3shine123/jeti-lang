@@ -33,6 +33,15 @@ BUILD=/tmp/libui_build
 rm -rf "$BUILD"
 mkdir -p "$BUILD"
 
+# Precompiled Foundation mode: the demo imports Foundation.hje (declarations
+# only) and links the archive — the recommended multi-TU shape. Build it once
+# if it is not there yet.
+FOUNDATION_A="$JETILANG/target/foundation/libjetifoundation.a"
+if [ ! -f "$FOUNDATION_A" ]; then
+    echo "==> Building libjetifoundation.a (first run)..."
+    "$JETILANG/tools/build-foundation-lib.sh" >&2
+fi
+
 echo "==> Transpile (jetic)..."
 "$JETIC" -rewrite-jeti "$SCRIPT_DIR/libui_demo.jeti" -o "$BUILD/libui_demo.c" \
     -I "$SCRIPT_DIR/include" -I "$LIBUI"
@@ -49,6 +58,7 @@ fi
 clang $FLAGS "${INCLUDES[@]}" \
     -x c "$BUILD/libui_demo.c" \
     "$JETILANG/include/jeti/runtime.c" \
+    -x none "$FOUNDATION_A" \
     -L "$LIBUI/build/meson-out" -lui \
     -Wl,-rpath,"$LIBUI/build/meson-out" \
     "${FRAMEWORKS[@]}" \

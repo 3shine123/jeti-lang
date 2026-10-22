@@ -1554,6 +1554,34 @@ jetic -rewrite-jeti mylib.jeti --slots <libjetifoundation.slots 的副本> -o my
 
 这套代价来自"静态派发 + 每 TU 统一布局"本身：C++ 的每类独立 vtable 没有这个放大效应，ObjC 靠运行期按名查表绕开。Jeti 选择保持静态派发，于是把一致性要求显式化成随包清单——**冻结 ABI 是分发预编译库的前提**，不是实现缺陷。仍然存在的 R3 边界：客户端只 import `.hje` 却往公开段新增类方法（而不是新增类），段差异照旧会 abort。
 
+#### 定时器 —— NPTimer
+
+`NPTimer` 是 block 形态 `NSTimer` 的移植，底座是运行期新增的 **timer 层**（`include/jeti/runtime.h`）：deadline 回调按序挂在任务就绪队列旁边——机制层只有排序链表，无锁、零 libc，裸机可用。
+
+```jeti
+#import <Foundation/Foundation.hje>
+
+int main() {
+    @autoreleasepool {
+        [NPTimer scheduledTimerWithTimeInterval:0.5 repeats:1 block:^(NPTimer *t) {
+            printf("tick\n");
+            if ([t timeInterval] > 0 && rand() % 2) [t invalidate];
+        }];
+        [NPTimer scheduledTimerWithTimeInterval:2.0 repeats:0 block:^(NPTimer *t) {
+            printf("done\n");
+        }];
+        [[NPRunLoop mainRunLoop] run];   // 阻塞、按拍触发，全部排空后返回
+    }
+    return 0;
+}
+```
+
+API 与语义都对齐 ObjC：`+scheduledTimerWithTimeInterval:repeats:block:`（创建并排程）、`+timerWithTimeInterval:repeats:block:`（只创建）、`-fire`、`-invalidate`、`-isValid`、`-timeInterval`（单位是秒——`NSTimeInterval` 对齐）。一次性 fire 完 `isValid` 归 0；`-fire` 不动排程节奏；重复 timer 错过的拍**收敛成一次迟到触发**、节奏永不漂移（NSTimer 模型，绝不补发）。
+
+泵是显式的，和 ObjC 的 run loop 一个思路——但它住在 **`NPRunLoop`** 里，不在你的代码里：`[[NPRunLoop mainRunLoop] run]` 在 deadline 之间睡眠，timer 注册表与任务就绪队列全空才返回——`[[NSRunLoop mainRunLoop] run]` 的形态（另有 `-poll`，给 GUI/嵌入式宿主每轮事件循环驱一泵的合法入口，应用代码用不到）。`run` 与用户类自己的 `-run`/`+run` 同名共存是合法的：选择子的 `+`/`-` 种类与调用点强转签名都按**接收者的静态类**解析（见 architecture.md R3/R4），同名不同签名不会互相污染。底下的 `jeti_sched_*` C API 是机制层，不是用户面——`-ffreestanding` 下没有内建时钟、也没有阻塞泵：用 `jeti_sched_set_clock` 注入时钟源，在主循环里自己泵（`jeti_sched_run()`）；时钟未注入时任何 timer 都不会到期。时钟钩子同时是测试缝——golden `tests/golden/13_foundation/13_timer/` 用虚拟时钟驱动整张语义表。
+
+与 ObjC 的诚实差异：没有 run loop mode（Jeti 只有一条全局队列）；排程中的 timer 不被运行期 retain，排程期间调用方须持有对象。
+
 ### Hello World
 
 ```jeti

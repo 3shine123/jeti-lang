@@ -1,0 +1,225 @@
+#import <Foundation/NPIndexSet.hje>
+#import <Foundation/NPObject.jeti>
+
+#include <stdlib.h>
+#include <string.h>
+
+// —— 文件内辅助（np_indexset_ 前缀：裸名会撞系统符号且静默走错实现，
+// 见 golden 14_uuid 的命名注记）——
+
+// 区间表扩容到至少 want 个区间。
+static int np_indexset_reserve(NPIndexSet *self, size_t want) {
+    if (want <= self->_rcap) { return 1; }
+    size_t ncap = self->_rcap ? self->_rcap * 2 : 8;
+    while (ncap < want) { ncap *= 2; }
+    size_t *ns = (size_t *)realloc(self->_starts, ncap * sizeof(size_t));
+    if (!ns) { return 0; }
+    size_t *nl = (size_t *)realloc(self->_lens, ncap * sizeof(size_t));
+    if (!nl) { free(ns); return 0; }
+    self->_starts = ns;
+    self->_lens = nl;
+    self->_rcap = ncap;
+    return 1;
+}
+
+// 在 pos 位置插入一个区间（调用方保证排序不变性）。
+static int np_indexset_insert_range(NPIndexSet *self, size_t pos, size_t start, size_t len) {
+    if (!np_indexset_reserve(self, self->_rcount + 1)) { return 0; }
+    memmove(&self->_starts[pos + 1], &self->_starts[pos], (self->_rcount - pos) * sizeof(size_t));
+    memmove(&self->_lens[pos + 1], &self->_lens[pos], (self->_rcount - pos) * sizeof(size_t));
+    self->_starts[pos] = start;
+    self->_lens[pos] = len;
+    self->_rcount++;
+    return 1;
+}
+
+// 删除 [pos, pos+n) 区间。
+static void np_indexset_erase_ranges(NPIndexSet *self, size_t pos, size_t n) {
+    memmove(&self->_starts[pos], &self->_starts[pos + n], (self->_rcount - pos - n) * sizeof(size_t));
+    memmove(&self->_lens[pos], &self->_lens[pos + n], (self->_rcount - pos - n) * sizeof(size_t));
+    self->_rcount -= n;
+}
+
+// 二分找第一个 start > index 的区间下标。
+static size_t np_indexset_upper(NPIndexSet *self, size_t index) {
+    size_t lo = 0, hi = self->_rcount;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (self->_starts[mid] <= index) { lo = mid + 1; } else { hi = mid; }
+    }
+    return lo;
+}
+
+// —— 实现 ——
+
+@implementation NPIndexSet
+
++ (NPIndexSet *)indexSet {
+    return [[NPIndexSet alloc] init];
+}
+
++ (NPIndexSet *)indexSetWithIndex:(size_t)index {
+    NPMutableIndexSet *s = [[NPMutableIndexSet alloc] init];
+    if (!s) { return NULL; }
+    [s addIndex:index];
+    return s;
+}
+
++ (NPIndexSet *)indexSetWithIndexesInRange:(NPRange)range {
+    NPMutableIndexSet *s = [[NPMutableIndexSet alloc] init];
+    if (!s) { return NULL; }
+    if (range.length > 0) { [s addIndexesInRange:range]; }
+    return s;
+}
+
+- (id)init {
+    self = [super init];
+    if (self) {
+        _starts = NULL;
+        _lens = NULL;
+        _rcount = 0;
+        _rcap = 0;
+    }
+    return self;
+}
+
+- (void)dealloc {
+    if (_starts) { free(_starts); _starts = NULL; }
+    if (_lens) { free(_lens); _lens = NULL; }
+    _rcount = 0;
+    _rcap = 0;
+    [super dealloc];
+}
+
+- (size_t)count {
+    size_t total = 0;
+    for (size_t i = 0; i < _rcount; i++) { total += _lens[i]; }
+    return total;
+}
+
+- (BOOL)containsIndex:(size_t)index {
+    size_t up = np_indexset_upper(self, index);
+    if (up == 0) { return 0; }
+    size_t r = up - 1;
+    return index >= _starts[r] && index < _starts[r] + _lens[r];
+}
+
+- (size_t)firstIndex {
+    if (_rcount == 0) { return NPNotFound; }
+    return _starts[0];
+}
+
+- (size_t)lastIndex {
+    if (_rcount == 0) { return NPNotFound; }
+    size_t r = _rcount - 1;
+    return _starts[r] + _lens[r] - 1;
+}
+
+- (BOOL)intersectsIndexesInRange:(NPRange)range {
+    if (range.length == 0) { return 0; }
+    size_t end = range.location + range.length;  // 半开
+    for (size_t i = 0; i < _rcount; i++) {
+        size_t rs = _starts[i];
+        size_t re = rs + _lens[i];
+        if (rs < end && range.location < re) { return 1; }
+        if (rs >= end) { break; }  // 排序表：后续只会更靠右
+    }
+    return 0;
+}
+
+- (void)enumerateUsingBlock:(void (^)(size_t))block {
+    if (!block) { return; }
+    for (size_t r = 0; r < _rcount; r++) {
+        for (size_t i = 0; i < _lens[r]; i++) {
+            block(_starts[r] + i);  // 块指针经 vtable 形参可直呼（clang 块语义）
+        }
+    }
+}
+
+- (BOOL)isEqual:(id)object {
+    if (self == object) { return 1; }
+    if (![object isKindOfClass:[NPIndexSet class]]) { return 0; }
+    NPIndexSet *o = object;
+    if (_rcount != o->_rcount) { return 0; }
+    for (size_t i = 0; i < _rcount; i++) {
+        if (_starts[i] != o->_starts[i] || _lens[i] != o->_lens[i]) { return 0; }
+    }
+    return 1;
+}
+
+@end
+
+@implementation NPMutableIndexSet
+
+- (void)addIndex:(size_t)index {
+    NPRange r;
+    r.location = index;
+    r.length = 1;
+    [self addIndexesInRange:r];
+}
+
+- (void)addIndexesInRange:(NPRange)range {
+    if (range.length == 0) { return; }
+    size_t start = range.location;
+    size_t end = start + range.length;  // 半开
+    size_t up = np_indexset_upper(self, end - 1);
+    // 合并所有与 [start, end) 相交或相邻的区间（相邻：start ≤ rs+len ≤ end-1+1）
+    size_t lo = up;
+    while (lo > 0) {
+        size_t r = lo - 1;
+        if (_starts[r] + _lens[r] >= start) { lo = r; } else { break; }
+    }
+    if (lo == up) {
+        // 无重叠：直接插入
+        if (!np_indexset_insert_range(self, up, start, end - start)) { return; }
+        return;
+    }
+    // 展开合并边界
+    size_t ns = _starts[lo] < start ? _starts[lo] : start;
+    size_t ne = _starts[up - 1] + _lens[up - 1];
+    if (end > ne) { ne = end; }
+    np_indexset_erase_ranges(self, lo, up - lo);
+    np_indexset_insert_range(self, lo, ns, ne - ns);
+}
+
+- (void)removeIndex:(size_t)index {
+    NPRange r;
+    r.location = index;
+    r.length = 1;
+    [self removeIndexesInRange:r];
+}
+
+- (void)removeIndexesInRange:(NPRange)range {
+    if (range.length == 0) { return; }
+    size_t start = range.location;
+    size_t end = start + range.length;  // 半开
+    size_t up = np_indexset_upper(self, end - 1);
+    size_t lo = up;
+    while (lo > 0) {
+        size_t r = lo - 1;
+        if (_starts[r] + _lens[r] > start) { lo = r; } else { break; }
+    }
+    if (lo == up) { return; }  // 无交集
+    // 记录受影响区间的边界（先取出再重排，避免中途改动）
+    size_t head_start = _starts[lo];
+    size_t head_keep = start > head_start ? start - head_start : 0;  // 左侧保留长度
+    size_t tail_start = _starts[up - 1];
+    size_t tail_end = tail_start + _lens[up - 1];
+    size_t tail_keep = tail_end > end ? tail_end - end : 0;          // 右侧保留长度
+    size_t head_len = head_keep;
+    size_t tail_len = tail_keep;
+    np_indexset_erase_ranges(self, lo, up - lo);
+    // 右侧残余（若有）先插，保持排序：先插右段再在其前插左段
+    if (tail_len > 0) {
+        np_indexset_insert_range(self, lo, end, tail_len);
+    }
+    if (head_len > 0) {
+        np_indexset_insert_range(self, lo, head_start, head_len);
+    }
+}
+
+- (void)removeAllIndexes {
+    _rcount = 0;
+}
+
+@end

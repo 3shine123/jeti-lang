@@ -1,0 +1,39 @@
+#ifndef NPRUNLOOP_NH
+#define NPRUNLOOP_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPRunLoop —— 主线程事件泵的 ObjC 面（对应 NSRunLoop 的最小核）。
+//
+// 底层是运行期 timer 注册表 + 任务就绪队列（include/jeti/runtime.h 的
+// scheduling layers）；NPRunLoop 把"谁泵、何时泵"收进一个 ObjC 形态的类，
+// 用户代码不接触任何 jeti_sched_* C API：
+//
+//     [[NPRunLoop mainRunLoop] run];   // 阻塞、按拍触发 timer，排空即返回
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - `-run` 对应 `[[NSRunLoop mainRunLoop] run]`：没有输入源或 timer 时退出——
+//   Jeti 的退出条件是 timer 注册表与就绪队列同时排空。
+//   `run` 是全程序最常见的演示方法名，同名的用户类方法（`- (async void)run`、
+//   `+ (void)run`）与本方法共存是合法的：选择子的 `+`/`-` 种类与强转签名都按
+//   接收者的静态类解析（见 docs/plans/architecture.md R3/R4 与 checker 的
+//   `method_kinds_by_class`），公共段里同名不同签名不会再互相污染。
+// - 没有 run loop mode（NSDefaultRunLoopMode 等）：Jeti 只有一条全局队列；
+//   mode 相关 API（-runMode:beforeDate: 等）待真实需求出现再加。
+// - `-poll` 不是 ObjC 形状（NSRunLoop 的 `-run` 之外没有对应物），它是 GUI/
+//   嵌入式宿主每轮事件循环驱一泵的合法入口——应用代码不需要它。
+@interface NPRunLoop : NPObject {
+@private
+    int _placeholder;
+}
+// 主线程的 run loop（进程级单例）。
++ (NPRunLoop *)mainRunLoop;
+// 阻塞驱动：触发到期 timer、清空就绪队列，两者全空即返回。
+// hosted 下在 deadline 之间睡眠；-ffreestanding 无此实现（主循环自泵）。
+- (void)run;
+// 非阻塞驱动一次：触发全部到期 timer，再清空当前就绪队列。给 GUI/嵌入式
+// 宿主的每轮事件循环用；应用代码请用 -run。
+- (void)poll;
+@end
+
+#endif

@@ -204,3 +204,14 @@ jetic -ffreestanding kernel.jeti       # 裸机（自备运行时）
 ### 回归
 
 `tests/predicate_filter_test.jeti`（自检 38 项：DSL / 占位符 / 量词 / KVC 类链与未命中 / 宿主 API）+ `tests/multi_tu/13_kvc_predicate`（跨 TU 强弱表合并）+ `tests/nil_messaging_test.jeti`（按值 struct 返回不得发表条目）。
+
+## 13. NPTimer 与运行期 timer 层
+
+`include/Foundation/NPTimer.hje/.jeti` 是 block 形态 NSTimer 的移植（`+scheduledTimerWithTimeInterval:repeats:block:` / `+timerWithTimeInterval:…` / `-fire` / `-invalidate` / `-isValid` / `-timeInterval`，单位秒——NSTimeInterval 对齐）。底座是 `include/jeti/runtime.h` 的 **timer 调度层**，与任务就绪队列并行的第二张注册表，同一套"机制层零策略"纪律：
+
+- **结构**：按 deadline 排序的侵入式单链表；无锁、零 libc（`runtime_freestanding.c` 同步一份完整实现）。
+- **时钟可注入**：`jeti_sched_set_clock`。hosted 默认内建单调毫秒时钟（`clock_gettime(CLOCK_MONOTONIC)`）；freestanding **无默认时钟**——未注入前任何 timer 永不到期（`poll` 直接返回），时钟源与泵一样归裸机持有者。
+- **泵**：`jeti_sched_poll()` 非阻塞触发全部到期 timer；`jeti_sched_run()` 先 poll 再清就绪队列；`jeti_sched_has_work()` 是退出条件。**Foundation 面是 `NPRunLoop`**（`+mainRunLoop` / `-run`（包 `jeti_sched_run_loop`，**hosted only**，freestanding 无定义）在 deadline 之间 nanosleep，注册表与队列全空才返回——`[[NSRunLoop mainRunLoop] run]` 的形态；`-poll`（包 `jeti_sched_run()`）给 GUI/嵌入式宿主每轮事件循环驱一泵）。**用户代码不出现 `jeti_sched_*`**——那是机制层，只服务 GUI 宿主与裸机主循环；Jeti 无 run loop mode。**同名选择子按接收者类解析**：`run` 与用户类自己的 `- (async void)run`/`+ (void)run` 同名共存合法——选择子的 `+`/`-` 种类（checker `method_kinds_by_class`）与调用点强转签名（codegen 按接收者静态类 + `LOCAL_VAR_CLASS`）都沿接收者的类链解析；`__sig` 的 async 标记只在全 TU 声明一致时写入（`async_sig_marks`）。
+- **语义（ObjC 对齐）**：一次性 fire 完 `isValid` 归 0；`-fire` 不改排程节奏；回调前节点先摘表——回调内 add/cancel（含自我 cancel）安全；重复 timer 沿**原 cadence** 重排，错过的拍收敛为一次迟到触发、不漂移不补发（NSTimer 模型）。句柄在 fire/cancel 后仍可查询（节点不回收，量级 = timer 个数）。
+- **诚实边界**：Jeti 无 run loop mode；排程中的 timer 不被运行期 retain，排程期间调用方须持有对象；NPTimer 的 block ivar 因块指针 ivar 的解析器缺口（NPNotificationCenter 同款）以 `id` 存储并在调用点强转。
+- **回归**：`tests/golden/13_foundation/13_timer/`（虚拟时钟驱动 A1 一次性 / A2 逐拍重复 / A3 fire / A4 未排程 + B 真实时钟阻塞泵）+ 探针 `probes/x7_nptimer/`。新方法进公共段，`libjetifoundation.slots` 从 135 条增至 **141 条**（NPTimer 4 + NPRunLoop 2），升级后需重建库并重编客户端。

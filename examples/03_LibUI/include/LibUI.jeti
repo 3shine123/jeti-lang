@@ -1,6 +1,6 @@
 #import <LibUI.hje>
 #import <Cocoa.jeti>
-#import <Foundation/Foundation.jeti>
+#import <Foundation/Foundation.hje>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

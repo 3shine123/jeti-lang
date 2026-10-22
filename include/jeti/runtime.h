@@ -342,6 +342,57 @@ void jeti_sched_run(void);
  * for in-task suspension. */
 NPTask *jeti_task_current(void);
 
+// ─── Timer scheduling layer (Foundation/NPTimer) ────────────────────────────
+/* Deadlined callbacks beside the ready queue. Same mechanism-only discipline
+ * as the task layer: a sorted intrusive singly-linked list, no locks, no
+ * libc. The time source is INJECTED — hosted runtime.c installs a monotonic
+ * millisecond clock by default; freestanding installs none, and until the
+ * user provides one no timer ever comes due (the bare-metal owner owns the
+ * tick source exactly like they own the pump loop). */
+
+typedef struct jeti_timer_s *jeti_timer;
+
+/* Fire callback. Runs inside jeti_sched_poll / jeti_sched_run — re-arming
+ * (add) and cancelling timers from inside is safe; cancelling the timer
+ * that is currently firing is a no-op (it is already detached). */
+typedef void (*jeti_timer_fn)(void *user);
+
+/* Install the monotonic millisecond clock. NULL restores the platform
+ * default (hosted: the built-in monotonic clock; freestanding: none). */
+void jeti_sched_set_clock(uint64_t (*fn)(void));
+
+/* Schedule a callback `delay_ms` from now. `period_ms` 0 = one-shot; nonzero
+ * = repeating, re-armed on its original cadence (missed beats coalesce to a
+ * single late fire, the schedule never drifts — ObjC NSTimer's model). The
+ * returned handle stays queryable (jeti_sched_timer_valid) after it fires or
+ * is cancelled: a one-shot reads invalid once fired, matching -[NSTimer
+ * isValid]. */
+jeti_timer jeti_sched_add_timer(uint64_t delay_ms, uint64_t period_ms,
+                                jeti_timer_fn fn, void *user);
+
+/* Remove a scheduled timer. Idempotent; the handle stays queryable. */
+void jeti_sched_cancel_timer(jeti_timer timer);
+
+/* 1 while the timer is scheduled (or just now firing), 0 once fired
+ * (one-shot) or cancelled. NULL reads 0. */
+int jeti_sched_timer_valid(jeti_timer timer);
+
+/* Fire every due timer once, then return — non-blocking. Repeating timers
+ * re-arm; callbacks may enqueue tasks (they run on the next pump). */
+void jeti_sched_poll(void);
+
+/* 1 while either the ready queue or the timer registry is non-empty — the
+ * run-loop exit condition. */
+int jeti_sched_has_work(void);
+
+/* HOSTED ONLY (defined in runtime.c, absent from runtime_freestanding.c):
+ * block, sleeping between timers, until the registry and the ready queue
+ * both drain — `[[NSRunLoop mainRunLoop] run]` with ObjC's run-forever shape
+ * minus the modes: Jeti has one queue, no run-loop modes. On freestanding
+ * the caller owns the wait; the pattern is the plan's
+ * `while (1) { jeti_sched_run(); <WFI>; }`. */
+void jeti_sched_run_loop(void);
+
 // ─── Internal API (for runtime implementation) ───────────────────────────────────
 
 void np_class_register(np_class_t *cls);

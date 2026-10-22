@@ -2868,6 +2868,14 @@ fn lower_toplevel_awaits_expr(e: &mut AstExpr) {
         }
         AstExprData::Comma(parts) => { for p in parts.iter_mut() { lower_toplevel_awaits_expr(p); } }
         AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => lower_toplevel_awaits_expr(inner),
+        // A SYNC block literal is an execution site: the blockOn bridge plants
+        // a synthesized Await inside its body (see lower_async_blocks_expr),
+        // so the body must be walked like any sync function body — without
+        // this the Await survives to codegen as a bare thunk call and the
+        // NPTask * result leaks into whatever context awaited it.
+        // The async-block arm owns is_async: true (its awaits are already
+        // state-machine bookkeeping inside the thunk).
+        AstExprData::Block { body: Some(b), is_async: false, .. } => lower_toplevel_awaits_stmt(b),
         _ => {}
     }
 }
@@ -3307,6 +3315,18 @@ fn lower_async_blocks_expr(
                 end_line: 0,
                 end_col: 0,
             };
+        }
+        // A SYNC block literal is an execution site too: its body runs like
+        // any function body, so a `[NPTask blockOn:async ^…]` inside it must
+        // take the bridge. Without this traversal the nested MsgSend is never
+        // visited (the `_ => {}` fall-through swallowed it) and the call
+        // degraded to `NPTask->blockOn_` in the generated C — probe-verified
+        // for all three spellings, bare/paren/statement, inside a callback
+        // block. The async-block arm above owns `is_async: true`; bodies of
+        // bridged/IIFE async blocks were already lowered before their thunk
+        // is built, so only sync bodies need walking here.
+        AstExprData::Block { body: Some(b), is_async: false, .. } => {
+            lower_async_blocks_stmt(b, seq, top_decls, ctx);
         }
         _ => {}
     }

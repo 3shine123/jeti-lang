@@ -278,7 +278,92 @@ void jeti_task_mark_ready(NPTask *task) {
     (void)jeti_task_start(task);
 }
 
+// ─── Timer scheduling layer (Foundation/NPTimer) ─────────────────────────────
+// Same registry shape as the hosted runtime.c, with two bare-metal forks:
+// NO default clock — until jeti_sched_set_clock installs a tick source no
+// timer ever comes due (poll is a no-op), and NO jeti_sched_run_loop — the
+// main loop owns the wait (`while (1) { jeti_sched_run(); __WFI(); }`).
+
+static uint64_t (*timer_clock)(void) = NULL;
+
+void jeti_sched_set_clock(uint64_t (*fn)(void)) {
+    timer_clock = fn;   /* NULL = no time source; freestanding has no default */
+}
+
+struct jeti_timer_s {
+    uint64_t deadline;              /* absolute ms in the clock's domain */
+    uint64_t period;                /* 0 = one-shot */
+    jeti_timer_fn fn;
+    void *user;
+    int valid;
+    struct jeti_timer_s *next;
+};
+
+static struct jeti_timer_s *timer_head = NULL;
+
+static void timer_insert(struct jeti_timer_s *t) {
+    struct jeti_timer_s **link = &timer_head;
+    while (*link && (*link)->deadline <= t->deadline) link = &(*link)->next;
+    t->next = *link;
+    *link = t;
+    t->valid = 1;
+}
+
+jeti_timer jeti_sched_add_timer(uint64_t delay_ms, uint64_t period_ms,
+                                jeti_timer_fn fn, void *user) {
+    if (!fn) return NULL;
+    struct jeti_timer_s *t = jeti_malloc(sizeof(*t));
+    if (!t) return NULL;
+    t->deadline = timer_clock() + delay_ms;
+    t->period = period_ms;
+    t->fn = fn;
+    t->user = user;
+    t->next = NULL;
+    timer_insert(t);
+    return t;
+}
+
+void jeti_sched_cancel_timer(jeti_timer timer) {
+    if (!timer || !timer->valid) return;
+    struct jeti_timer_s **link = &timer_head;
+    while (*link && *link != timer) link = &(*link)->next;
+    if (*link) {
+        *link = timer->next;
+        timer->next = NULL;
+    }
+    timer->valid = 0;   /* the node outlives the schedule: isValid stays answerable */
+}
+
+int jeti_sched_timer_valid(jeti_timer timer) {
+    return timer ? timer->valid : 0;
+}
+
+void jeti_sched_poll(void) {
+    if (!timer_clock) return;
+    uint64_t now = timer_clock();
+    while (timer_head && timer_head->deadline <= now) {
+        struct jeti_timer_s *t = timer_head;
+        timer_head = t->next;
+        t->next = NULL;
+        t->valid = 0;
+        t->fn(t->user);
+        if (t->period) {
+            uint64_t now2 = timer_clock();
+            do { t->deadline += t->period; } while (t->deadline <= now2);
+            timer_insert(t);
+        }
+    }
+}
+
+int jeti_sched_has_work(void) {
+    return sched_head != NULL || timer_head != NULL;
+}
+
 void jeti_sched_run(void) {
+    /* due timers first: a timer callback may enqueue tasks, and the queue
+     * below is what carries them; timers added during that queue run wait
+     * for the next pump */
+    jeti_sched_poll();
     while (sched_head) {
         NPTask *t = sched_head;
         sched_head = t->parent;
