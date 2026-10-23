@@ -9,25 +9,39 @@
 
 // NPCache — 容量受限的对象缓存（对应 ObjC 的 NSCache 的可用子集）。
 //
-// v1 语义：
+// 语义：
 //   * objectForKey: 命中会把该键提升为最近使用（LRU）；
 //   * 插入超过 countLimit 时淘汰最久未使用的条目（countLimit=0 = 不限）；
+//   * **成本维度**：`setObject:forKey:cost:` 记成本，总成本超过
+//     totalCostLimit 时同样淘汰最久未使用者（totalCostLimit=0 = 不限）。
+//     ObjC 的注释写明「limits are imprecise/not strict」——本实现按确定性的
+//     LRU 淘汰到不超限为止（比 ObjC 严格，但不与其语义冲突）；
 //   * 键用 isEqual: 值语义（NPString/NPNumber 可作键，同 NPDictionary）；
 //   * 缓存持有值（retain），非弱引用 —— ObjC NSCache 的 evictable/弱值
-//     特性 v1 不做。
-// 存储：NPMutableDictionary 键→值 + NPArray 访问序（首=最旧，尾=最新）。
+//     特性不做。
+//
+// ObjC 的 NSCache 不公开 totalCost（头文件里没有该属性），本类同样只给
+// totalCostLimit 访问器；成本是否生效从「哪些键被淘汰」观察。
+// 存储：NPMutableDictionary 键→值 + NPArray 访问序（首=最旧，尾=最新）
+//       + NPMutableDictionary 键→成本。
 @interface NPCache : NPObject {
 @public
     NPMutableDictionary *_store;   // 键 → 值
     NPMutableArray *_order;        // 访问序键表：首=最旧
+    NPMutableDictionary *_costs;   // 键 → NPNumber(成本)
     size_t _countLimit;            // 0 = 不限
+    size_t _totalCostLimit;        // 0 = 不限
+    size_t _totalCost;             // 当前成本总和
 }
 + (NPCache *)cache;
 - (NPCache *)initWithCountLimit:(size_t)limit;
 - (void)setCountLimit:(size_t)limit;
 - (size_t)countLimit;
+- (void)setTotalCostLimit:(size_t)limit;
+- (size_t)totalCostLimit;
 - (id)objectForKey:(id)key;                  // 命中提升 LRU；未中 nil
-- (void)setObject:(id)object forKey:(id)key; // 超限淘汰最旧
+- (void)setObject:(id)object forKey:(id)key;                 // 成本 0
+- (void)setObject:(id)object forKey:(id)key cost:(size_t)cost;
 - (void)removeObjectForKey:(id)key;
 - (void)removeAllObjects;
 - (size_t)count;

@@ -1,0 +1,100 @@
+/* NPExpression golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * P1-5：NPPredicate 的表达式对象层。核对结论：NPPredicate 本身**不是**「只做了
+ * 比较算子」的半成品（它已有 AND/OR/NOT、字符串算子、BETWEEN/IN/ANY/MATCHES）；
+ * 缺的是 ObjC 的 NSExpression 那层**表达式对象**，本用例覆盖它。
+ *
+ * A1 常量表达式：type=0、constantValue、predicateFormat（字符串常量带单引号）
+ * A2 键路径表达式：type=3，经编译期 KVC 表取值（int 键 + 字符串键）
+ * A3 变量表达式：type=2，从 context 绑定字典取值；format 形如 `$x`
+ * A4 被求值对象：type=1，求值即返回传入对象本身
+ * 期望输出：A1..A4 各一行。
+ *
+ * 键解析与 NPPredicate 同源（jeti_kvc_value + 编译期 KVC 表），不做运行期反射。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+/* KVC 可见的测试对象：零参实例方法即键（ObjC getter 约定）。 */
+@interface Person : NPObject {
+@public
+    int _age;
+    NPString *_name;
+}
+- (Person *)initWithAge:(int)age name:(const char *)name;
+- (int)age;
+- (NPString *)name;
+@end
+
+@implementation Person
+
+- (Person *)initWithAge:(int)age name:(const char *)name {
+    self = [super init];
+    if (self) {
+        _age = age;
+        _name = [[NPString alloc] initWithUTF8String:name];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    // 经局部 `id` 释放：直接对 ivar 写 `(NPObject *)_name` 会触发 checker 的
+    // "cast from smaller integer type 'int'" 警告，局部 id 不会。
+    id n = _name;
+    if (n) { jeti_release(n); _name = NULL; }
+    [super dealloc];
+}
+
+- (int)age {
+    return _age;
+}
+
+- (NPString *)name {
+    return _name;
+}
+
+@end
+
+int main(void) {
+    Person *p = [[Person alloc] initWithAge:30 name:"ann"];
+
+    /* A1：常量表达式 */
+    NPExpression *c = [NPExpression expressionForConstantValue:@"ann"];
+    id cv = [c constantValue];
+    NPString *cf = [c predicateFormat];
+    printf("A1 type=%ld value=%s format=%s\n",
+           (long)[c expressionType], [(NPString *)cv UTF8String], [cf UTF8String]);
+
+    /* A2：键路径 —— 经编译期 KVC 表取值（int 键与字符串键各一）。
+       键名用 `[NPString stringWithUTF8String:]` 而非 `@"..."`：类方法走直接
+       调用路径，`@"..."` 发射成 `jeti_stringFromCstr()`（返回 NPObject *）传
+       给 NPString * 形参会报 incompatible pointer types；这是既有 golden 一直
+       沿用的写法。 */
+    NPExpression *kAge = [NPExpression expressionForKeyPath:[NPString stringWithUTF8String:"age"]];
+    NPExpression *kName = [NPExpression expressionForKeyPath:[NPString stringWithUTF8String:"name"]];
+    id av = [kAge expressionValueWithObject:p context:NULL];
+    id nv = [kName expressionValueWithObject:p context:NULL];
+    NPString *kf = [kAge predicateFormat];
+    printf("A2 type=%ld age=%d name=%s format=%s\n",
+           (long)[kAge expressionType],
+           [(NPNumber *)av intValue], [(NPString *)nv UTF8String], [kf UTF8String]);
+
+    /* A3：变量 —— 从 context 绑定字典取 */
+    NPDictionary *ctx = [NPDictionary dictionaryWithObject:@"bound" forKey:@"x"];
+    NPExpression *v = [NPExpression expressionForVariable:[NPString stringWithUTF8String:"x"]];
+    id vv = [v expressionValueWithObject:p context:ctx];
+    NPString *vf = [v predicateFormat];
+    printf("A3 type=%ld value=%s format=%s\n",
+           (long)[v expressionType], [(NPString *)vv UTF8String], [vf UTF8String]);
+
+    /* A4：被求值对象 —— 求值即返回传入对象本身 */
+    NPExpression *eo = [NPExpression expressionForEvaluatedObject];
+    id ev = [eo expressionValueWithObject:p context:NULL];
+    id pobj = p;
+    printf("A4 type=%ld same=%d\n",
+           (long)[eo expressionType], ev == pobj ? 1 : 0);
+
+    jeti_release(pobj);
+    return 0;
+}

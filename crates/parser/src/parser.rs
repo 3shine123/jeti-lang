@@ -1553,6 +1553,92 @@ else if self.match_keyword(KeywordKind::Typeof) {
             },
         }
     }
+    /// Parse an integer literal token's text with C's radix rules: `0x`/`0X`
+    /// hex, leading-`0` octal, decimal otherwise. Shared by primary-expression
+    /// parsing and enum values — the enum path used to call `str::parse`,
+    /// which rejects every `0x` literal, and its `unwrap_or` fallback then
+    /// silently substituted the auto-increment value.
+    fn parse_int_literal_text(text: &str) -> i64 {
+        if text.len() > 2 && (text.starts_with("0x") || text.starts_with("0X")) {
+            i64::from_str_radix(&text[2..], 16).unwrap_or_else(|_| u64::from_str_radix(&text[2..], 16).unwrap_or(0) as i64)
+        } else if text.len() > 1 && text.starts_with('0') && text[1..].bytes().all(|c| (b'0'..=b'7').contains(&c)) {
+            i64::from_str_radix(&text[1..], 8).unwrap_or(0)
+        } else {
+            text.parse::<i64>().unwrap_or_else(|_| text.parse::<u64>().unwrap_or(0) as i64)
+        }
+    }
+
+    /// Fold an enumerator's constant expression to an integer.
+    ///
+    /// C requires enumerator values to be integer constant expressions, and the
+    /// parser stores every member as its folded value — so anything that cannot
+    /// be folded must be *reported*, never quietly replaced by the
+    /// auto-increment value (that silent substitution is how
+    /// `enum { A = 1, B = 0x10, C }` used to compile to `A=1, B=2, C=3`).
+    ///
+    /// Covered: integer/char/bool literals, earlier enumerators of the *same*
+    /// enum (via `seen`), unary `+ - ~ !`, the binary arithmetic / shift /
+    /// relational / equality / bitwise / logical operators, the conditional
+    /// operator, and casts/parentheses over any of those. Anything else — a
+    /// `sizeof`, an identifier from outside this enum, a string — is `None`.
+    fn fold_enum_const(e: &CstExpr, seen: &std::collections::HashMap<String, i64>) -> Option<i64> {
+        match &e.data {
+            CstExprData::Integer(v) => Some(*v),
+            CstExprData::Char(c) => Some(*c as i64),
+            CstExprData::Bool(b) => Some(if *b { 1 } else { 0 }),
+            CstExprData::Ident(name) => seen.get(name).copied(),
+            CstExprData::Paren(inner) => Self::fold_enum_const(inner, seen),
+            CstExprData::Cast { expr, .. } => Self::fold_enum_const(expr, seen),
+            CstExprData::Unary { op, operand, is_postfix } => {
+                if *is_postfix {
+                    return None; // `x++` is not a constant expression
+                }
+                let v = Self::fold_enum_const(operand, seen)?;
+                match *op {
+                    5 => Some(v.wrapping_neg()), // -
+                    6 => Some(v),                // +
+                    7 => Some(!v),               // ~
+                    8 => Some(if v == 0 { 1 } else { 0 }), // !
+                    _ => None,                   // ++/--/*/& are not constant
+                }
+            }
+            CstExprData::Binary { op, left, right } => {
+                let l = Self::fold_enum_const(left, seen)?;
+                let r = Self::fold_enum_const(right, seen)?;
+                match *op {
+                    1 => Some(l.wrapping_mul(r)),
+                    2 => if r == 0 { None } else { Some(l.wrapping_div(r)) },
+                    3 => if r == 0 { None } else { Some(l.wrapping_rem(r)) },
+                    4 => Some(l.wrapping_add(r)),
+                    5 => Some(l.wrapping_sub(r)),
+                    6 => Some(l.wrapping_shl(r as u32)),
+                    7 => Some(l.wrapping_shr(r as u32)),
+                    8 => Some(if l < r { 1 } else { 0 }),
+                    9 => Some(if l > r { 1 } else { 0 }),
+                    10 => Some(if l <= r { 1 } else { 0 }),
+                    11 => Some(if l >= r { 1 } else { 0 }),
+                    12 => Some(if l == r { 1 } else { 0 }),
+                    13 => Some(if l != r { 1 } else { 0 }),
+                    14 => Some(l & r),
+                    15 => Some(l ^ r),
+                    16 => Some(l | r),
+                    17 => Some(if l != 0 && r != 0 { 1 } else { 0 }),
+                    18 => Some(if l != 0 || r != 0 { 1 } else { 0 }),
+                    _ => None,
+                }
+            }
+            CstExprData::Ternary { cond, true_expr, false_expr } => {
+                let c = Self::fold_enum_const(cond, seen)?;
+                if c != 0 {
+                    Self::fold_enum_const(true_expr, seen)
+                } else {
+                    Self::fold_enum_const(false_expr, seen)
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn parse_primary(&mut self) -> Option<CstExpr> {
         let (pri_line, pri_col) = (self.current.line, self.current.column);
         // Soft keyword `await` — suspension-point operator
@@ -1742,13 +1828,7 @@ line: pri_line,
             // the radix, so `mkdir(p, 0755)` opened the directory with a
             // wrong mode — a silent C-superset break caught by the
             // NPFileManager probes.
-            let val = if text.len() > 2 && (text.starts_with("0x") || text.starts_with("0X")) {
-                i64::from_str_radix(&text[2..], 16).unwrap_or_else(|_| u64::from_str_radix(&text[2..], 16).unwrap_or(0) as i64)
-            } else if text.len() > 1 && text.starts_with('0') && text[1..].bytes().all(|c| (b'0'..=b'7').contains(&c)) {
-                i64::from_str_radix(&text[1..], 8).unwrap_or(0)
-            } else {
-                text.parse::<i64>().unwrap_or_else(|_| text.parse::<u64>().unwrap_or(0) as i64)
-            };
+            let val = Self::parse_int_literal_text(text);
             // The lexer strips the integer suffix from the token text but
             // records it in `int_suffix`. Annotate the literal's type here —
             // downstream return-type inference (block literals) reads this;
@@ -5810,6 +5890,9 @@ if self.current.kind == TokenKind::Identifier {
         if self.check(TokenKind::LBrace) {
             self.advance();
             let mut next_val: i64 = 0;
+            // Enumerators already assigned in THIS enum, so a later member may
+            // refer to an earlier one (`enum { A = 1, B = A + 1 }`).
+            let mut seen: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
             while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
                 if self.current.kind == TokenKind::Identifier ||
                    (self.current.kind == TokenKind::Keyword &&
@@ -5818,14 +5901,32 @@ if self.current.kind == TokenKind::Identifier {
                     // builtin type never wins here (C superset: `enum E { id };`).
                     let mname = self.current_text().to_string();
                     self.advance();
-                    members.push(mname);
+                    members.push(mname.clone());
                     if self.match_token(TokenKind::Assign) {
-                        if self.current.kind == TokenKind::Integer {
-                            let val = self.current_text().parse().unwrap_or(next_val);
-                            self.advance();
-                            next_val = val;
+                        // C: an enumerator value is a `constant-expression`
+                        // (= `conditional-expression`, which excludes the comma
+                        // operator). Parse at that level — a lone integer token
+                        // is only its simplest case — then fold it.
+                        //
+                        // An unfoldable value is *reported*. The previous
+                        // single-token path silently fell back to the
+                        // auto-increment value for anything it did not
+                        // recognise, so `enum { A = 1, B = 0x10, C }` compiled
+                        // to A=1, B=2, C=3 with no diagnostic at all.
+                        let val_token = self.current.clone();
+                        let folded = match self.parse_conditional() {
+                            Some(e) => Self::fold_enum_const(&e, &seen),
+                            None => None,
+                        };
+                        match folded {
+                            Some(v) => next_val = v,
+                            None => self.error_at(
+                                &val_token,
+                                "enumerator value is not an integer constant expression",
+                            ),
                         }
                     }
+                    seen.insert(mname, next_val);
                     values.push(CstExpr {
                         kind: CstExprKind::Integer, expr_type: None,
                         line: self.previous.line, col: self.previous.column,

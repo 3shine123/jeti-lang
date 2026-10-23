@@ -1,0 +1,49 @@
+#ifndef NPEXPRESSION_NH
+#define NPEXPRESSION_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPDictionary.hje>
+
+// 表达式类型，逐值对齐 ObjC 的 NSExpressionType（见系统 NSExpression.h）。
+// 本类实现其中**可静态表达**的四类（常量 / 被求值对象 / 变量 / 键路径）；
+// 其余类型（函数 4、集合运算 5–7、子查询 13、聚合 14、anyKey 15、块 19、
+// 条件 20）都需要运行期按名解析符号，与 Jeti 的静态派发模型冲突 —— 明确不做，
+// 不静默降级成别的东西。
+typedef enum {
+    NPConstantValueExpressionType   = 0,
+    NPEvaluatedObjectExpressionType = 1,
+    NPVariableExpressionType        = 2,
+    NPKeyPathExpressionType         = 3
+} NPExpressionType;
+
+// NPExpression — 表达式对象（对应 ObjC 的 NSExpression）。
+//
+// 与 NPPredicate 同一套键解析：键路径经 `jeti_kvc_value` 走编译期生成的
+// KVC 访问器表（`JETI_KVC_$_<Class>`，codegen 在本头可见时发射），不做运行期
+// 反射。键不满足 KVC 时**响亮中止**而非静默返回 nil —— 与 NPPredicate 同款
+// 取舍（静态派发下没有可注入异常的运行期）。
+@interface NPExpression : NPObject {
+@public
+    NPExpressionType _type;
+    NPObject        *_constant;   // 常量表达式的值
+    NPString        *_keyPath;    // 键路径表达式的键
+    NPString        *_variable;   // 变量表达式的名字
+}
++ (NPExpression *)expressionForConstantValue:(id)object;
++ (NPExpression *)expressionForEvaluatedObject;
++ (NPExpression *)expressionForVariable:(NPString *)name;
++ (NPExpression *)expressionForKeyPath:(NPString *)keyPath;
+
+- (NPExpressionType)expressionType;
+- (id)constantValue;
+- (NPString *)keyPath;
+- (NPString *)variable;
+// 求值。`object` 是被求值对象（键路径与「被求值对象」用它），
+// `context` 是变量绑定字典（变量表达式用它，可为 nil）。
+- (id)expressionValueWithObject:(id)object context:(NPDictionary *)context;
+// 可解析的文本形式（对应 ObjC 的 predicateFormat）。
+- (NPString *)predicateFormat;
+@end
+
+#endif

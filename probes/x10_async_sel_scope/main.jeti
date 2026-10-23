@@ -1,0 +1,73 @@
+/* x10 —— async 通道「选择子按接收者类解析」验收（.hje 多 TU 正规流程）。
+ *
+ * 背景：async pass 曾在选择子名上全局收集 async 方法（async_sels），于是
+ * 「AsyncA 有 - (async int)run、SyncB 有 - (int)run」时，任何 `await [b run]`
+ * （b: SyncB）都会被当成任务驱动 —— 标量返回是 clang 硬错误，指针返回是
+ * 运行期静默 UB（把对象指针当 NPTask* 交给 jeti_task_await）。
+ *
+ * 修复后：每个接收者按自己的静态类链解析；只有接收者类不可知（id）才回退
+ * 全局集合。本探针钉住四个方向：
+ *   A1 同步局部变量 + 同名 async 存在 → 不驱动，值正确（rule 6 警告预期内）
+ *   A2 self 接收者：本类声明的同步方法不得被 rule 2 要求 await
+ *   A3 真 async 接收者 → 仍然正确驱动
+ *   A4 普通同步调用（无 await）→ 值正确
+ *
+ * 期望输出（逐行）：
+ *   A1 sync-local awaited = 42
+ *   A2 self sync send     = 105
+ *   A3 async awaited      = 7
+ *   A4 plain sync call    = 42
+ * 另外编译期应对 A1 打印 rule 6 警告（"await has no effect here"）。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+@interface AsyncA : NPObject
+- (async int)run;
+@end
+@implementation AsyncA
+- (async int)run { return 7; }
+@end
+
+@interface SyncB : NPObject
+- (int)run;
+@end
+@implementation SyncB
+- (int)run { return 42; }
+@end
+
+@interface Probe : NPObject
+- (int)run;                 /* 与 AsyncA 的 async run 同名，接收者类不同 */
+- (async int)goSyncLocal;
+- (async int)goSelf;
+@end
+@implementation Probe
+- (int)run { return 5; }
+- (async int)goSyncLocal {
+    SyncB *b = [[SyncB alloc] init];
+    int v = await [b run];  /* 同步：不驱动（rule 6 警告），v = 42 */
+    return v;
+}
+- (async int)goSelf {
+    int v = [self run];     /* 同步调用，不得被 rule 2 要求 await */
+    return v + 100;
+}
+@end
+
+int main(void) {
+    [NPTask blockOn:async ^ void {
+        Probe *p = [[Probe alloc] init];
+        int a = await [p goSyncLocal];
+        int b = await [p goSelf];
+        AsyncA *x = [[AsyncA alloc] init];
+        int c = await [x run];          /* 真 async：驱动，得 7 */
+        printf("A1 sync-local awaited = %d\n", a);
+        printf("A2 self sync send     = %d\n", b);
+        printf("A3 async awaited      = %d\n", c);
+        SyncB *y = [[SyncB alloc] init];
+        int d = [y run];                /* 普通同步调用 */
+        printf("A4 plain sync call    = %d\n", d);
+    }];
+    return 0;
+}

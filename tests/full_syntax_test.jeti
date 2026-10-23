@@ -830,7 +830,7 @@ static void fs_take_fn(nonnull NPString *s) { printf("5.4 fn %s\n", [s UTF8Strin
 @implementation FsFetcher
 - (int)helper:(int)n { return n + 1; }
 - (async int)compute:(int)n {
-    int a = await [self helper:n];                       // 挂起点（同步调用立即恢复）
+    int a = [self helper:n];                             // 同步调用（await 打在非 async 操作数上是 rule 6 警告）
     return a * 2;
 }
 + (async void)runAll {

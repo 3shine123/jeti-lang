@@ -1,8 +1,293 @@
 #import <Foundation/NPString.hje>
+#import <Foundation/NPData.hje>
 #import <Foundation/NPObject.jeti>
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+
+// ── 编码转换辅助 ──────────────────────────────────────────────────────────
+// 内部存储一律是 UTF-8（_cstr）。转换走「UTF-8 ↔ 码点序列 ↔ 目标编码」两段
+// 式：逐字节直转在 UTF-16/32 上必然错位（代理项、端序、BOM 都处理不了）。
+//
+// 函数名一律 np_str_ 前缀 —— 文件级 C 函数名撞系统符号会静默调错实现
+// （uuid_parse 先例，见 AGENTS.md）。
+//
+// 全部返回 malloc 的缓冲（调用方 free）；非法输入/目标编码表示不了返回 NULL。
+// BOM/端序规则逐条对齐 ObjC（clang 探针实测，见 NPString.hje 注释）。
+
+static int np_str_host_is_le(void) {
+    unsigned int probe = 1;
+    return *(unsigned char *)&probe == 1;
+}
+
+// UTF-8 → 码点序列。非法 UTF-8（截断、坏续字节、过长编码、代理项区间）返回
+// NULL —— 与 ObjC「转换失败即 nil」一致，不静默产出替换字符。
+static uint32_t *np_str_utf8_to_cps(const char *s, size_t len, size_t *out_n) {
+    uint32_t *cps = (uint32_t *)malloc((len + 1) * sizeof(uint32_t));
+    if (!cps) return NULL;
+    size_t n = 0;
+    size_t i = 0;
+    while (i < len) {
+        unsigned char b = (unsigned char)s[i];
+        uint32_t cp;
+        size_t extra;
+        if (b < 0x80)                { cp = b;         extra = 0; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F;  extra = 1; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F;  extra = 2; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07;  extra = 3; }
+        else { free(cps); return NULL; }
+        if (i + extra >= len) { free(cps); return NULL; }
+        size_t k;
+        for (k = 0; k < extra; k++) {
+            unsigned char c = (unsigned char)s[i + 1 + k];
+            if ((c & 0xC0) != 0x80) { free(cps); return NULL; }
+            cp = (cp << 6) | (uint32_t)(c & 0x3F);
+        }
+        // 过长编码（overlong）与代理项区间都不是合法码点。
+        if ((extra == 1 && cp < 0x80) || (extra == 2 && cp < 0x800) ||
+            (extra == 3 && cp < 0x10000) || cp > 0x10FFFF ||
+            (cp >= 0xD800 && cp <= 0xDFFF)) {
+            free(cps);
+            return NULL;
+        }
+        cps[n++] = cp;
+        i += extra + 1;
+    }
+    *out_n = n;
+    return cps;
+}
+
+// 一个码点 → UTF-8，写入 buf（调用方保证 ≥4 字节），返回写入字节数。
+static size_t np_str_put_utf8(unsigned char *buf, uint32_t cp) {
+    if (cp < 0x80) {
+        buf[0] = (unsigned char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        buf[0] = (unsigned char)(0xC0 | (cp >> 6));
+        buf[1] = (unsigned char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        buf[0] = (unsigned char)(0xE0 | (cp >> 12));
+        buf[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (unsigned char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    buf[0] = (unsigned char)(0xF0 | (cp >> 18));
+    buf[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+    buf[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[3] = (unsigned char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+// 码点序列 → UTF-8 字节串（NUL 结尾）。返回 malloc 的缓冲与字节数。
+static char *np_str_cps_to_utf8(const uint32_t *cps, size_t n, size_t *out_len) {
+    unsigned char *buf = (unsigned char *)malloc(n * 4 + 1);
+    if (!buf) return NULL;
+    size_t o = 0;
+    size_t i;
+    for (i = 0; i < n; i++) o += np_str_put_utf8(buf + o, cps[i]);
+    buf[o] = 0;
+    *out_len = o;
+    return (char *)buf;
+}
+
+static void np_str_put_u16(unsigned char *p, uint16_t v, int le) {
+    if (le) { p[0] = (unsigned char)(v & 0xFF); p[1] = (unsigned char)(v >> 8); }
+    else    { p[0] = (unsigned char)(v >> 8);   p[1] = (unsigned char)(v & 0xFF); }
+}
+
+static void np_str_put_u32(unsigned char *p, uint32_t v, int le) {
+    if (le) {
+        p[0] = (unsigned char)(v & 0xFF);         p[1] = (unsigned char)((v >> 8) & 0xFF);
+        p[2] = (unsigned char)((v >> 16) & 0xFF); p[3] = (unsigned char)((v >> 24) & 0xFF);
+    } else {
+        p[0] = (unsigned char)((v >> 24) & 0xFF); p[1] = (unsigned char)((v >> 16) & 0xFF);
+        p[2] = (unsigned char)((v >> 8) & 0xFF);  p[3] = (unsigned char)(v & 0xFF);
+    }
+}
+
+static uint16_t np_str_get_u16(const unsigned char *p, int le) {
+    if (le) return (uint16_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8));
+    return (uint16_t)(((uint32_t)p[0] << 8) | (uint32_t)p[1]);
+}
+
+static uint32_t np_str_get_u32(const unsigned char *p, int le) {
+    if (le) {
+        return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+               ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    }
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+// 码点 → 目标编码字节。表示不了某个码点、或编码未支持时返回 NULL（不静默
+// 降级）。主机端序变体输出 BOM，显式端序变体不输出（对齐 ObjC）。
+//
+// `out_bom` 单独回报 BOM 占的字节数：ObjC 的 lengthOfBytesUsingEncoding:
+// 只算载荷、**不计 BOM**（探针实测 UTF16=6 而 data 长 8），调用方要能扣掉它。
+static unsigned char *np_str_cps_to_bytes(const uint32_t *cps, size_t n,
+                                          NPStringEncoding enc, size_t *out_len,
+                                          size_t *out_bom) {
+    int host_le = np_str_host_is_le();
+    int wide = 0;            // 0 = 单字节族，2 = UTF-16，4 = UTF-32
+    int emit_bom = 0;
+    int order_le = host_le;
+    int ascii = 0;
+    int latin1 = 0;
+
+    if (enc == NPStringEncodingASCII)                  { ascii = 1; }
+    else if (enc == NPStringEncodingUTF8)              { }
+    else if (enc == NPStringEncodingISOLatin1)         { latin1 = 1; }
+    else if (enc == NPStringEncodingUTF16)             { wide = 2; emit_bom = 1; }
+    else if (enc == NPStringEncodingUTF16BigEndian)    { wide = 2; order_le = 0; }
+    else if (enc == NPStringEncodingUTF16LittleEndian) { wide = 2; order_le = 1; }
+    else if (enc == NPStringEncodingUTF32)             { wide = 4; emit_bom = 1; }
+    else if (enc == NPStringEncodingUTF32BigEndian)    { wide = 4; order_le = 0; }
+    else if (enc == NPStringEncodingUTF32LittleEndian) { wide = 4; order_le = 1; }
+    else { return NULL; }
+
+    size_t cap = 0;
+    size_t i;
+    if (wide == 2) {
+        for (i = 0; i < n; i++) cap += (cps[i] > 0xFFFF) ? 4 : 2;
+    } else if (wide == 4) {
+        cap = n * 4;
+    } else {
+        cap = n;
+    }
+    size_t total = cap + (emit_bom ? (size_t)wide : 0);
+    unsigned char *out = (unsigned char *)malloc(total + 1);
+    if (!out) return NULL;
+    if (out_bom) *out_bom = emit_bom ? (size_t)wide : 0;
+    size_t o = 0;
+
+    if (emit_bom) {
+        if (wide == 2) {
+            if (order_le) { out[o++] = 0xFF; out[o++] = 0xFE; }
+            else          { out[o++] = 0xFE; out[o++] = 0xFF; }
+        } else {
+            if (host_le) {
+                out[o++] = 0xFF; out[o++] = 0xFE; out[o++] = 0x00; out[o++] = 0x00;
+            } else {
+                out[o++] = 0x00; out[o++] = 0x00; out[o++] = 0xFE; out[o++] = 0xFF;
+            }
+        }
+    }
+
+    for (i = 0; i < n; i++) {
+        uint32_t cp = cps[i];
+        if (wide == 0) {
+            if (ascii) {
+                if (cp > 0x7F) { free(out); return NULL; }
+                out[o++] = (unsigned char)cp;
+            } else if (latin1) {
+                if (cp > 0xFF) { free(out); return NULL; }
+                out[o++] = (unsigned char)cp;
+            } else {
+                o += np_str_put_utf8(out + o, cp);
+            }
+        } else if (wide == 2) {
+            if (cp > 0xFFFF) {
+                uint32_t v = cp - 0x10000;
+                np_str_put_u16(out + o, (uint16_t)(0xD800 + (v >> 10)), order_le);
+                o += 2;
+                np_str_put_u16(out + o, (uint16_t)(0xDC00 + (v & 0x3FF)), order_le);
+                o += 2;
+            } else {
+                np_str_put_u16(out + o, (uint16_t)cp, order_le);
+                o += 2;
+            }
+        } else {
+            np_str_put_u32(out + o, cp, order_le);
+            o += 4;
+        }
+    }
+    *out_len = o;
+    return out;
+}
+
+// 目标编码字节 → 码点序列。非法序列返回 NULL。
+//   - 显式端序变体**不剥 BOM**：前导 BOM 解成一个 U+FEFF 字符；
+//   - 主机端序变体剥 BOM 并用它定序，**无 BOM 时按大端解**。
+// 两条都是 clang 探针实测的 ObjC 行为，不是推测。
+static uint32_t *np_str_bytes_to_cps(const unsigned char *b, size_t len,
+                                     NPStringEncoding enc, size_t *out_n) {
+    if (enc == NPStringEncodingUTF8) {
+        return np_str_utf8_to_cps((const char *)b, len, out_n);
+    }
+    if (enc == NPStringEncodingASCII || enc == NPStringEncodingISOLatin1) {
+        uint32_t *cps = (uint32_t *)malloc((len + 1) * sizeof(uint32_t));
+        if (!cps) return NULL;
+        size_t i;
+        for (i = 0; i < len; i++) {
+            if (enc == NPStringEncodingASCII && b[i] > 0x7F) { free(cps); return NULL; }
+            cps[i] = (uint32_t)b[i];
+        }
+        *out_n = len;
+        return cps;
+    }
+
+    int wide;
+    int strip_bom = 0;
+    int order_le = 0;        // 主机端序变体无 BOM 时的默认：大端
+    if (enc == NPStringEncodingUTF16)                  { wide = 2; strip_bom = 1; }
+    else if (enc == NPStringEncodingUTF16BigEndian)    { wide = 2; order_le = 0; }
+    else if (enc == NPStringEncodingUTF16LittleEndian) { wide = 2; order_le = 1; }
+    else if (enc == NPStringEncodingUTF32)             { wide = 4; strip_bom = 1; }
+    else if (enc == NPStringEncodingUTF32BigEndian)    { wide = 4; order_le = 0; }
+    else if (enc == NPStringEncodingUTF32LittleEndian) { wide = 4; order_le = 1; }
+    else { return NULL; }
+
+    size_t off = 0;
+    if (strip_bom && len >= (size_t)wide) {
+        if (wide == 2) {
+            if (b[0] == 0xFF && b[1] == 0xFE)      { order_le = 1; off = 2; }
+            else if (b[0] == 0xFE && b[1] == 0xFF) { order_le = 0; off = 2; }
+        } else {
+            if (b[0] == 0xFF && b[1] == 0xFE && b[2] == 0x00 && b[3] == 0x00) {
+                order_le = 1; off = 4;
+            } else if (b[0] == 0x00 && b[1] == 0x00 && b[2] == 0xFE && b[3] == 0xFF) {
+                order_le = 0; off = 4;
+            }
+        }
+    }
+    if ((len - off) % (size_t)wide != 0) return NULL;
+
+    size_t units = (len - off) / (size_t)wide;
+    uint32_t *cps = (uint32_t *)malloc((units + 1) * sizeof(uint32_t));
+    if (!cps) return NULL;
+    size_t n = 0;
+    size_t i;
+    for (i = 0; i < units; i++) {
+        uint32_t cp;
+        if (wide == 2) {
+            uint16_t u = np_str_get_u16(b + off + i * 2, order_le);
+            if (u >= 0xD800 && u <= 0xDBFF) {
+                if (i + 1 >= units) { free(cps); return NULL; }
+                uint16_t lo = np_str_get_u16(b + off + (i + 1) * 2, order_le);
+                if (lo < 0xDC00 || lo > 0xDFFF) { free(cps); return NULL; }
+                cp = 0x10000 + (((uint32_t)(u - 0xD800)) << 10) + (uint32_t)(lo - 0xDC00);
+                i++;
+            } else if (u >= 0xDC00 && u <= 0xDFFF) {
+                free(cps);
+                return NULL;        // 孤立低位代理项
+            } else {
+                cp = (uint32_t)u;
+            }
+        } else {
+            cp = np_str_get_u32(b + off + i * 4, order_le);
+            if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+                free(cps);
+                return NULL;
+            }
+        }
+        cps[n++] = cp;
+    }
+    *out_n = n;
+    return cps;
+}
 
 @implementation NPString
 
@@ -240,6 +525,77 @@
 // `-copy` honors the ObjC convention: the caller owns the result (+1).
 - (NPString *)copy {
     return [[NPString alloc] initWithString:self];
+}
+
+// ── 编码转换 ────────────────────────────────────────────────────────────
+// 与 ObjC 一致：转换不了返回 nil（dataUsingEncoding:）/ NULL（init 族），
+// 绝不静默降级或产出替换字符。
+
+- (NPData *)dataUsingEncoding:(NPStringEncoding)encoding {
+    size_t n = 0;
+    uint32_t *cps = np_str_utf8_to_cps(_cstr ? _cstr : "", _length, &n);
+    if (!cps) return NULL;
+    size_t len = 0;
+    unsigned char *bytes = np_str_cps_to_bytes(cps, n, encoding, &len, NULL);
+    free(cps);
+    if (!bytes) return NULL;
+    // 与 NPData 自家工厂同一持有约定（NPFileManager 也是这么构造的）。
+    NPData *data = [NPData dataWithBytes:bytes length:len];
+    free(bytes);
+    return data;
+}
+
+// 只算载荷、**不计 BOM**；转换不了返回 0 —— 两条都与 ObjC 实测一致。
+- (size_t)lengthOfBytesUsingEncoding:(NPStringEncoding)encoding {
+    size_t n = 0;
+    uint32_t *cps = np_str_utf8_to_cps(_cstr ? _cstr : "", _length, &n);
+    if (!cps) return 0;
+    size_t len = 0;
+    size_t bom = 0;
+    unsigned char *bytes = np_str_cps_to_bytes(cps, n, encoding, &len, &bom);
+    free(cps);
+    if (!bytes) return 0;
+    free(bytes);
+    return len - bom;
+}
+
+- (BOOL)canBeConvertedToEncoding:(NPStringEncoding)encoding {
+    size_t n = 0;
+    uint32_t *cps = np_str_utf8_to_cps(_cstr ? _cstr : "", _length, &n);
+    if (!cps) return NO;
+    size_t len = 0;
+    unsigned char *bytes = np_str_cps_to_bytes(cps, n, encoding, &len, NULL);
+    free(cps);
+    if (!bytes) return NO;
+    free(bytes);
+    return YES;
+}
+
+- (NPString *)initWithBytes:(const void *)bytes length:(size_t)len encoding:(NPStringEncoding)encoding {
+    self = [super init];
+    if (!self) return NULL;
+    size_t n = 0;
+    uint32_t *cps = np_str_bytes_to_cps((const unsigned char *)bytes, len, encoding, &n);
+    if (!cps) return NULL;              // 非法字节序列 → nil，与 ObjC 一致
+    size_t u8len = 0;
+    char *u8 = np_str_cps_to_utf8(cps, n, &u8len);
+    free(cps);
+    if (!u8) return NULL;
+    _cstr = (char *)malloc(u8len + 1);
+    if (_cstr) {
+        memcpy(_cstr, u8, u8len);
+        _cstr[u8len] = '\0';
+    }
+    _length = u8len;
+    _hash = 0;
+    _hashIsValid = NO;
+    free(u8);
+    return self;
+}
+
+- (NPString *)initWithData:(NPData *)data encoding:(NPStringEncoding)encoding {
+    if (!data) return NULL;
+    return [self initWithBytes:[data bytes] length:[data length] encoding:encoding];
 }
 
 @end

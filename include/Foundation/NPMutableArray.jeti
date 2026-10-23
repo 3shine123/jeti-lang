@@ -194,4 +194,28 @@
     _count = write;
 }
 
+// In-place comparator sort: sort a copy via the inherited
+// sortedArrayUsingComparator: (stable merge sort), then copy back. A nil
+// comparator leaves the array unchanged.
+- (void)sortUsingComparator:(int (^)(id, id))cmp {
+    if (!cmp) return;
+    NPArray *sorted = [self sortedArrayUsingComparator:cmp];
+    if (!sorted) return;
+    for (size_t i = 0; i < _count; i++) {
+        _items[i] = sorted->_items[i];
+    }
+}
+
+// In-place multi-key sort: sort a copy via the inherited
+// sortedArrayUsingDescriptors: (stable merge), then copy back. A nil/empty
+// descriptor array leaves the array unchanged.
+- (void)sortUsingDescriptors:(NPArray *)descriptors {
+    if (!descriptors || [descriptors count] == 0) return;
+    NPArray *sorted = [self sortedArrayUsingDescriptors:descriptors];
+    if (!sorted) return;
+    for (size_t i = 0; i < _count; i++) {
+        _items[i] = sorted->_items[i];
+    }
+}
+
 @end

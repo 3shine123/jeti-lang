@@ -1,0 +1,73 @@
+#import <Foundation/NPSortDescriptor.hje>
+#import <Foundation/NPObject.jeti>
+#include <stdint.h>
+
+extern void *_Block_copy(const void *src);
+extern void _Block_release(const void *src);
+
+@implementation NPSortDescriptor
+
+- (id)initWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp {
+    self = [super init];
+    if (self) {
+        // Key label: an owned NPString (alloc-init hold — NPScanner/NPURL
+        // precedent, no autoreleased string dependency). The comparator is a
+        // real block: copied and stored as id (block-pointer ivars are dropped
+        // by codegen — NPTimer precedent), cast back at the call site.
+        _sdKey = key ? [[NPString alloc] initWithString:key] : NULL;
+        _ascending = ascending ? 1 : 0;
+        _comparator = cmp ? (id)_Block_copy((const void *)cmp) : NULL;
+    }
+    return self;
+}
+
+- (void)dealloc {
+    if (_sdKey) {
+        jeti_release(_sdKey);
+        _sdKey = NULL;
+    }
+    if (_comparator) {
+        _Block_release((const void *)_comparator);
+        _comparator = NULL;
+    }
+    [super dealloc];
+}
+
++ (NPSortDescriptor *)sortDescriptorWithKey:(NPString *)key ascending:(int)ascending {
+    // No comparator: compareObject:toObject: falls back to pointer-identity
+    // ordering (same object → 0, else address order) — enough for
+    // order-preserving placements, never a value comparison.
+    return [[self alloc] initWithKey:key ascending:ascending comparator:NULL];
+}
+
++ (NPSortDescriptor *)sortDescriptorWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp {
+    return [[self alloc] initWithKey:key ascending:ascending comparator:cmp];
+}
+
+- (NPString *)key {
+    return _sdKey;
+}
+
+- (int)ascending {
+    return _ascending;
+}
+
+- (int)compareObject:(id)obj1 toObject:(id)obj2 {
+    if (!_comparator) {
+        // Identity fallback (see the class-side note): same object 0, else
+        // address order. Flipped for descending like a real comparison.
+        int r = (obj1 == obj2) ? 0 : ((uintptr_t)obj1 < (uintptr_t)obj2 ? -1 : 1);
+        return _ascending ? r : -r;
+    }
+    int (^cmp)(id, id) = (int (^)(id, id))_comparator;
+    int r = cmp(obj1, obj2);
+    // Fold the direction here: the sort engines call descriptors without
+    // knowing their sense.
+    return _ascending ? r : -r;
+}
+
+- (NPSortDescriptor *)reversedSortDescriptor {
+    return [NPSortDescriptor sortDescriptorWithKey:_sdKey ascending:!_ascending comparator:(int (^)(id, id))_comparator];
+}
+
+@end

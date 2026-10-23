@@ -17,6 +17,8 @@
     { "include": "#objc-at-class-protocol" },
     { "include": "#objc-at-access-control" },
     { "include": "#objc-at-exception" },
+    { "include": "#jeti-at-defer" },
+    { "include": "#jeti-soft-keywords" },
     { "include": "#jeti-noarc" },
     { "include": "#objc-at-synchronized" },
     { "include": "#objc-at-autoreleasepool" },
@@ -201,6 +203,9 @@
             { "include": "#objc-at-selector" },
             { "include": "#objc-at-access-control" },
             { "include": "#objc-at-dynamic-synthesize" },
+            { "include": "#objc-at-exception" },
+            { "include": "#jeti-at-defer" },
+            { "include": "#jeti-soft-keywords" },
             { "include": "#method-signature" },
             { "include": "#objc-types" },
             { "include": "#objc-constants" },
@@ -303,6 +308,22 @@
         {
           "name": "keyword.control.exception",
           "match": "@(?:try|catch|finally|throw)\\b"
+        }
+      ]
+    },
+    "jeti-at-defer": {
+      "patterns": [
+        {
+          "name": "keyword.control.defer",
+          "match": "@defer\\b"
+        }
+      ]
+    },
+    "jeti-soft-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.async",
+          "match": "\\b(?:async|await|throws|when)\\b"
         }
       ]
     },

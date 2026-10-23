@@ -1,0 +1,115 @@
+/* NPProcessInfo 补齐 golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * P1-4：补齐 ObjC NSProcessInfo 的 environment（完整环境表）、
+ * globallyUniqueString、operatingSystemVersion / isOperatingSystemAtLeastVersion: /
+ * operatingSystemVersionString。
+ *
+ * 判据说明：OS 版本值随机器变、唯一串每次调用都变，**都不能硬编码**。所以本用例
+ * 断言的是**结构性质**：形状是否合规、两次调用是否不同、大小关系是否正确、前缀
+ * 是否存在。这样期望输出才是确定的。
+ *
+ * A1 environment：是字典、含 PATH、条数 > 0
+ * A2 globallyUniqueString 形状：`<UUID 大写>-<pid>-<16 位十六进制>`
+ * A3 globallyUniqueString 唯一性：两次调用不同
+ * A4 operatingSystemVersion：主版本 > 0（说明真的从 OS 取到了）
+ * A5 isOperatingSystemAtLeastVersion:：0.0.0 为真、99.0.0 为假
+ * A6 operatingSystemVersionString：以 "Version " 开头
+ * A7 arguments：经运行期钩子读平台捕获的 argv；[0] 是程序路径、元素都是
+ *    NPString、条数与 jeti_argc() 一致
+ * 期望输出：A1..A7 各一行。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+/* 形状检查：`<UUID 大写>-<pid>-<16 位十六进制>`。
+ * 前 36 位是 8-4-4-4-12 的大写十六进制 UUID，然后 '-'、pid、'-'、16 位大写十六进制。 */
+static int unique_shape_ok(NPString *s) {
+    const char *p = s ? [s UTF8String] : NULL;
+    if (!p) return 0;
+    size_t n = strlen(p);
+    if (n < 36 + 1 + 1 + 1 + 16) return 0;
+    size_t i;
+    for (i = 0; i < 36; i++) {
+        char c = p[i];
+        int dash = (i == 8 || i == 13 || i == 18 || i == 23);
+        if (dash) {
+            if (c != '-') return 0;
+            continue;
+        }
+        int hexup = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+        if (!hexup) return 0;
+    }
+    if (p[36] != '-') return 0;
+    if (p[n - 17] != '-') return 0;          /* pid 段与序号段的分隔 */
+    for (i = n - 16; i < n; i++) {
+        char c = p[i];
+        int hexup = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+        if (!hexup) return 0;
+    }
+    return 1;
+}
+
+static int has_prefix(const char *s, const char *prefix) {
+    if (!s || !prefix) return 0;
+    return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+int main(void) {
+    NPProcessInfo *pi = [NPProcessInfo processInfo];
+
+    /* A1：environment 是字典、含 PATH、条数 > 0 */
+    NPDictionary *env = [pi environment];
+    NPString *path = [env objectForKey:@"PATH"];
+    printf("A1 isdict=%d hasPATH=%d nonempty=%d\n",
+           [env isKindOfClass:[NPDictionary class]] ? 1 : 0,
+           path != NULL ? 1 : 0,
+           [env count] > 0 ? 1 : 0);
+
+    /* A2/A3：形状 + 唯一性 */
+    NPString *g1 = [pi globallyUniqueString];
+    NPString *g2 = [pi globallyUniqueString];
+    printf("A2 shape=%d\n", unique_shape_ok(g1));
+    printf("A3 distinct=%d\n", [g1 isEqualToString:g2] == 0 ? 1 : 0);
+
+    /* A4：主版本 > 0 说明真的从 OS 取到了（只输出判据：版本值随机器变，
+       打进 .out 会让期望输出不可复现） */
+    NPROperatingSystemVersion v = [pi operatingSystemVersion];
+    printf("A4 gt0=%d patchValid=%d\n",
+           v.majorVersion > 0 ? 1 : 0,
+           v.patchVersion >= 0 ? 1 : 0);
+
+    /* A5：大小关系 */
+    NPROperatingSystemVersion zero;
+    zero.majorVersion = 0; zero.minorVersion = 0; zero.patchVersion = 0;
+    NPROperatingSystemVersion huge;
+    huge.majorVersion = 99; huge.minorVersion = 0; huge.patchVersion = 0;
+    printf("A5 atLeastZero=%d atLeast99=%d\n",
+           [pi isOperatingSystemAtLeastVersion:zero] ? 1 : 0,
+           [pi isOperatingSystemAtLeastVersion:huge] ? 1 : 0);
+
+    /* A6：版本串前缀 */
+    NPString *vs = [pi operatingSystemVersionString];
+    printf("A6 prefix=%d\n", has_prefix([vs UTF8String], "Version "));
+
+    /* A7：arguments。只输出判据 —— [0] 是本次运行的程序路径（临时目录，随机器变），
+       打进 .out 会让期望输出不可复现。四个判据里 matchesRuntime 把 Foundation 层
+       与运行期钩子绑在一起（两边条数必须一致）。 */
+    NPArray *args = [pi arguments];
+    size_t argc = [args count];
+    id first = [args firstObject];
+    const char *p0 = first ? [(NPString *)first UTF8String] : NULL;
+    int allstr = 1;
+    size_t ai;
+    for (ai = 0; ai < argc; ai++) {
+        id a = [args objectAtIndex:ai];
+        if (![a isKindOfClass:[NPString class]]) allstr = 0;
+    }
+    printf("A7 nonempty=%d firstPath=%d allStrings=%d matchesRuntime=%d\n",
+           argc >= 1 ? 1 : 0,
+           (p0 && p0[0] != '\0') ? 1 : 0,
+           allstr,
+           argc == (size_t)jeti_argc() ? 1 : 0);
+    return 0;
+}

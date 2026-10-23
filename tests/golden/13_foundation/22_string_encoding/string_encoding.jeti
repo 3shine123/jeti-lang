@@ -1,0 +1,105 @@
+/* NPString 编码 API golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * 语义全部由 probes/x17_string_encoding/ 的 clang ObjC 基准实测锁定，探针与
+ * 基准输出逐字节 diff 一致。本用例把这些语义固化成可回归的期望输出。
+ *
+ * A1 UTF-8 编码：原始字节，无 BOM
+ * A2 ASCII / ISO-Latin-1：表示不了返回 nil（不静默降级、不产出替换字符）
+ * A3 可转换的 ASCII/Latin-1：单字节直出
+ * A4 UTF-16：主机端序变体带 BOM；BE/LE 显式端序不带
+ * A5 UTF-32：同上
+ * A6 代理项对：U+1F600 在 UTF-16 里编成 3D D8 00 DE（LE）
+ * A7 lengthOfBytesUsingEncoding:：只算载荷、不计 BOM；转换不了返回 0
+ * A8 canBeConvertedToEncoding:：转换不了返回 NO
+ * A9 往返：UTF16BE 编码再解码回原 UTF-8 字节
+ * A10 解码端序：显式端序不剥 BOM；主机端序剥 BOM 定序；无 BOM 按大端
+ * A11 非法字节序列 → nil
+ * 期望输出：A1..A11 各一行。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static void hex(const char *label, NPData *d) {
+    printf("%s =", label);
+    if (!d) { printf(" nil\n"); return; }
+    const unsigned char *b = [d bytes];
+    size_t i;
+    for (i = 0; i < [d length]; i++) printf(" %02X", b[i]);
+    printf("\n");
+}
+
+static void hexstr(NPString *s) {
+    if (!s) { printf(" nil"); return; }
+    const char *p = [s UTF8String];
+    size_t i;
+    for (i = 0; p[i] != '\0'; i++) printf(" %02X", (unsigned char)p[i]);
+}
+
+/* 字节字面量 → NPData（解码方向用例的输入） */
+static NPData *mk(const unsigned char *bytes, size_t n) {
+    return [NPData dataWithBytes:bytes length:n];
+}
+
+int main(void) {
+    /* "Aé€"：U+0041 / U+00E9 / U+20AC */
+    NPString *s = [NPString stringWithUTF8String:"A\xC3\xA9\xE2\x82\xAC"];
+    /* U+1F600 —— UTF-16 需代理项对 */
+    NPString *astral = [NPString stringWithUTF8String:"\xF0\x9F\x98\x80"];
+    /* "AB" —— 可被 ASCII / Latin-1 表示 */
+    NPString *plain = [NPString stringWithUTF8String:"AB"];
+
+    printf("A1 utf8    ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF8]);
+    printf("A2 ascii   ");  hex("", [s dataUsingEncoding:NPStringEncodingASCII]);
+    printf("A2 latin1  ");  hex("", [s dataUsingEncoding:NPStringEncodingISOLatin1]);
+    printf("A3 asciiAB ");  hex("", [plain dataUsingEncoding:NPStringEncodingASCII]);
+    printf("A3 latin1AB");  hex("", [plain dataUsingEncoding:NPStringEncodingISOLatin1]);
+    printf("A4 utf16   ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF16]);
+    printf("A4 utf16be ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF16BigEndian]);
+    printf("A4 utf16le ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF16LittleEndian]);
+    printf("A5 utf32   ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF32]);
+    printf("A5 utf32be ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF32BigEndian]);
+    printf("A5 utf32le ");  hex("", [s dataUsingEncoding:NPStringEncodingUTF32LittleEndian]);
+    printf("A6 astral16");  hex("", [astral dataUsingEncoding:NPStringEncodingUTF16]);
+    printf("A6 astral32");  hex("", [astral dataUsingEncoding:NPStringEncodingUTF32]);
+
+    printf("A7 len utf8=%lu utf16=%lu utf32=%lu ascii=%lu\n",
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingUTF8],
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingUTF16],
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingUTF32],
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingASCII]);
+    printf("A8 can ascii=%d latin1=%d utf16=%d\n",
+        [s canBeConvertedToEncoding:NPStringEncodingASCII] ? 1 : 0,
+        [s canBeConvertedToEncoding:NPStringEncodingISOLatin1] ? 1 : 0,
+        [s canBeConvertedToEncoding:NPStringEncodingUTF16] ? 1 : 0);
+
+    NPData *u16 = [s dataUsingEncoding:NPStringEncodingUTF16BigEndian];
+    NPString *back = [[NPString alloc] initWithData:u16 encoding:NPStringEncodingUTF16BigEndian];
+    const char *rt = [back UTF8String];
+    printf("A9 roundtrip =");
+    size_t ri;
+    for (ri = 0; rt[ri] != '\0'; ri++) printf(" %02X", (unsigned char)rt[ri]);
+    printf("\n");
+
+    /* A10：解码端序语义（每条都由 clang 基准实测） */
+    unsigned char be16[]  = {0x00,0x41,0x00,0xE9,0x20,0xAC};
+    unsigned char le16[]  = {0x41,0x00,0xE9,0x00,0xAC,0x20};
+    unsigned char bom_le[] = {0xFF,0xFE,0x41,0x00,0xE9,0x00,0xAC,0x20};
+    NPString *d1 = [[NPString alloc] initWithData:mk(be16, sizeof be16) encoding:NPStringEncodingUTF16];
+    NPString *d2 = [[NPString alloc] initWithData:mk(le16, sizeof le16) encoding:NPStringEncodingUTF16];
+    NPString *d3 = [[NPString alloc] initWithData:mk(bom_le, sizeof bom_le) encoding:NPStringEncodingUTF16];
+    NPString *d4 = [[NPString alloc] initWithData:mk(bom_le, sizeof bom_le) encoding:NPStringEncodingUTF16BigEndian];
+    // 打印**字节**而不是字符：小端载荷被当大端解读时会解出 U+E900 等私用区码点，
+    // 把不可见字符写进 .out 既脆弱又看不出内容，字节形式一眼可核对。
+    printf("A10 nobom-be:");   hexstr(d1);
+    printf(" nobom-le:");      hexstr(d2);
+    printf(" bom-host:");      hexstr(d3);
+    printf(" bom-explicit:");  hexstr(d4);
+    printf("\n");
+
+    /* A11：非法 UTF-8（孤立续字节）→ nil */
+    unsigned char bad[] = {0xFF,0x41};
+    NPString *d5 = [[NPString alloc] initWithData:mk(bad, sizeof bad) encoding:NPStringEncodingUTF8];
+    printf("A11 invalid-utf8 = %s\n", d5 ? "not-nil" : "nil");
+    return 0;
+}

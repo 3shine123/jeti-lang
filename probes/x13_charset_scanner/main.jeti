@@ -1,0 +1,89 @@
+/* NPCharacterSet + NPScanner 探针（.hje 多 TU 正规流程）。
+ *
+ * A1 内置集成员：digit/letter/alnum/whitespace 边界与大小写
+ * A2 characterSetWithCharactersInString: + 可变 add/remove/invert
+ * A3 扫描数值：scanInt/scanLongLong/scanDouble 含负号与小数
+ * A4 集合扫描：scanCharactersFromSet / scanUpToCharactersFromSet / scanUpToString
+ * A5 精确匹配 scanString + 位置推进 + isAtEnd
+ * A6 未命中不推进：失败 scan 后位置不变；出参置 NULL
+ * 期望输出：A1..A6 各一行 ok。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+    /* A1 内置集成员 */
+    NPCharacterSet *digits = [NPCharacterSet decimalDigitCharacterSet];
+    NPCharacterSet *letters = [NPCharacterSet letterCharacterSet];
+    NPCharacterSet *alnum = [NPCharacterSet alphanumericCharacterSet];
+    NPCharacterSet *ws = [NPCharacterSet whitespaceCharacterSet];
+    int a1 = [digits characterIsMember:'0'] && [digits characterIsMember:'9'] && ![digits characterIsMember:'a']
+        && [letters characterIsMember:'A'] && [letters characterIsMember:'z'] && ![letters characterIsMember:'0']
+        && [alnum characterIsMember:'5'] && [alnum characterIsMember:'q'] && ![alnum characterIsMember:'-']
+        && [ws characterIsMember:' '] && [ws characterIsMember:'\t'] && ![ws characterIsMember:'\n'];
+    printf("A1 %s\n", a1 ? "ok" : "FAIL");
+
+    /* A2 自定义集 + 可变操作 */
+    NPCharacterSet *vowels = [NPCharacterSet characterSetWithCharactersInString:[NPString stringWithUTF8String:"aeiou"]];
+    NPMutableCharacterSet *mcs = [NPMutableCharacterSet characterSet];
+    NPRange r;
+    r.location = 'x'; r.length = 2;      /* x y */
+    [mcs addCharactersInRange:r];
+    [mcs addCharactersInString:[NPString stringWithUTF8String:"z"]];
+    int a2 = [vowels characterIsMember:'e'] && ![vowels characterIsMember:'b']
+        && [mcs characterIsMember:'x'] && [mcs characterIsMember:'y'] && [mcs characterIsMember:'z'];
+    [mcs removeCharactersInString:[NPString stringWithUTF8String:"y"]];
+    a2 = a2 && ![mcs characterIsMember:'y'] && [mcs characterIsMember:'x'];
+    [mcs invert];
+    a2 = a2 && ![mcs characterIsMember:'x'] && [mcs characterIsMember:'q'];
+    printf("A2 %s\n", a2 ? "ok" : "FAIL");
+
+    /* A3 数值扫描 */
+    NPScanner *sc = [NPScanner scannerWithString:[NPString stringWithUTF8String:"  42 -7 3.5 9000000000"]];
+    int i = 0;
+    long long ll = 0;
+    double d = 0;
+    int a3 = [sc scanInt:&i] && i == 42
+        && [sc scanInt:&i] && i == -7
+        && [sc scanDouble:&d] && (d > 3.49 && d < 3.51)
+        && [sc scanLongLong:&ll] && ll == 9000000000LL;
+    printf("A3 %s\n", a3 ? "ok" : "FAIL");
+
+    /* A4 集合扫描 */
+    NPScanner *s4 = [NPScanner scannerWithString:[NPString stringWithUTF8String:"name=Jeti;age=1"]];
+    NPCharacterSet *stopEq = [NPCharacterSet characterSetWithCharactersInString:[NPString stringWithUTF8String:"="]];
+    NPCharacterSet *stopSemi = [NPCharacterSet characterSetWithCharactersInString:[NPString stringWithUTF8String:";"]];
+    NPString *word = NULL;
+    int a4 = [s4 scanUpToCharactersFromSet:stopEq intoString:&word]
+        && strcmp([word UTF8String], "name") == 0
+        && [s4 scanString:[NPString stringWithUTF8String:"="] intoString:NULL];
+    NPString *value = NULL;
+    a4 = a4 && [s4 scanUpToCharactersFromSet:stopSemi intoString:&value]
+        && strcmp([value UTF8String], "Jeti") == 0;
+    [s4 scanString:[NPString stringWithUTF8String:";"] intoString:NULL];
+    NPString *rest = NULL;
+    a4 = a4 && [s4 scanUpToString:[NPString stringWithUTF8String:"@"] intoString:&rest]
+        && strcmp([rest UTF8String], "age=1") == 0;
+    printf("A4 %s\n", a4 ? "ok" : "FAIL");
+
+    /* A5 scanString + isAtEnd */
+    NPScanner *s5 = [NPScanner scannerWithString:[NPString stringWithUTF8String:"ab"]];
+    NPString *hit = NULL;
+    int a5 = [s5 scanString:[NPString stringWithUTF8String:"ab"] intoString:&hit]
+        && [s5 isAtEnd] && [s5 scanLocation] == 2;
+    printf("A5 %s\n", a5 ? "ok" : "FAIL");
+
+    /* A6 未命中不推进 */
+    NPScanner *s6 = [NPScanner scannerWithString:[NPString stringWithUTF8String:"xyz"]];
+    NPCharacterSet *digits6 = [NPCharacterSet decimalDigitCharacterSet];
+    int vi = 0;
+    NPString *vs = NULL;
+    size_t before = [s6 scanLocation];
+    int a6 = ![s6 scanInt:&vi] && [s6 scanLocation] == before && vi == 0
+        && ![s6 scanCharactersFromSet:digits6 intoString:&vs] && vs == NULL
+        && [s6 scanLocation] == before;
+    printf("A6 %s\n", a6 ? "ok" : "FAIL");
+    return 0;
+}

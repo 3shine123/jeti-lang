@@ -1,0 +1,59 @@
+#ifndef NPSCANNER_NH
+#define NPSCANNER_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPCharacterSet.hje>
+
+// NPScanner —— 定向扫描解析器（对应 ObjC 的 NSScanner）。
+//
+// 持有一段 NPString 与一个扫描位置；各 scan* 方法按语义消费前缀并推进
+// 位置，返回是否命中（未命中不推进——ObjC 对齐）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **字节/ASCII 域**：与 NPString 的 char 访问一致（0..255）；unichar 与
+//   locale 相关的十进制格式（逗号小数点）不支持。
+// - 跳过集默认是 whitespace+newline（ObjC 默认），`setCharactersToBeSkipped:`
+//   传 nil 关闭跳过；每个 scan* 先消费跳过集再匹配。
+// - 未命中的 scan* 返回 0 且**不推进**位置；`intoString:` 出参未命中时
+//   置 NULL。
+// - v1 不含 scanHex*、scanUUID、locale 变体。
+@interface NPScanner : NPObject {
+@protected
+    NPString *_scanString;   // 被扫的串（强持有）
+    size_t _scanLocation;    // 字节偏移
+    NPCharacterSet *_skipSet; // 每次扫描前跳过的字符；NULL = 不跳
+}
++ (NPScanner *)scannerWithString:(NPString *)str;
+- (id)initWithString:(NPString *)str;
+
+// Internal primitives (implementation helpers; declared so the same-TU
+// checker sees them — not part of the ObjC surface).
+// Skip-set consumption before every scan.
+- (void)np_skip;
+// Sign + digit run from the current position; returns chars consumed
+// (0 = no digits). Either out-pointer may be NULL.
+- (size_t)np_scanNumber:(long long *)outInt dbl:(double *)outDouble;
+
+- (NPString *)string;
+- (size_t)scanLocation;
+- (void)setScanLocation:(size_t)loc;
+- (void)setCharactersToBeSkipped:(NPCharacterSet *)set;  // nil = 不跳过
+- (BOOL)isAtEnd;
+
+// 数值扫描：跳过集 → 可选正负号 → 数字。溢出按 long long 截断（v1）。
+- (BOOL)scanInt:(int *)out;
+- (BOOL)scanLongLong:(long long *)out;
+- (BOOL)scanDouble:(double *)out;
+
+// 集合扫描：命中集成员则连续消费并输出子串；未命中返回 0。
+- (BOOL)scanCharactersFromSet:(NPCharacterSet *)set intoString:(NPString **)out;
+// 反向扫描：消费**不属于**集合的前缀；遇集合成员或串尾停。
+- (BOOL)scanUpToCharactersFromSet:(NPCharacterSet *)set intoString:(NPString **)out;
+// 字面量扫描：消费到 stop 串为止的前缀（stop 本身不被消费）。
+- (BOOL)scanUpToString:(NPString *)stop intoString:(NPString **)out;
+// 精确匹配：当前位置 == literal 时消费之；out 可为 NULL（只吃不吃）。
+- (BOOL)scanString:(NPString *)literal intoString:(NPString **)out;
+@end
+
+#endif

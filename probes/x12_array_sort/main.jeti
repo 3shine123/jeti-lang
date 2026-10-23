@@ -1,0 +1,134 @@
+/* 排序 comparator API 探针（.hje 多 TU 正规流程）。
+ *
+ * A1 数值排序：NPNumber 数组按 compare: 升序（64 位精度路径）
+ * A2 字符串排序：NPString 按 compare: 字典序
+ * A3 稳定性：相同 key 的元素保持相对顺序（双字段对象验证）
+ * A4 nil 比较器：sortedArray 返回未排序副本；sortUsing 原数组不变
+ * A5 原地排序：sortUsingComparator: 后原数组有序
+ * A6 空数组/单元素：排序为 no-op 且不崩
+ * 比较器一律用块字面量内联（C 函数指针不是块，vtable 形参收不了）。
+ * 期望输出：A1..A6 各一行 ok。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+/* 双字段测试对象：key 相同、tag 不同——稳定性验证用 */
+@interface Pair : NPObject {
+@public
+    int key;
+    int tag;
+}
++ (Pair *)pairWithKey:(int)k tag:(int)t;
+- (NPString *)desc;
+@end
+
+@implementation Pair
++ (Pair *)pairWithKey:(int)k tag:(int)t {
+    Pair *p = [[Pair alloc] init];
+    p->key = k;
+    p->tag = t;
+    return p;
+}
+- (NPString *)desc {
+    char buf[32];
+    sprintf(buf, "%d.%d", key, tag);
+    return [NPString stringWithUTF8String:buf];
+}
+@end
+
+int main(void) {
+    /* A1 数值排序 */
+    NPMutableArray *nums = [NPMutableArray array];
+    long long vals[6] = { 5, -3, 9, 5, 0, -3 };
+    for (int i = 0; i < 6; i++) {
+        [nums addObject:[NPNumber numberWithLongLong:vals[i]]];
+    }
+    NPArray *sorted = [nums sortedArrayUsingComparator:^int(id a, id b) {
+        return [(NPNumber *)a compare:(NPNumber *)b];
+    }];
+    int a1 = [sorted count] == 6
+        && [[sorted objectAtIndex:0] intValue] == -3
+        && [[sorted objectAtIndex:1] intValue] == -3
+        && [[sorted objectAtIndex:2] intValue] == 0
+        && [[sorted objectAtIndex:3] intValue] == 5
+        && [[sorted objectAtIndex:4] intValue] == 5
+        && [[sorted objectAtIndex:5] intValue] == 9;
+    printf("A1 %s\n", a1 ? "ok" : "FAIL");
+
+    /* A2 字符串排序 */
+    NPMutableArray *strs = [NPMutableArray array];
+    [strs addObject:[NPString stringWithUTF8String:"pear"]];
+    [strs addObject:[NPString stringWithUTF8String:"apple"]];
+    [strs addObject:[NPString stringWithUTF8String:"banana"]];
+    NPArray *sstrs = [strs sortedArrayUsingComparator:^int(id a, id b) {
+        return [(NPString *)a compare:(NPString *)b];
+    }];
+    int a2 = [sstrs count] == 3
+        && strcmp([[sstrs objectAtIndex:0] UTF8String], "apple") == 0
+        && strcmp([[sstrs objectAtIndex:1] UTF8String], "banana") == 0
+        && strcmp([[sstrs objectAtIndex:2] UTF8String], "pear") == 0;
+    printf("A2 %s\n", a2 ? "ok" : "FAIL");
+
+    /* A3 稳定性：key 相同的元素按插入序出现在排序结果里 */
+    NPMutableArray *pairs = [NPMutableArray array];
+    [pairs addObject:[Pair pairWithKey:2 tag:1]];
+    [pairs addObject:[Pair pairWithKey:1 tag:2]];
+    [pairs addObject:[Pair pairWithKey:2 tag:3]];
+    [pairs addObject:[Pair pairWithKey:1 tag:4]];
+    [pairs addObject:[Pair pairWithKey:2 tag:5]];
+    NPArray *spairs = [pairs sortedArrayUsingComparator:^int(id a, id b) {
+        Pair *x = a;
+        Pair *y = b;
+        return x->key - y->key;
+    }];
+    /* 期望：1.2 1.4 2.1 2.3 2.5（同 key 组内保持插入序） */
+    NPString *d0 = [[spairs objectAtIndex:0] desc];
+    NPString *d1 = [[spairs objectAtIndex:1] desc];
+    NPString *d2 = [[spairs objectAtIndex:2] desc];
+    NPString *d3 = [[spairs objectAtIndex:3] desc];
+    NPString *d4 = [[spairs objectAtIndex:4] desc];
+    int a3 = [spairs count] == 5
+        && strcmp([d0 UTF8String], "1.2") == 0
+        && strcmp([d1 UTF8String], "1.4") == 0
+        && strcmp([d2 UTF8String], "2.1") == 0
+        && strcmp([d3 UTF8String], "2.3") == 0
+        && strcmp([d4 UTF8String], "2.5") == 0;
+    printf("A3 %s\n", a3 ? "ok" : "FAIL");
+
+    /* A4 nil 比较器 */
+    NPArray *copy = [nums sortedArrayUsingComparator:nil];
+    int a4 = [copy count] == 6
+        && [[copy objectAtIndex:0] intValue] == 5      /* 未排序原序 */
+        && [[copy objectAtIndex:5] intValue] == -3;
+    printf("A4a %s\n", a4 ? "ok" : "FAIL");
+    NPMutableArray *m4 = [[NPMutableArray alloc] initWithArray:nums];
+    [m4 sortUsingComparator:nil];
+    int a4b = [m4 count] == 6 && [[m4 objectAtIndex:0] intValue] == 5;
+    printf("A4b %s\n", a4b ? "ok" : "FAIL");
+
+    /* A5 原地排序 */
+    NPMutableArray *m5 = [[NPMutableArray alloc] initWithArray:nums];
+    [m5 sortUsingComparator:^int(id a, id b) {
+        return [(NPNumber *)a compare:(NPNumber *)b];
+    }];
+    int a5 = [m5 count] == 6
+        && [[m5 objectAtIndex:0] intValue] == -3
+        && [[m5 objectAtIndex:5] intValue] == 9;
+    printf("A5 %s\n", a5 ? "ok" : "FAIL");
+
+    /* A6 空数组/单元素 */
+    NPMutableArray *empty = [NPMutableArray array];
+    NPArray *se = [empty sortedArrayUsingComparator:^int(id a, id b) {
+        return 0;
+    }];
+    NPMutableArray *one = [NPMutableArray array];
+    [one addObject:[NPNumber numberWithLongLong:7]];
+    [one sortUsingComparator:^int(id a, id b) {
+        return [(NPNumber *)a compare:(NPNumber *)b];
+    }];
+    int a6 = [se count] == 0 && [one count] == 1 && [[one objectAtIndex:0] intValue] == 7;
+    printf("A6 %s\n", a6 ? "ok" : "FAIL");
+    return 0;
+}

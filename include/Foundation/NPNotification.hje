@@ -1,0 +1,32 @@
+#ifndef NPNOTIFICATION_NH
+#define NPNOTIFICATION_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPDictionary.hje>
+
+// NPNotification — 独立通知对象（对应 ObjC 的 NSNotification）。
+//
+// ObjC 的 NSNotificationName 就是 NSString；object 是发布者身份标记（可为
+// nil）；userInfo 是附加载荷字典（可为 nil）。持有语义按 ObjC 的三个只读
+// property：name 与 userInfo 是 **copy**（发布后再改原对象不影响已投递的
+// 通知），object 是 **retain**（发布者身份，不拷贝）。
+@interface NPNotification : NPObject {
+@public
+    NPString     *_name;
+    NPObject     *_object;
+    NPDictionary *_userInfo;
+}
++ (NPNotification *)notificationWithName:(NPString *)name object:(id)object;
++ (NPNotification *)notificationWithName:(NPString *)name object:(id)object
+                                userInfo:(NPDictionary *)userInfo;
+- (NPNotification *)initWithName:(NPString *)name object:(id)object
+                        userInfo:(NPDictionary *)userInfo;
+
+- (NPString *)name;
+- (id)object;
+- (NPDictionary *)userInfo;
+- (NPString *)description;
+@end
+
+#endif

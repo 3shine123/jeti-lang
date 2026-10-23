@@ -1,0 +1,59 @@
+#import <Foundation/NPNotification.hje>
+#import <Foundation/NPObject.jeti>
+#import <Foundation/NPString.jeti>
+#include <stdlib.h>
+
+@implementation NPNotification
+
+- (NPNotification *)initWithName:(NPString *)name object:(id)object
+                        userInfo:(NPDictionary *)userInfo {
+    self = [super init];
+    if (!self) return NULL;
+    // name / userInfo 按 ObjC 的 copy property 语义持有：各自独立一份，发布方
+    // 之后再改原对象不会回头改动已构造的通知。object 是发布者身份，retain 即可
+    // （ObjC 的 object property 也是 retain，不 copy）。
+    _name = name ? [name copy] : NULL;
+    // 不强转：`jeti_retain` 本就返回 NPObject *，多余强转会让检查器按「隐式
+    // 声明的 int 返回值」报 cast 警告（NPArray/NPDictionary 的同款惯用法也不转）。
+    _object = object ? jeti_retain(object) : NULL;
+    _userInfo = userInfo ? (NPDictionary *)[userInfo copy] : NULL;
+    return self;
+}
+
+- (void)dealloc {
+    if (_name) { jeti_release(_name); _name = NULL; }
+    if (_object) { jeti_release(_object); _object = NULL; }
+    if (_userInfo) { jeti_release(_userInfo); _userInfo = NULL; }
+    [super dealloc];
+}
+
++ (NPNotification *)notificationWithName:(NPString *)name object:(id)object {
+    @noarc {
+        return [[[self alloc] initWithName:name object:object userInfo:NULL] autorelease];
+    }
+}
+
++ (NPNotification *)notificationWithName:(NPString *)name object:(id)object
+                                userInfo:(NPDictionary *)userInfo {
+    @noarc {
+        return [[[self alloc] initWithName:name object:object userInfo:userInfo] autorelease];
+    }
+}
+
+- (NPString *)name {
+    return _name;
+}
+
+- (id)object {
+    return _object;
+}
+
+- (NPDictionary *)userInfo {
+    return _userInfo;
+}
+
+- (NPString *)description {
+    return [NPString stringWithUTF8String:"<NPNotification>"];
+}
+
+@end

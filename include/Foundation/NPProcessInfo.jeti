@@ -1,9 +1,92 @@
 #import <Foundation/NPProcessInfo.hje>
 #import <Foundation/NPObject.jeti>
+#import <Foundation/NPUUID.hje>
+#import <Foundation/NPMutableDictionary.hje>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/utsname.h>
+#include <sys/time.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
+
+// POSIX 环境变量表：这里只**声明**（定义在 libc 里），不定义，不会撞符号。
+extern char **environ;
+
+// ── 辅助 ────────────────────────────────────────────────────────────────
+// 命名一律 np_procinfo_ 前缀 —— 文件级 C 函数名撞系统符号会静默调错实现
+// （uuid_parse 先例，见 AGENTS.md）。
+
+// 解析 "M.m.p" 形式的前三段，缺段按 0；遇到非数字即停止。
+static void np_procinfo_parse_version(const char *s, long *major, long *minor, long *patch) {
+    long parts[3] = {0, 0, 0};
+    int idx = 0;
+    const char *p = s;
+    while (p && *p && idx < 3) {
+        long v = 0;
+        int digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            v = v * 10 + (long)(*p - '0');
+            p++;
+            digits++;
+        }
+        if (digits == 0) break;
+        parts[idx] = v;
+        idx++;
+        if (*p != '.') break;
+        p++;
+    }
+    *major = parts[0];
+    *minor = parts[1];
+    *patch = parts[2];
+}
+
+// OS 版本：Apple 平台取产品版本（`kern.osproductversion`，如 "27.2"）；其余
+// 平台退化为 `uname -r` 的内核版本 —— 这是文档化的平台差异，不是静默降级。
+static void np_procinfo_os_version(long *major, long *minor, long *patch) {
+    *major = 0;
+    *minor = 0;
+    *patch = 0;
+#if defined(__APPLE__)
+    char buf[64];
+    size_t len = sizeof(buf);
+    if (sysctlbyname("kern.osproductversion", buf, &len, NULL, 0) == 0 && len > 0) {
+        buf[sizeof(buf) - 1] = '\0';
+        np_procinfo_parse_version(buf, major, minor, patch);
+        return;
+    }
+#endif
+    struct utsname u;
+    if (uname(&u) == 0) {
+        np_procinfo_parse_version(u.release, major, minor, patch);
+    }
+}
+
+// build 串（Apple 平台的 `kern.osversion`，如 "26B5101f"）；其余平台留空。
+static void np_procinfo_build(char *out, size_t cap) {
+    if (cap == 0) return;
+    out[0] = '\0';
+#if defined(__APPLE__)
+    size_t len = cap;
+    if (sysctlbyname("kern.osversion", out, &len, NULL, 0) != 0) out[0] = '\0';
+#endif
+}
+
+// 唯一串尾部序号：进程内单调递增，低 16 位留给计数器，高位是首次调用的微秒
+// 时间戳，因此同一进程内两次调用必不相同。
+static unsigned long long np_procinfo_next_serial(void) {
+    static unsigned long long counter = 0;
+    static unsigned long long base = 0;
+    if (base == 0) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        base = ((unsigned long long)tv.tv_sec * 1000000ULL + (unsigned long long)tv.tv_usec) << 16;
+    }
+    counter++;
+    return base + counter;
+}
 
 @implementation NPProcessInfo
 
@@ -18,6 +101,27 @@
 
 - (int)processIdentifier {
     return (int)getpid();
+}
+
+// 程序参数，下标 0 是程序路径（与 ObjC 一致）。经运行期钩子读平台侧捕获的
+// argv —— jetic 不合成 main，库内部拿不到 `main` 的 argc/argv。
+// 平台没有捕获路径时返回空数组（文档化差异，不是猜值）。
+- (NPArray *)arguments {
+    int n = jeti_argc();
+    if (n <= 0) return [NPArray arrayWithObjects:NULL count:0];
+    id *items = (id *)malloc(sizeof(id) * (size_t)n);
+    if (!items) return [NPArray arrayWithObjects:NULL count:0];
+    size_t k = 0;
+    int i;
+    for (i = 0; i < n; i++) {
+        const char *a = jeti_argv(i);
+        if (!a) continue;
+        items[k] = [NPString stringWithUTF8String:a];
+        k++;
+    }
+    NPArray *arr = [NPArray arrayWithObjects:items count:k];
+    free(items);
+    return arr;
 }
 
 - (NPString *)environmentVariable:(NPString *)name {
@@ -61,6 +165,86 @@
     struct utsname u;
     if (uname(&u) != 0) return nil;
     return [NPString stringWithUTF8String:u.machine];
+}
+
+// 完整环境变量表。格式畸形的项（没有 `=`、或 `=` 在首位即空名）跳过 ——
+// ObjC 对无法转换的项同样是忽略而非报错。
+- (NPDictionary *)environment {
+    NPMutableDictionary *d = [NPMutableDictionary dictionary];
+    char **e = environ;
+    if (!e) return d;
+    for (; *e; e++) {
+        const char *entry = *e;
+        const char *eq = strchr(entry, '=');
+        if (!eq || eq == entry) continue;
+        size_t klen = (size_t)(eq - entry);
+        char *kbuf = (char *)malloc(klen + 1);
+        if (!kbuf) continue;
+        memcpy(kbuf, entry, klen);
+        kbuf[klen] = '\0';
+        NPString *key = [NPString stringWithUTF8String:kbuf];
+        NPString *val = [NPString stringWithUTF8String:eq + 1];
+        free(kbuf);
+        if (key && val) {
+            [d setObject:val forKey:key];
+        }
+    }
+    return d;
+}
+
+// 形状对齐 ObjC（clang 探针实测）：`<UUID 大写>-<pid>-<16 位十六进制>`。
+// 值每次不同是契约本身（唯一性），对齐的是可解析的形状。
+- (NPString *)globallyUniqueString {
+    NPUUID *u = [NPUUID UUID];
+    id us = [u UUIDString];
+    const char *uuid = us ? [(NPString *)us UTF8String] : "";
+    char buf[128];
+    size_t n = strlen(uuid);
+    if (n > 63) n = 63;
+    size_t i;
+    for (i = 0; i < n; i++) {
+        char c = uuid[i];
+        // ObjC 的 globallyUniqueString 里 UUID 段是全大写
+        buf[i] = (c >= 'a' && c <= 'f') ? (char)(c - 'a' + 'A') : c;
+    }
+    buf[n] = '\0';
+    unsigned long long serial = np_procinfo_next_serial();
+    snprintf(buf + n, sizeof(buf) - n, "-%d-%016llX", (int)getpid(), serial);
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (NPROperatingSystemVersion)operatingSystemVersion {
+    NPROperatingSystemVersion v;
+    np_procinfo_os_version(&v.majorVersion, &v.minorVersion, &v.patchVersion);
+    return v;
+}
+
+- (BOOL)isOperatingSystemAtLeastVersion:(NPROperatingSystemVersion)version {
+    NPROperatingSystemVersion cur = [self operatingSystemVersion];
+    if (cur.majorVersion != version.majorVersion) return cur.majorVersion > version.majorVersion;
+    if (cur.minorVersion != version.minorVersion) return cur.minorVersion > version.minorVersion;
+    return cur.patchVersion >= version.patchVersion;
+}
+
+- (NPString *)operatingSystemVersionString {
+    NPROperatingSystemVersion v = [self operatingSystemVersion];
+    char build[64];
+    np_procinfo_build(build, sizeof(build));
+    char buf[160];
+    if (build[0] != '\0') {
+        // ObjC 实测形如 `Version 27.2 (Build 26B5101f)`：patch 为 0 时不写出来
+        if (v.patchVersion != 0) {
+            snprintf(buf, sizeof(buf), "Version %ld.%ld.%ld (Build %s)",
+                     v.majorVersion, v.minorVersion, v.patchVersion, build);
+        } else {
+            snprintf(buf, sizeof(buf), "Version %ld.%ld (Build %s)",
+                     v.majorVersion, v.minorVersion, build);
+        }
+    } else {
+        snprintf(buf, sizeof(buf), "Version %ld.%ld.%ld",
+                 v.majorVersion, v.minorVersion, v.patchVersion);
+    }
+    return [NPString stringWithUTF8String:buf];
 }
 
 @end

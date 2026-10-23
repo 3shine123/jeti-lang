@@ -49,8 +49,12 @@ for np in *.jeti; do
     # jeti 侧:run 模式(与用户路径一致),捕获合并输出
     "$JETIC" run "$np" $EH_FLAG >"$WORK/$stem.jeti.all" 2>&1; jeti_rc=$?
     # 只取程序 stderr(NPLog 走 stderr;jetic 自身的 stdout/警告已在 all 里,按需剔除)
-    grep -v '^' /dev/null >/dev/null # no-op 占位,保持结构
-    cp "$WORK/$stem.jeti.all" "$WORK/$stem.jeti.out"
+    # jetic 自身的诊断一律带 ANSI 前缀(`\x1b[1;31merror:` / `\x1b[1;33mwarning:`,见各
+    # crate 的 eprintln 配色),且 jetic 不做 isatty/NO_COLOR 判断,重定向下照发;而程序
+    # 输出经 NPLog 是裸写 stderr、不带转义。所以按 ESC 前缀剔除就能精确去掉 jetic 的行
+    # —— 包括 `run` 遇到子进程被信号杀死时新报的 "terminated by signal N" —— 又不会
+    # 误伤程序自己打印的 "error: ..." 文本。
+    grep -v $'^\033' "$WORK/$stem.jeti.all" > "$WORK/$stem.jeti.out" || true
 
     # 07_uncaught:全栈回溯与 Foundation 内部类名(如 '__NSCFConstantString' vs
     # 'NPString')不可复现,只比措辞前缀 "*** Terminating app due to uncaught exception of class '"

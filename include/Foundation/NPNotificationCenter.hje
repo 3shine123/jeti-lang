@@ -4,6 +4,7 @@
 #import <Foundation/NPObject.hje>
 #import <Foundation/NPString.hje>
 #import <Foundation/NPArray.hje>
+#import <Foundation/NPNotification.hje>
 
 // NPNotificationCenter — 同步观察者总线（对应 ObjC 的
 // NSNotificationCenter）。
@@ -29,14 +30,21 @@
 }
 + (NPNotificationCenter *)defaultCenter;   // 共享单例
 // 注册：block 为 nil 则忽略。object 传 NULL 表示不按对象过滤。
+//
+// 块收的是 **NPNotification \***（对应 ObjC 的
+// `addObserverForName:object:queue:usingBlock:`，那里的块同样收
+// NSNotification），因此 name/object/userInfo 都从通知对象上取。
 - (void)addObserver:(id)observer forName:(NPString *)name object:(id)object
-              usingBlock:(void (^)(NPString *name, id object))block;
+              usingBlock:(void (^)(NPNotification *notification))block;
 // 精确注销：observer/name/block 三者都匹配的项被移除（name NULL 只按
 // observer+block 匹配）。
 - (void)removeObserver:(id)observer;
 - (void)removeObserver:(id)observer forName:(NPString *)name;
 // 发布：同步逐个调用匹配的块；name 不可为 nil（ObjC 同规则）。
 - (void)postNotificationName:(NPString *)name object:(id)object;
+- (void)postNotificationName:(NPString *)name object:(id)object userInfo:(NPDictionary *)userInfo;
+// 直接投递一个已构造的通知（ObjC 的 `-postNotification:`）。
+- (void)postNotification:(NPNotification *)notification;
 - (size_t)observerCount;
 @end
 

@@ -1,0 +1,24 @@
+// _Block_copy/_Block_release 非块实参负例 —— checker 必须拒绝。
+//
+// 根因：Blocks ABI 的原型是 `void *_Block_copy(const void *)`，实参的「块性」
+// 在签名里根本表达不出来，C 类型系统一律放行。非块指针会被当成块头解引用
+// （_Block_copy 要读 isa/flags），当场 segfault——NPSortDescriptor 首版就是
+// 把 NPString *key 当块拷了，探针在任何一行输出之前就崩了。
+//
+// 判定故意收窄（漏报可接受、误报不可）：块字面量、块类型、块 typedef 别名都
+// 合法；`id`/`instancetype`/`void *`/`Class`/`SEL` 以及类型读不出来的实参一律
+// 静默（块可以合法地存在 id/void * 里，NPTimer 的 ivar 就是这么写的）。只有
+// **可证明**不是块的有名指针（类指针 / char * / struct 指针）才报错。
+#import <Foundation/Foundation.hje>
+
+extern void *_Block_copy(const void *src);
+extern void _Block_release(const void *src);
+
+int main(void) {
+    NPString *key = [NPString stringWithUTF8String:"k"];
+    // error: argument to '_Block_copy' is not a block; only a block literal or
+    //        block-typed value can be passed
+    void *bad = _Block_copy((const void *)key);
+    (void)bad;
+    return 0;
+}

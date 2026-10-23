@@ -1,0 +1,46 @@
+#ifndef NPURL_NH
+#define NPURL_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPNumber.hje>
+
+// NPURL —— URL 解析（对应 ObjC 的 NSURL 的**纯解析子集**）。
+//
+// v1 只做字符串拆装：scheme://host[:port]/path?query#fragment。
+// 组件各存一个 NPString ivar；缺失的组件返回 nil。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **要求 scheme://authority 形态**：不带 `://` 的输入（mailto:x、相对引用）
+//   `+URLWithString:` 返回 nil（ObjC 的 NSURL 支持更多 scheme 形态）。
+// - **不做事 percent-decoding/编码**：`path`/`query` 是原始字节段；ObjC 的
+//   `path` 会解码 %41 → A。需要解码时用 NPScanner 自行处理。
+// - **userinfo 被丢弃**（user:pass@host 的 @ 前段不进任何组件）；**无 IPv6
+//   字面量**（[::1] 形态会解析出错误 host——v1 不支持，待需求出现）。
+// - 无相对 URL 解析（URLWithString:relativeToURL:）、无书签/文件引用 URL、
+//   无网络语义（不做 DNS/连接——那是 NPURLSession 的事，见缺口计划 P3）。
+// - `-port` 返回 NPNumber（ObjC 对齐）；显式空 port（`host:`）→ nil。
+@interface NPURL : NPObject {
+@protected
+    NPString *_scheme;
+    NPString *_host;
+    NPString *_port;      // 数字拼写；nil = 未显式给出
+    NPString *_path;      // 含前导 '/'；nil = 未给出
+    NPString *_query;     // '?' 后 '#' 前的原始段；nil = 未给出
+    NPString *_fragment;  // '#' 后；nil = 未给出
+}
+// 解析；非法输入（缺 :// 或空 host）返回 nil（ObjC 对齐）。
++ (NPURL *)URLWithString:(NPString *)str;
+- (id)initWithString:(NPString *)str;
+
+// 组件（缺失 → nil）。absoluteString 是重建的规范拼装。
+- (NPString *)scheme;
+- (NPString *)host;
+- (NPNumber *)port;
+- (NPString *)path;
+- (NPString *)query;
+- (NPString *)fragment;
+- (NPString *)absoluteString;
+@end
+
+#endif

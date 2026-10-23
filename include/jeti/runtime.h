@@ -227,6 +227,18 @@ BOOL jeti_isKindOfClass(NPObject *obj, NPClass *cls);
  * call share one implementation. */
 id jeti_kvc_value(id obj, const char *key);
 
+/* Process arguments, for NPProcessInfo -arguments.
+ *
+ * The runtime reads them from the PLATFORM rather than from `main`'s argc/argv:
+ * jetic never synthesizes `main` (the user writes it), so Foundation-internal
+ * code has no other way to see the program's arguments.
+ *   Apple : _NSGetArgc / _NSGetArgv
+ *   Linux : /proc/self/cmdline (NUL-separated), split once and cached
+ *   other : empty (argc 0) — documented platform gap, not a silent guess
+ * Index 0 is the program path, matching ObjC's NSProcessInfo.arguments. */
+int jeti_argc(void);
+const char *jeti_argv(int index);
+
 // ─── Autorelease pool API ────────────────────────────────────────────────────────
 
 typedef struct jeti_autoreleasepool jeti_autoreleasepool_t;

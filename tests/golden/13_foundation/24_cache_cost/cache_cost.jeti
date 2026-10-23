@@ -1,0 +1,88 @@
+/* NPCache 成本维度 golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * P1-3：NPCache 补齐 ObjC NSCache 的成本维度 —— `setObject:forKey:cost:`、
+ * `totalCostLimit`。ObjC 头文件注释写明「limits are imprecise/not strict」，
+ * 本实现按确定性 LRU 淘汰到不超限为止。
+ *
+ * 判据说明：ObjC 的 NSCache **不公开** totalCost（头文件里没有该属性），
+ * 所以本类同样只给 totalCostLimit 访问器，成本是否生效一律从「哪些键被淘汰」
+ * 观察（objectForKey: 未中返回 nil）。注意 objectForKey: 命中会提升 LRU，
+ * 因此每组的断言都放在该组操作之后。
+ *
+ * A1 countLimit 维度回归（原有行为不被成本维度破坏）
+ * A2 totalCostLimit 维度：总成本超限淘汰最旧
+ * A3 同键覆盖：成本替换而非累加（否则会多淘汰一条）
+ * A4 removeObjectForKey: 把成本扣回去（否则后续插入会误淘汰）
+ * A5 setObject:forKey: 等价于成本 0
+ * A6 totalCostLimit=0 = 不限
+ * A7 单条自身就超限时保留（无从淘汰，ObjC 的 limits 非强制）
+ * 期望输出：A1..A7 各一行。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+int main(void) {
+    /* A1：countLimit=2，插第 3 条淘汰最旧的 k1 */
+    NPCache *c1 = [NPCache cache];
+    [c1 setCountLimit:2];
+    [c1 setObject:@"v1" forKey:@"k1"];
+    [c1 setObject:@"v2" forKey:@"k2"];
+    [c1 setObject:@"v3" forKey:@"k3"];
+    BOOL a1_k1gone = [c1 objectForKey:@"k1"] == NULL;
+    BOOL a1_k3here = [c1 objectForKey:@"k3"] != NULL;
+    printf("A1 count=%zu k1gone=%d k3here=%d\n", [c1 count], a1_k1gone, a1_k3here);
+
+    /* A2：每条成本 3、上限 6；插第 3 条总成本 9 → 淘汰最旧的 a */
+    NPCache *c2 = [NPCache cache];
+    [c2 setTotalCostLimit:6];
+    [c2 setObject:@"a" forKey:@"a" cost:3];
+    [c2 setObject:@"b" forKey:@"b" cost:3];
+    [c2 setObject:@"c" forKey:@"c" cost:3];
+    BOOL a2_agone = [c2 objectForKey:@"a"] == NULL;
+    BOOL a2_chere = [c2 objectForKey:@"c"] != NULL;
+    printf("A2 count=%zu agone=%d chere=%d\n", [c2 count], a2_agone, a2_chere);
+
+    /* A3：同键覆盖同成本。正确记账 → 5+5=10 ≤ 10，两条都在；
+       若覆盖时累加 → 10+5=15 > 10 会多淘汰 x。 */
+    NPCache *c3 = [NPCache cache];
+    [c3 setTotalCostLimit:10];
+    [c3 setObject:@"x" forKey:@"x" cost:5];
+    [c3 setObject:@"x" forKey:@"x" cost:5];
+    [c3 setObject:@"y" forKey:@"y" cost:5];
+    BOOL a3_xhere = [c3 objectForKey:@"x"] != NULL;
+    printf("A3 count=%zu xhere=%d\n", [c3 count], a3_xhere);
+
+    /* A4：移除后成本归零。正确 → 5+5=10 ≤ 10，两条都在；
+       若移除未扣成本 → 10+5=15 > 10 会淘汰 q。 */
+    NPCache *c4 = [NPCache cache];
+    [c4 setTotalCostLimit:10];
+    [c4 setObject:@"p" forKey:@"p" cost:10];
+    [c4 removeObjectForKey:@"p"];
+    [c4 setObject:@"q" forKey:@"q" cost:5];
+    [c4 setObject:@"r" forKey:@"r" cost:5];
+    BOOL a4_qhere = [c4 objectForKey:@"q"] != NULL;
+    BOOL a4_rhere = [c4 objectForKey:@"r"] != NULL;
+    printf("A4 count=%zu qhere=%d rhere=%d\n", [c4 count], a4_qhere, a4_rhere);
+
+    /* A5：不带 cost 的入口 = 成本 0，不占额度 */
+    NPCache *c5 = [NPCache cache];
+    [c5 setTotalCostLimit:1];
+    [c5 setObject:@"z" forKey:@"z"];
+    [c5 setObject:@"y" forKey:@"y" cost:1];
+    BOOL a5_zhere = [c5 objectForKey:@"z"] != NULL;
+    printf("A5 count=%zu zhere=%d\n", [c5 count], a5_zhere);
+
+    /* A6：totalCostLimit=0 = 不限 */
+    NPCache *c6 = [NPCache cache];
+    [c6 setObject:@"a" forKey:@"a" cost:1000];
+    [c6 setObject:@"b" forKey:@"b" cost:1000];
+    printf("A6 count=%zu\n", [c6 count]);
+
+    /* A7：单条自身超限 → 保留（无从淘汰） */
+    NPCache *c7 = [NPCache cache];
+    [c7 setTotalCostLimit:2];
+    [c7 setObject:@"big" forKey:@"big" cost:10];
+    printf("A7 count=%zu\n", [c7 count]);
+    return 0;
+}

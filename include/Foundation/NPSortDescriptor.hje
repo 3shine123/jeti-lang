@@ -1,0 +1,48 @@
+#ifndef NPSORTDESCRIPTOR_NH
+#define NPSORTDESCRIPTOR_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+
+// NPSortDescriptor —— 排序描述符（对应 ObjC 的 NSSortDescriptor 的
+// **无 KVC 子集**）。
+//
+// Jeti 是静态派发，没有 ObjC 的 `valueForKey:` 运行期查表——描述符不按
+// key 反射取值，而是持有调用方给的**比较块**（`int (^)(id, id)`，返回
+// <0/0/>0，语义与 NPArray sortedArrayUsingComparator: 一致）。key 在这里
+// 只是标签：进 description、帮调用方对齐多键次序，不参与取值。
+//
+// 多键排序：把描述符放进 NPArray 传给
+// `sortedArrayUsingDescriptors:`（NPArray）/`sortUsingDescriptors:`
+// （NPMutableArray）——数组前面的描述符优先；前级比出平局才落到后级；
+// 全部级平局保持原相对顺序（稳定）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **无 KVC**：`sortDescriptorWithKey:ascending:` 只存标签；真正的比较
+//   语义来自 `initWithKey:ascending:comparator:` 的块。ObjC 的
+//   `compare:` 选择子路径（运行期按名反射）不存在——诚实边界，不是降级。
+// - `-reversedSortDescriptor` 返回新描述符（同 key、同比较块、升降反转）。
+// - 块指针 ivar 按 NPTimer 先例存 `id`（`_Block_copy` 持有），
+//   `compareObject:toObject:` 调用点强转。
+@interface NPSortDescriptor : NPObject {
+@protected
+    NPString *_sdKey;        // 标签（不参与取值——见上）
+    int _ascending;
+    id _comparator;          // int (^)(id, id)，_Block_copy 持有
+}
+// ObjC 拼写对齐：只存 key 标签 + 方向（无比较块时 compareObject:toObject:
+// 退化为按指针恒等比较——同对象 0，否则按地址序，仅够保序用途）。
++ (NPSortDescriptor *)sortDescriptorWithKey:(NPString *)key ascending:(int)ascending;
+// Jeti 形态：key 标签 + 方向 + 比较块（比较语义的真正来源）。
++ (NPSortDescriptor *)sortDescriptorWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp;
+- (id)initWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp;
+
+- (NPString *)key;
+- (int)ascending;
+// 用本描述符比较两对象：升降序已折算（升序直接用块结果，降序取反）。
+- (int)compareObject:(id)obj1 toObject:(id)obj2;
+// 新描述符：同 key、同比较块、方向反转。
+- (NPSortDescriptor *)reversedSortDescriptor;
+@end
+
+#endif

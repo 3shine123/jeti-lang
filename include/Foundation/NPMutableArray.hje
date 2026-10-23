@@ -36,6 +36,12 @@
 - (void)setObject:(T)obj atIndex:(size_t)index;
 // In-place filter: drops the elements the predicate rejects, order preserved.
 - (void)filterUsingPredicate:(NPPredicate *)pred;
+// In-place comparator sort (stable merge sort via the inherited
+// sortedArrayUsingComparator:). A nil comparator leaves the array unchanged.
+- (void)sortUsingComparator:(int (^)(id, id))cmp;
+// In-place multi-key sort via the inherited sortedArrayUsingDescriptors:.
+// A nil/empty descriptor array leaves the array unchanged.
+- (void)sortUsingDescriptors:(NPArray *)descriptors;
 
 @end
 

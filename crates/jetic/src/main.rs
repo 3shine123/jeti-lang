@@ -615,6 +615,38 @@ fn spelling_is_erased_template(spelling: &str, params: &[String]) -> bool {
     })
 }
 
+/// The signal that killed a child, if it was killed rather than exiting.
+/// `ExitStatus::code()` is `None` in that case — which is how a crash used to
+/// reach the user as a bare `1` with no explanation at all.
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
+/// Name for the signals a crashing program realistically dies of. Only the
+/// numbers that agree across platforms are named (SIGBUS is 7 on Linux and 10
+/// on Darwin, so it stays unnamed rather than lying on one of them); anything
+/// else reports the bare number.
+fn signal_name(n: i32) -> &'static str {
+    match n {
+        2 => "SIGINT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        15 => "SIGTERM",
+        _ => "signal",
+    }
+}
+
 /// The C for a specialization is machine-made glue compiled for a concrete
 /// type argument — the library it came from is built `-w` for exactly that
 /// reason. Keep its diagnostics out of the user's build without silencing the
@@ -2014,7 +2046,30 @@ fn main() {
 
             let _ = fs::remove_file(&bin_path);
 
-            std::process::exit(run_status.code().unwrap_or(1));
+            // A program killed by a signal (SIGSEGV/SIGABRT/…) has no exit code:
+            // `code()` is `None`, and the old `unwrap_or(1)` turned that into a
+            // bare `1` with no output whatsoever — a segfault was
+            // indistinguishable from a deliberate `return 1`, and a probe that
+            // died looked like it had merely "exited quietly". Name the signal,
+            // and report the shell's 128+N status so a caller can tell a crash
+            // from a clean non-zero exit.
+            match run_status.code() {
+                Some(code) => std::process::exit(code),
+                None => {
+                    let sig = exit_signal(&run_status);
+                    match sig {
+                        Some(n) => eprintln!(
+                            "\x1b[1;31merror:\x1b[0m program terminated by signal {} ({})",
+                            n,
+                            signal_name(n)
+                        ),
+                        None => eprintln!(
+                            "\x1b[1;31merror:\x1b[0m program terminated abnormally"
+                        ),
+                    }
+                    std::process::exit(sig.map_or(1, |n| 128 + n));
+                }
+            }
         }
         _ => {
             // compile mode: compile to binary, keep it

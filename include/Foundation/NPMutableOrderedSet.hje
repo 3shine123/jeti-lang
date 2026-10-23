@@ -1,0 +1,43 @@
+#ifndef NPMUTABLEORDEREDSET_NH
+#define NPMUTABLEORDEREDSET_NH
+
+#import <Foundation/NPOrderedSet.hje>
+
+// Mutable counterpart of NPOrderedSet. Inherits NPOrderedSet's positional
+// querying (objectAtIndex: / firstObject / lastObject / indexOfObject:) and
+// NPSet's storage ivars (_items / _count / _capacity) + add path.
+//
+// Order semantics (NSOrderedSet-aligned):
+// - add keeps FIRST-insertion position — re-adding an existing element is a
+//   no-op on both membership and order;
+// - removal is a dense shift (the tail moves down), so indices stay valid
+//   and contiguous;
+// - insertObject:atIndex: puts a NEW element at the position, pushing the
+//   rest back; an equal element already in the set is a no-op (its position
+//   does not move — same as re-adding).
+@interface NPMutableOrderedSet<T> : NPOrderedSet<T> {
+@public
+    // ivars inherited from NPSet
+}
+
++ (NPMutableOrderedSet *)orderedSet;
++ (NPMutableOrderedSet *)orderedSetWithObject:(id)object;
++ (NPMutableOrderedSet *)orderedSetWithArray:(NPArray *)array;
+
+- (NPMutableOrderedSet *)init;
+- (NPMutableOrderedSet *)initWithCapacity:(size_t)capacity;
+- (NPMutableOrderedSet *)initWithArray:(NPArray *)other;
+
+// addObject:/addObjectsFromArray: are declared (and implemented) on NPSet —
+// the vtable slots live there. The mutable subclass adds removal, positional
+// insert and exchange.
+
+- (void)removeObject:(T)obj;
+- (void)removeObjectAtIndex:(size_t)index;
+- (void)removeAllObjects;
+- (void)insertObject:(T)obj atIndex:(size_t)index;
+- (void)exchangeObjectsAtIndexes:(size_t)i1 and:(size_t)i2;
+
+@end
+
+#endif

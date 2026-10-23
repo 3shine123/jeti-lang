@@ -159,6 +159,18 @@ pub struct Checker {
     /// the block signature (params + their annotations) is unreachable without
     /// this map. Foundation and essentially all real block code use typedefs.
     pub typedef_blocks: HashMap<String, AstType>,
+    /// Classes seen only as `@class X;` forward declarations in this TU, and
+    /// classes whose `@interface` is actually visible here.
+    ///
+    /// A forward declaration registers a symbol with an empty method set —
+    /// exactly the shape an `@interface` that declares nothing has — so the
+    /// symbol table alone cannot tell "declares nothing" from "declaration
+    /// lives in another TU". Only the latter is unknowable, and reporting "no
+    /// visible method" there is a guess (baremetal's `Metal::Ghost` is forward
+    /// declared and only ever messaged as nil). `class_declares_selector`
+    /// consults both sets to answer None instead.
+    pub forward_declared_classes: std::collections::HashSet<String>,
+    pub visible_interface_classes: std::collections::HashSet<String>,
     /// Enum tag name → member list, collected from THIS TU's `enum` decls
     /// (including ones nested in namespaces and class bodies). Powers switch
     /// exhaustiveness: a switch over a *known* enum with no `default:` must
@@ -377,6 +389,8 @@ impl Checker {
             struct_eq_tags: Vec::new(),
             struct_alias_tags: HashMap::new(),
             typedef_blocks: HashMap::new(),
+            forward_declared_classes: std::collections::HashSet::new(),
+            visible_interface_classes: std::collections::HashSet::new(),
             enum_members: HashMap::new(),
             enum_member_values: HashMap::new(),
             enum_alias_tags: HashMap::new(),
@@ -697,6 +711,16 @@ impl Checker {
         let st = self.symtab.as_ref()?;
         if st.find_class(class_name).is_none() {
             return None; // unresolved class: cannot judge
+        }
+        // A class that exists here only as `@class X;` has no method set to
+        // consult — its `@interface` lives in another TU. The symbol is present
+        // (so the check above passes) but empty, which would otherwise read as
+        // "declares nothing" and turn a legal send into a false positive. Not
+        // visible is not the same as not declared.
+        if self.forward_declared_classes.contains(class_name)
+            && !self.visible_interface_classes.contains(class_name)
+        {
+            return None;
         }
         let mut cur = class_name.to_string();
         for _ in 0..32 {
@@ -1696,6 +1720,67 @@ impl Checker {
         self.narrowed.iter().rev().any(|s| s.contains(name))
     }
 
+    /// Peel the `(...)` / explicit-cast wrappers down to the operand that
+    /// carries the real type. The `_Block_copy` idiom *requires* the cast
+    /// (`_Block_copy((const void *)blk)`, to silence the ABI's own
+    /// pointer-conversion warning), so the cast target is always `void *` and
+    /// tells us nothing — the operand underneath is what has to be judged.
+    fn peel_casts(e: &AstExpr) -> &AstExpr {
+        match &e.data {
+            AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => Self::peel_casts(inner),
+            _ => e,
+        }
+    }
+
+    /// `true` only when a `_Block_copy`/`_Block_release` operand is *provably*
+    /// not a block.
+    ///
+    /// Deliberately narrow, per the project's "missing a bug is acceptable, a
+    /// false positive is not" rule: a block literal and any block-typed or
+    /// block-typedef'd value are blocks; `id`/`instancetype`/`void *` and
+    /// anything whose type we cannot read stay silent (a block legitimately
+    /// lives in an `id`/`void *` between a copy and its release, which is
+    /// exactly how NPTimer's ivar is spelled). What remains — a named class
+    /// pointer, `char *`, a struct pointer — can only be a bug: the ABI will
+    /// read it as a block header.
+    fn block_operand_is_provably_not_a_block(&self, a: &AstExpr) -> bool {
+        let inner = Self::peel_casts(a);
+        if matches!(inner.data, AstExprData::Block { .. }) {
+            return false;
+        }
+        let ty = match &inner.data {
+            AstExprData::VarRef { name, .. } => self
+                .lookup_scope_var_type(name)
+                .or_else(|| inner.expr_type.as_ref().map(|t| (**t).clone())),
+            _ => inner.expr_type.as_ref().map(|t| (**t).clone()),
+        };
+        let Some(ty) = ty else { return false };
+        if ty.is_block || ty.is_fn_ptr {
+            return false;
+        }
+        // A typedef'd block alias carries no `is_block` on the spelling
+        // (`SimpleBlock blk` is just a named type) — same lookup the block
+        // invocation path needs, same reason.
+        if let Some(n) = ty.name.as_ref() {
+            if self.block_alias_names.contains(n) || self.typedef_blocks.contains_key(n) {
+                return false;
+            }
+        }
+        if !ty.is_pointer {
+            // A bare scalar is also not a block, but only a *known* pointer
+            // shape is reported — see the doc comment.
+            return false;
+        }
+        // `void *` (and `id`, `instancetype`, `Class`, `SEL`) are where a block
+        // can legitimately be parked: not provably wrong.
+        if matches!(ty.prim, TypePrim::Void | TypePrim::Id | TypePrim::Instancetype
+                              | TypePrim::Class | TypePrim::Sel) {
+            return false;
+        }
+        // A named class pointer, `char *`, or a struct pointer.
+        ty.prim == TypePrim::Named || ty.prim == TypePrim::Char || ty.is_struct
+    }
+
     /// The nullability an argument expression *carries*, or `None` when unknown.
     ///
     /// Deliberately narrow — only shapes whose declared annotation we can read
@@ -2025,6 +2110,16 @@ impl Checker {
         "jeti_autorelease",
     ];
 
+    /// The Clang Blocks ABI entry points. Their prototype is
+    /// `void *_Block_copy(const void *)` / `void _Block_release(const void *)`,
+    /// so the C type system accepts *any* pointer — the operand's block-ness is
+    /// not expressed in the signature and cannot be. A non-block operand is
+    /// read as a block header and dereferenced (`_Block_copy` inspects
+    /// `isa`/`flags`), which segfaults on the spot: the NPSortDescriptor probe
+    /// passed an `NPString *` key and died before printing its first line. The
+    /// checker supplies the check the ABI cannot.
+    const BLOCK_RUNTIME_FNS: &[&str] = &["_Block_copy", "_Block_release"];
+
     /// Extract printf-style conversion characters from a format-string literal,
     /// in order (`'@'` for `%@`, `'d'` for `%d`, …). `%%` is skipped; flags,
     /// width, precision and length modifiers (`l`/`ll`/`h`/`z`/`t`/`j`/`q`/`L`)
@@ -2226,6 +2321,15 @@ impl Checker {
     /// `method_params` / `function_params` maps.  Runs once before checking.
     fn collect_signatures(&mut self, decl: &AstDecl) {
         match &decl.data {
+            // `@class X;` — the class exists (the binder registers a symbol) but
+            // nothing about its interface is visible in this TU. Recorded so
+            // `class_declares_selector` can answer "unknown" rather than
+            // "declares nothing".
+            AstDeclData::ForwardClass { names } => {
+                for n in names {
+                    self.forward_declared_classes.insert(n.clone());
+                }
+            }
             AstDeclData::Typedef { aliased_type: Some(at), .. } => {
                 // Block-typed and function-pointer typedefs (`typedef void
                 // (^SimpleBlock)(void)`, `typedef int (*IntFn)(int)`): the
@@ -2240,6 +2344,9 @@ impl Checker {
             }
             AstDeclData::Class { methods, properties, .. } => {
                 let cls_name = decl.name.clone();
+                if let Some(ref cn) = cls_name {
+                    self.visible_interface_classes.insert(cn.clone());
+                }
                 for m in methods {
                     if let AstDeclData::Method { params, is_class_method, return_type, .. } = &m.data {
                         if let Some(ref sel) = m.name {
@@ -3651,6 +3758,22 @@ impl Checker {
                 // General: warn about bare C-string literals passed to object-typed params.
                 let param_types = self.function_params.get(name).cloned().unwrap_or_default();
                 for a in args.iter_mut() { self.check_expr(a); }
+                // `_Block_copy`/`_Block_release` take a block and nothing else,
+                // but their ABI prototype (`const void *`) cannot say so — see
+                // BLOCK_RUNTIME_FNS. Runs after the args are checked so their
+                // types are recorded.
+                if Self::BLOCK_RUNTIME_FNS.contains(&name.as_str()) {
+                    if let Some(a) = args.first() {
+                        if self.block_operand_is_provably_not_a_block(a) {
+                            let msg = format!(
+                                "argument to '{}' is not a block; only a block literal or \
+                                 block-typed value can be passed — a non-block pointer is read \
+                                 as a block header and dereferenced",
+                                name);
+                            self.check_error_over(a.line, a.col, a.end_line, a.end_col, &msg);
+                        }
+                    }
+                }
                 for (i, a) in args.iter().enumerate() {
                     if let Some(Some(ref pt)) = param_types.get(i) {
                         if Self::is_object_type(pt) && matches!(a.data, AstExprData::String(_)) {

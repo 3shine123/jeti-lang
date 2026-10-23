@@ -1,0 +1,62 @@
+// NPString 编码 API 探针（P1-1）
+//
+// 判据不是「能跑」，而是**与 ObjC 逐字节一致**：本探针的输出格式与
+// probes/x17_string_encoding/objc_baseline.m 完全相同，直接 diff。
+//
+// 已由 ObjC 基准实测锁定的语义（见 NPString.hje 注释）：
+//   - 主机端序变体（UTF16=10 / UTF32）带 BOM，显式端序变体（BE/LE）不带；
+//   - lengthOfBytesUsingEncoding: 只算载荷、不计 BOM，转换不了返回 0；
+//   - canBeConvertedToEncoding: 转换不了返回 NO；
+//   - ASCII/Latin-1 表示不了就返回 nil（不静默降级、不产出替换字符）。
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static void dump(const char *label, NPData *d) {
+    if (!d) { printf("%-10s nil\n", label); return; }
+    printf("%-10s len=%2lu :", label, (unsigned long)[d length]);
+    const unsigned char *b = [d bytes];
+    size_t i;
+    for (i = 0; i < [d length]; i++) printf(" %02X", b[i]);
+    printf("\n");
+}
+
+int main(void) {
+    /* U+0041 'A', U+00E9 'é', U+20AC '€' */
+    NPString *s = [NPString stringWithUTF8String:"A\xC3\xA9\xE2\x82\xAC"];
+    /* U+1F600 — UTF-16 需代理项对 */
+    NPString *astral = [NPString stringWithUTF8String:"\xF0\x9F\x98\x80"];
+
+    dump("UTF8",    [s dataUsingEncoding:NPStringEncodingUTF8]);
+    dump("ASCII",   [s dataUsingEncoding:NPStringEncodingASCII]);
+    dump("Latin1",  [s dataUsingEncoding:NPStringEncodingISOLatin1]);
+    dump("UTF16",   [s dataUsingEncoding:NPStringEncodingUTF16]);
+    dump("UTF16BE", [s dataUsingEncoding:NPStringEncodingUTF16BigEndian]);
+    dump("UTF16LE", [s dataUsingEncoding:NPStringEncodingUTF16LittleEndian]);
+    dump("UTF32",   [s dataUsingEncoding:NPStringEncodingUTF32]);
+    dump("UTF32BE", [s dataUsingEncoding:NPStringEncodingUTF32BigEndian]);
+    dump("UTF32LE", [s dataUsingEncoding:NPStringEncodingUTF32LittleEndian]);
+    dump("astral16", [astral dataUsingEncoding:NPStringEncodingUTF16]);
+    dump("astral32", [astral dataUsingEncoding:NPStringEncodingUTF32]);
+
+    printf("lengthOfBytes UTF8=%lu ASCII=%lu UTF16=%lu UTF32=%lu\n",
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingUTF8],
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingASCII],
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingUTF16],
+        (unsigned long)[s lengthOfBytesUsingEncoding:NPStringEncodingUTF32]);
+    printf("canConvert ASCII=%d Latin1=%d UTF16=%d\n",
+        [s canBeConvertedToEncoding:NPStringEncodingASCII] ? 1 : 0,
+        [s canBeConvertedToEncoding:NPStringEncodingISOLatin1] ? 1 : 0,
+        [s canBeConvertedToEncoding:NPStringEncodingUTF16] ? 1 : 0);
+
+    NPData *u16 = [s dataUsingEncoding:NPStringEncodingUTF16BigEndian];
+    NPString *back = [[NPString alloc] initWithData:u16 encoding:NPStringEncodingUTF16BigEndian];
+    // 比往返后的 **UTF-8 字节**，不比 `-length`：ObjC 的 length 是 UTF-16 码元
+    // 数，NPString 的是 UTF-8 字节数 —— 那是 NPString 既有的 length 语义分歧
+    // （独立问题），不该混进编码转换的闸门。
+    const char *rt = [back UTF8String];
+    printf("roundtrip UTF16BE :");
+    size_t ri;
+    for (ri = 0; rt[ri] != '\0'; ri++) printf(" %02X", (unsigned char)rt[ri]);
+    printf("\n");
+    return 0;
+}

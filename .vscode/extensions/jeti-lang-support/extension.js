@@ -78,7 +78,12 @@ function hideStatusIfNoJetiTab() {
 
 function refreshStatusForActiveTab() {
   const active = vscode.window.activeTextEditor;
-  if (!active || !isJetiDocument(active.document)) return;
+  if (!active || !isJetiDocument(active.document)) {
+    // Not a jeti/hje tab: the item has nothing to say about the file under
+    // the cursor — hide it instead of showing the previous file's state.
+    hideStatusIfNoJetiTab();
+    return;
+  }
   if (!client) {
     setServerStatus('stopped');
     return;
@@ -431,6 +436,9 @@ function restart() {
   context.subscriptions.push(bar);
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(() => {
+      // Switching away from a jeti/hje tab hides the item — the same behavior
+      // clangd's "clangd: idle" item has for non-C files.
+      hideStatusIfNoJetiTab();
       if (!client) return;
       refreshStatusForActiveTab();
     }),

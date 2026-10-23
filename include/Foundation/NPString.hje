@@ -8,6 +8,30 @@ typedef struct {
     size_t length;
 } NPRange;
 
+// 字符串编码，逐值对齐 ObjC 的 NSStringEncoding（系统 NSString.h 的
+// NS_ENUM）——取值一致才能与 ObjC 代码/数据互操作。Jeti 侧实现
+// ASCII / UTF-8 / ISO-Latin-1 / UTF-16(±BOM) / UTF-32(±BOM) 子集；
+// 未覆盖的编码按 ObjC 语义返回 nil / 0 / NO，不静默降级。
+//
+// 端序约定（clang 探针实测，非推测）：
+//   - `Unicode`/`UTF16`(=10) 与 `UTF32`(0x8c000100) 是「主机端序」变体，
+//     编码时**输出 BOM**；
+//   - `UTF16BigEndian`/`UTF16LittleEndian`/`UTF32BigEndian`/
+//     `UTF32LittleEndian` 是显式端序变体，编码时**不输出 BOM**。
+typedef uint32_t NPStringEncoding;
+enum {
+    NPStringEncodingASCII             = 1,
+    NPStringEncodingUTF8              = 4,
+    NPStringEncodingISOLatin1         = 5,
+    NPStringEncodingUnicode           = 10,          // = UTF-16，含 BOM，主机端序
+    NPStringEncodingUTF16             = 10,
+    NPStringEncodingUTF16BigEndian    = 0x90000100,
+    NPStringEncodingUTF16LittleEndian = 0x94000100,
+    NPStringEncodingUTF32             = 0x8c000100,  // 含 BOM，主机端序
+    NPStringEncodingUTF32BigEndian    = 0x98000100,
+    NPStringEncodingUTF32LittleEndian = 0x9c000100
+};
+
 #ifndef YES
 #define YES 1
 #endif
@@ -58,6 +82,23 @@ typedef struct {
 - (uint32_t)hash;
 - (NPString *)description;
 - (NPString *)copy;
+
+// ── 编码转换（对应 ObjC NSString 的同名方法）──────────────────────────────
+// 语义逐条对齐 ObjC（clang 探针实测）：
+//   - dataUsingEncoding: 目标编码表示不了某个字符时返回 nil；主机端序变体
+//     带 BOM，显式端序变体不带。
+//   - lengthOfBytesUsingEncoding: 只算载荷、**不计 BOM**；转换不了返回 0。
+//   - canBeConvertedToEncoding: 转换不了返回 NO。
+//   - initWithData:/initWithBytes: 显式端序变体**不剥 BOM**（BOM 变成一个
+//     U+FEFF 字符）；主机端序变体剥 BOM 并用它定序，**无 BOM 时按大端解**。
+//   - 非法字节序列（截断的 UTF-8、孤立的代理项、越界码点）一律 nil。
+@class NPData;
+
+- (NPData *)dataUsingEncoding:(NPStringEncoding)encoding;
+- (size_t)lengthOfBytesUsingEncoding:(NPStringEncoding)encoding;
+- (BOOL)canBeConvertedToEncoding:(NPStringEncoding)encoding;
+- (NPString *)initWithData:(NPData *)data encoding:(NPStringEncoding)encoding;
+- (NPString *)initWithBytes:(const void *)bytes length:(size_t)len encoding:(NPStringEncoding)encoding;
 
 @end
 

@@ -56,7 +56,7 @@
 }
 
 - (void)addObserver:(id)observer forName:(NPString *)name object:(id)object
-              usingBlock:(void (^)(NPString *name, id object))block {
+              usingBlock:(void (^)(NPNotification *notification))block {
     if (!block) return;
     [self npc_reserve];
     if (_count >= _capacity) return;   // 扩容失败：放弃注册
@@ -99,8 +99,13 @@ static void npnc_remove_matching(NPNotificationCenter *self, id observer,
     npnc_remove_matching(self, observer, name, NULL);
 }
 
-- (void)postNotificationName:(NPString *)name object:(id)object {
-    if (!name) return;
+// 三个投递入口最终都走这里：构造 NPNotification 后按 (name, object) 匹配投递。
+// 匹配规则对齐 ObjC —— 注册名 NULL = 通配该维；object 维按指针身份比较。
+- (void)postNotification:(NPNotification *)notification {
+    if (!notification) return;
+    NPString *name = [notification name];
+    if (!name) return;                       // ObjC 同规则：name 不可为 nil
+    id object = [notification object];
     // 倒序遍历：块内 removeObserver 安全（ObjC 同款保证）。
     for (size_t i = _count; i > 0; i--) {
         size_t idx = i - 1;
@@ -109,9 +114,19 @@ static void npnc_remove_matching(NPNotificationCenter *self, id observer,
         // object 维：注册对象 NULL = 通配，否则要求指针相等（身份过滤）。
         if (_objects[idx] && _objects[idx] != object) continue;
         // 块按对象存，调用点强转为块类型（clang 块即指针，合法）。
-        void (^blk)(NPString *, id) = (void (^)(NPString *, id))_blocks[idx];
-        if (blk) blk(name, object);
+        void (^blk)(NPNotification *) = (void (^)(NPNotification *))_blocks[idx];
+        if (blk) blk(notification);
     }
+}
+
+- (void)postNotificationName:(NPString *)name object:(id)object {
+    [self postNotificationName:name object:object userInfo:NULL];
+}
+
+- (void)postNotificationName:(NPString *)name object:(id)object userInfo:(NPDictionary *)userInfo {
+    if (!name) return;
+    NPNotification *note = [NPNotification notificationWithName:name object:object userInfo:userInfo];
+    [self postNotification:note];
 }
 
 - (size_t)observerCount {

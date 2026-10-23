@@ -1,0 +1,109 @@
+/* NPJSONSerialization 探针（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * A1 标量解析：整数/double/true/false/null/字符串
+ * A2 容器解析：数组、嵌套对象、混合嵌套
+ * A3 字符串转义：\" \\ \/ \n \t \uXXXX（含代理对 😄）→ UTF-8
+ * A4 错误路径：截断/尾随垃圾/坏转义/裸标识 → nil
+ * A5 序列化：紧凑形态、键保序、bool 保真、控制字符转义
+ * A6 往返：parse(serialize(parse(x))) 恒等
+ * A7 深度上限：>64 层嵌套 → nil；顶层 data 入口（JSONObjectWithData:）
+ * 期望输出：A1..A7 各一行 ok。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static int s_eq(id v, const char *c) {
+    return v && [v isKindOfClass:[NPString class]] && strcmp([(NPString *)v UTF8String], c) == 0;
+}
+
+int main(void) {
+    /* A1 标量 */
+    id n1 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"42"]];
+    id n2 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"-3.5"]];
+    id n3 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"true"]];
+    id n4 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"false"]];
+    id n5 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"null"]];
+    id n6 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"\"hi\""]];
+    NPNull *nn = n5;
+    int a1 = [n1 isKindOfClass:[NPNumber class]] && [(NPNumber *)n1 longLongValue] == 42
+        && [(NPNumber *)n2 doubleValue] > -3.51 && [(NPNumber *)n2 doubleValue] < -3.49
+        && [n3 isKindOfClass:[NPNumber class]] && [(NPNumber *)n3 boolValue] == 1
+        && [(NPNumber *)n4 boolValue] == 0
+        && n5 != NULL && [nn isKindOfClass:[NPNull class]]
+        && s_eq(n6, "hi");
+    printf("A1 %s\n", a1 ? "ok" : "FAIL");
+
+    /* A2 容器 */
+    id arr = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"[1,2,3]"]];
+    id obj = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"{\"a\":1,\"b\":[true,null]}"]];
+    int a2 = [arr isKindOfClass:[NPArray class]] && [(NPArray *)arr count] == 3
+        && [[(NPArray *)arr objectAtIndex:2] longLongValue] == 3
+        && [obj isKindOfClass:[NPDictionary class]] && [(NPDictionary *)obj count] == 2
+        && [[obj objectForKey:[NPString stringWithUTF8String:"a"]] longLongValue] == 1;
+    NPArray *bArr = [obj objectForKey:[NPString stringWithUTF8String:"b"]];
+    a2 = a2 && [bArr isKindOfClass:[NPArray class]] && [bArr count] == 2
+        && [[bArr objectAtIndex:0] boolValue] == 1
+        && [bArr objectAtIndex:1] != NULL
+        && [[bArr objectAtIndex:1] isKindOfClass:[NPNull class]];
+    printf("A2 %s\n", a2 ? "ok" : "FAIL");
+
+    /* A3 转义 */
+    id esc = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"\"a\\\"b\\\\c\\u0041\\u4e2d\""]];
+    int a3 = s_eq(esc, "a\"b\\cA\xe4\xb8\xad");
+    id emoji = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"\"\\ud83d\\ude04\""]];
+    a3 = a3 && s_eq(emoji, "\xf0\x9f\x98\x84");   /* U+1F604 😄 增补平面 */
+    printf("A3 %s\n", a3 ? "ok" : "FAIL");
+
+    /* A4 错误路径 */
+    int a4 = [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"{\"a\":"]] == NULL
+        && [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"[1,2] x"]] == NULL
+        && [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"\"\\q\""]] == NULL
+        && [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"tru"]] == NULL
+        && [NPJSONSerialization JSONObjectWithString:[NPString stringWithUTF8String:"{\"a\" 1}"]] == NULL;
+    printf("A4 %s\n", a4 ? "ok" : "FAIL");
+
+    /* A5 序列化 */
+    NPMutableDictionary *d = [NPMutableDictionary dictionary];
+    [d setObject:[NPNumber numberWithInt:1] forKey:[NPString stringWithUTF8String:"n"]];
+    [d setObject:[NPNumber numberWithBool:1] forKey:[NPString stringWithUTF8String:"flag"]];
+    [d setObject:[NPString stringWithUTF8String:"he\"llo\n"] forKey:[NPString stringWithUTF8String:"s"]];
+    NPMutableArray *inner = [NPMutableArray array];
+    [inner addObject:[NPNull null]];
+    [inner addObject:[NPNumber numberWithDouble:2.5]];
+    [d setObject:inner forKey:[NPString stringWithUTF8String:"arr"]];
+    NPString *out = [NPJSONSerialization stringWithJSONObject:d];
+    /* 键按插入序：n, flag, s, arr */
+    int a5 = out && strcmp([out UTF8String],
+        "{\"n\":1,\"flag\":true,\"s\":\"he\\\"llo\\n\",\"arr\":[null,2.5]}") == 0;
+    printf("A5 %s\n", a5 ? "ok" : "FAIL");
+
+    /* A6 往返 */
+    NPString *src6 = [NPString stringWithUTF8String:"{\"k\":[1,-2.5,true,null,\"x\\ny\",{\"z\":9}]}"];
+    id p1 = [NPJSONSerialization JSONObjectWithString:src6];
+    NPString *ser = [NPJSONSerialization stringWithJSONObject:p1];
+    id p2 = ser ? [NPJSONSerialization JSONObjectWithString:ser] : NULL;
+    int a6 = p1 && ser && p2
+        && [p2 isKindOfClass:[NPDictionary class]]
+        && [[p2 objectForKey:[NPString stringWithUTF8String:"k"]] count] == 6;
+    NPArray *k6 = [p2 objectForKey:[NPString stringWithUTF8String:"k"]];
+    a6 = a6 && [[k6 objectAtIndex:0] longLongValue] == 1
+        && [[k6 objectAtIndex:1] doubleValue] < -2.49 && [[k6 objectAtIndex:1] doubleValue] > -2.51
+        && [[k6 objectAtIndex:2] boolValue] == 1
+        && [[k6 objectAtIndex:3] isKindOfClass:[NPNull class]]
+        && s_eq([k6 objectAtIndex:4], "x\ny")
+        && [[[k6 objectAtIndex:5] objectForKey:[NPString stringWithUTF8String:"z"]] longLongValue] == 9;
+    printf("A6 %s\n", a6 ? "ok" : "FAIL");
+
+    /* A7 深度上限 + data 入口 */
+    NPMutableString *deep = [NPMutableString stringWithUTF8String:""];
+    for (int i = 0; i < 70; i++) { [deep appendUTF8String:"["]; }
+    for (int i = 0; i < 70; i++) { [deep appendUTF8String:"]"]; }
+    int a7 = [NPJSONSerialization JSONObjectWithString:deep] == NULL;
+    NPData *data = [NPData dataWithBytes:"{\"via\":\"data\"}" length:14];  /* 14 字节：含收尾 } */
+    id viaData = [NPJSONSerialization JSONObjectWithData:data];
+    a7 = a7 && viaData && s_eq([viaData objectForKey:[NPString stringWithUTF8String:"via"]], "data");
+    printf("A7 %s\n", a7 ? "ok" : "FAIL");
+    return 0;
+}

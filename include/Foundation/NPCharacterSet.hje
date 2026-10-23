@@ -1,0 +1,54 @@
+#ifndef NPCHARACTERSET_NH
+#define NPCHARACTERSET_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+
+// NPCharacterSet —— 字符集合（对应 ObjC 的 NSCharacterSet）。
+//
+// 内部是一张 256 项位图表（指针 ivar，calloc 分配——定长数组 ivar 会踩
+// codegen 的解析边界，NPUUID 的两半 u64 是同一先例）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **字节/ASCII 范围**：v1 只覆盖 0..255（`characterIsMember:` 收 char，
+//   `NPString -characterAtIndex:` 也是 char）。unichar/UTF-16 代理、
+//   非拉丁字符类别（letter 的 Unicode 全集）待真实需求出现再加——
+//   `letterCharacterSet` 现在是 ASCII 字母，不是 ObjC 的 Unicode 字母。
+// - 位图表成员方法只读；变异在 NSMutableCharacterSet 子类上。
+// - `np_addRange:`/`np_removeRange:` 是本实现的内部原语（np_ 前缀——
+//   裸名撞系统符号会静默走错实现，golden 14_uuid 命名注记），
+//   内置集与可变 API 都走它们。
+@interface NPCharacterSet : NPObject {
+@protected
+    unsigned char *_flags;   // 256 位图：1 = 成员
+}
+// 内置集（ObjC 对齐的拼写；范围见上面的诚实边界）。
++ (NPCharacterSet *)alphanumericCharacterSet;
++ (NPCharacterSet *)letterCharacterSet;
++ (NPCharacterSet *)decimalDigitCharacterSet;
++ (NPCharacterSet *)whitespaceCharacterSet;
++ (NPCharacterSet *)whitespaceAndNewlineCharacterSet;
++ (NPCharacterSet *)characterSetWithCharactersInString:(NPString *)str;
++ (NPCharacterSet *)characterSetWithRange:(NPRange)range;
+
+- (id)init;
+- (BOOL)characterIsMember:(char)c;
+
+// 内部原语（子类复用）。
+- (void)np_addRange:(NPRange)range;
+- (void)np_removeRange:(NPRange)range;
+@end
+
+// NPMutableCharacterSet —— 可变版（对应 NSMutableCharacterSet）。
+@interface NPMutableCharacterSet : NPCharacterSet {
+}
++ (NPMutableCharacterSet *)characterSet;
+- (void)addCharactersInRange:(NPRange)range;
+- (void)removeCharactersInRange:(NPRange)range;
+- (void)addCharactersInString:(NPString *)str;
+- (void)removeCharactersInString:(NPString *)str;
+// 全 256 位取反。
+- (void)invert;
+@end
+
+#endif

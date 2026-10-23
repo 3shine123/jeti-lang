@@ -42,14 +42,26 @@ esac
 #   * Mach-O (Darwin): plain nm shows a weak definition as 'D'/'T' anyway, so
 #     `nm -m` and its "weak external" marker are required.
 #   * ELF (Linux): weak symbols carry 'W'/'V'/'w'/'v'.
+#
+# Symbol matching is EXACT, against nm's last field. A substring match
+# (`grep -F " $sym"`) is wrong here: `_JETI_VTABLE_$_NPNotification` is a
+# prefix of `_JETI_VTABLE_$_NPNotificationCenter`, so every TU's weak stub for
+# the longer name made the owner's own strong symbol read as weak — a false
+# R2 failure the moment the library gained its first class-name prefix
+# collision. nm puts the symbol last in both plain and `-m` output.
+nm_lines_for() {
+    local obj="$1" sym="$2"
+    nm "$obj" 2>/dev/null | awk -v s="$sym" '$NF == s'
+}
+
 nm_is_weak() {
     local obj="$1" sym="$2"
     case "$(uname -s)" in
         Darwin)
-            nm -m "$obj" 2>/dev/null | grep -F -- " $sym" | grep -q "weak external"
+            nm -m "$obj" 2>/dev/null | awk -v s="$sym" '$NF == s' | grep -q "weak external"
             ;;
         *)
-            nm "$obj" 2>/dev/null | grep -F -- " $sym" \
+            nm "$obj" 2>/dev/null | awk -v s="$sym" '$NF == s' \
                 | grep -qE '^[0-9a-fA-F]+[[:space:]]+[WwVv][[:space:]]'
             ;;
     esac
@@ -59,7 +71,7 @@ check_strong() {
     local obj="$1" cls="$2"
     for member in "JETI_VTABLE_\$_${cls}" "JETI_META_VTABLE_\$_${cls}_inst" "JETI_GETCLASS_\$_${cls}"; do
         local sym="${sym_prefix}${member}"
-        if ! nm "$obj" 2>/dev/null | grep -qF -- " $sym"; then
+        if [ -z "$(nm_lines_for "$obj" "$sym")" ]; then
             echo "  error: symbol $sym not found in $obj" >&2
             exit 1
         fi

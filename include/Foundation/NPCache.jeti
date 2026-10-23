@@ -13,7 +13,10 @@
     if (self) {
         _store = [NPMutableDictionary dictionary];
         _order = [[NPMutableArray alloc] init];
+        _costs = [NPMutableDictionary dictionary];
         _countLimit = limit;
+        _totalCostLimit = 0;
+        _totalCost = 0;
     }
     return self;
 }
@@ -24,6 +27,14 @@
 
 - (size_t)countLimit {
     return _countLimit;
+}
+
+- (void)setTotalCostLimit:(size_t)limit {
+    _totalCostLimit = limit;
+}
+
+- (size_t)totalCostLimit {
+    return _totalCostLimit;
 }
 
 // 访问序表内按键值定位（键值语义）；未含返回 (size_t)-1。
@@ -51,14 +62,40 @@ static void npcache_touch(NPCache *self, id key) {
     }
 }
 
-// 淘汰最旧条目直至条数不超上限（countLimit=0 = 不限）。
+// 键当前记录的成本；未记录返回 0。
+static size_t npcache_cost_of(NPCache *self, id key) {
+    id v = [_costs objectForKey:key];
+    if (!v) return 0;
+    long long c = [(NPNumber *)v longLongValue];
+    return c > 0 ? (size_t)c : 0;
+}
+
+// 淘汰最旧一条，并把它占的成本从总和里扣掉。
+static void npcache_evict_oldest(NPCache *self) {
+    id oldest = [_order firstObject];
+    if (!oldest) return;
+    size_t c = npcache_cost_of(self, oldest);
+    if (c <= _totalCost) {
+        _totalCost -= c;
+    } else {
+        _totalCost = 0;
+    }
+    [_costs removeObjectForKey:oldest];
+    [_store removeObjectForKey:oldest];
+    [_order removeObjectAtIndex:0];
+}
+
+// 淘汰最旧条目直至两个维度都不超限（各自的 0 = 不限）。
+// 成本维度下若只剩最新一条仍超限就停下：单条自身就超限时无从淘汰，
+// 而 ObjC 的 limits 本就「不精确、非强制」（见头文件注释）。
 static void npcache_evict(NPCache *self) {
-    if (self->_countLimit == 0) return;
-    while ([_order count] > self->_countLimit) {
-        id oldest = [_order firstObject];
-        if (!oldest) break;
-        [_store removeObjectForKey:oldest];
-        [_order removeObjectAtIndex:0];
+    while (_countLimit != 0 && [_order count] > _countLimit) {
+        if (![_order firstObject]) break;
+        npcache_evict_oldest(self);
+    }
+    while (_totalCostLimit != 0 && _totalCost > _totalCostLimit) {
+        if ([_order count] <= 1) break;
+        npcache_evict_oldest(self);
     }
 }
 
@@ -72,14 +109,34 @@ static void npcache_evict(NPCache *self) {
 }
 
 - (void)setObject:(id)object forKey:(id)key {
+    [self setObject:object forKey:key cost:0];
+}
+
+- (void)setObject:(id)object forKey:(id)key cost:(size_t)cost {
     if (!key || !object) return;
+    // 同键覆盖：先扣掉旧成本，再记新成本，否则总成本会重复累计。
+    size_t old = npcache_cost_of(self, key);
+    if (old <= _totalCost) {
+        _totalCost -= old;
+    } else {
+        _totalCost = 0;
+    }
+    _totalCost += cost;
     [_store setObject:object forKey:key];
+    [_costs setObject:[NPNumber numberWithLongLong:(long long)cost] forKey:key];
     npcache_touch(self, key);
     npcache_evict(self);
 }
 
 - (void)removeObjectForKey:(id)key {
     if (!key) return;
+    size_t c = npcache_cost_of(self, key);
+    if (c <= _totalCost) {
+        _totalCost -= c;
+    } else {
+        _totalCost = 0;
+    }
+    [_costs removeObjectForKey:key];
     size_t idx = npcache_index_of(self, key);
     if (idx != (size_t)-1) {
         [_order removeObjectAtIndex:idx];
@@ -90,6 +147,8 @@ static void npcache_evict(NPCache *self) {
 - (void)removeAllObjects {
     [_order removeAllObjects];
     [_store removeAllObjects];
+    [_costs removeAllObjects];
+    _totalCost = 0;
 }
 
 - (size_t)count {

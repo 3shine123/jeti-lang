@@ -579,3 +579,9 @@ NPObject *jeti_autorelease(NPObject *obj) {
     pool->objects[pool->count++] = obj;
     return obj;
 }
+
+// ─── Process arguments (NPProcessInfo -arguments) ───────────────────────────
+// Freestanding has no process and no argument vector; the hooks exist so the
+// Foundation layer links, and report an empty list.
+int jeti_argc(void) { return 0; }
+const char *jeti_argv(int index) { (void)index; return NULL; }

@@ -1,0 +1,71 @@
+/* NPURL golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * A1 全组件解析：scheme/host/port/path/query/fragment + absoluteString 重建
+ * A2 缺省组件：无 port/path/query/fragment 时各组件为 nil
+ * A3 非法输入：缺 ://、空 host、裸 scheme → nil
+ * A4 端口：数字拼写 → NPNumber；显式空 port（host:）→ nil
+ * A5 userinfo 丢弃：user:pass@host 的 @ 前段不进任何组件
+ * A6 边界：path 含 query/fragment 分隔；query 不含 fragment
+ * 期望输出：A1..A6 各一行 ok。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static int s_eq(NPString *s, const char *c) {
+    return s && strcmp([s UTF8String], c) == 0;
+}
+
+int main(void) {
+    /* A1 全组件 */
+    NPURL *u = [NPURL URLWithString:[NPString stringWithUTF8String:"https://example.com:8080/a/b?q=1&x=2#frag"]];
+    int a1 = u
+        && s_eq([u scheme], "https")
+        && s_eq([u host], "example.com")
+        && [[u port] intValue] == 8080
+        && s_eq([u path], "/a/b")
+        && s_eq([u query], "q=1&x=2")
+        && s_eq([u fragment], "frag")
+        && s_eq([u absoluteString], "https://example.com:8080/a/b?q=1&x=2#frag");
+    printf("A1 %s\n", a1 ? "ok" : "FAIL");
+
+    /* A2 缺省组件 */
+    NPURL *u2 = [NPURL URLWithString:[NPString stringWithUTF8String:"https://example.com"]];
+    int a2 = u2
+        && s_eq([u2 host], "example.com")
+        && [u2 port] == NULL
+        && [u2 path] == NULL
+        && [u2 query] == NULL
+        && [u2 fragment] == NULL
+        && s_eq([u2 absoluteString], "https://example.com");
+    printf("A2 %s\n", a2 ? "ok" : "FAIL");
+
+    /* A3 非法输入 */
+    NPURL *b1 = [NPURL URLWithString:[NPString stringWithUTF8String:"example.com/no-scheme"]];
+    NPURL *b2 = [NPURL URLWithString:[NPString stringWithUTF8String:"://host"]];
+    NPURL *b3 = [NPURL URLWithString:[NPString stringWithUTF8String:"mailto:x@y"]];
+    int a3 = b1 == NULL && b2 == NULL && b3 == NULL;
+    printf("A3 %s\n", a3 ? "ok" : "FAIL");
+
+    /* A4 端口边界 */
+    NPURL *u4 = [NPURL URLWithString:[NPString stringWithUTF8String:"http://host:/path"]];
+    int a4 = u4 && [u4 port] == NULL && s_eq([u4 host], "host") && s_eq([u4 path], "/path");
+    NPURL *u4b = [NPURL URLWithString:[NPString stringWithUTF8String:"http://host:443"]];
+    a4 = a4 && [[u4b port] intValue] == 443;
+    printf("A4 %s\n", a4 ? "ok" : "FAIL");
+
+    /* A5 userinfo 丢弃 */
+    NPURL *u5 = [NPURL URLWithString:[NPString stringWithUTF8String:"https://user:pass@example.com/p"]];
+    int a5 = u5 && s_eq([u5 host], "example.com") && s_eq([u5 path], "/p")
+        && s_eq([u5 absoluteString], "https://example.com/p");
+    printf("A5 %s\n", a5 ? "ok" : "FAIL");
+
+    /* A6 分隔边界 */
+    NPURL *u6 = [NPURL URLWithString:[NPString stringWithUTF8String:"ftp://h/d#onlyfrag"]];
+    int a6 = u6 && s_eq([u6 path], "/d") && [u6 query] == NULL && s_eq([u6 fragment], "onlyfrag");
+    NPURL *u6b = [NPURL URLWithString:[NPString stringWithUTF8String:"ftp://h?q=only"]];
+    a6 = a6 && [u6b path] == NULL && s_eq([u6b query], "q=only") && [u6b fragment] == NULL;
+    printf("A6 %s\n", a6 ? "ok" : "FAIL");
+    return 0;
+}

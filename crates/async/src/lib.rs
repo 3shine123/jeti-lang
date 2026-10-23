@@ -121,25 +121,248 @@ fn decl_contains_await(d: &AstDecl) -> bool {
 // async-call arm below is kept ONLY to feed the `suspends` flag the
 // reconcile/diagnostic path still reads; it does not rewrite anything.
 
+/// Per-class async selector table + superclass links.
+/// The name-keyed global set classified by selector alone, so two classes
+/// sharing a name (`NPRunLoop -run` sync vs a user class's
+/// `- (async void)run`) made the desugar drive the sync send as a task handle:
+/// `jeti_task_await(<int>)` — a hard compile error for scalar returns and
+/// silent pointer mis-typing for object returns (probe x10_async_sel_scope).
+/// The receiver's static class decides, exactly like the checker's
+/// `method_kinds_by_class` and codegen's per-class dispatch casts; the global
+/// set survives only as the fallback for receivers whose class is not
+/// statically known (`id`).
+#[derive(Default)]
+pub(crate) struct AsyncSelScope {
+    /// Every async selector, colon-stripped — the `id`-receiver fallback.
+    global: std::collections::HashSet<String>,
+    /// class → async selectors it declares (@interface and @implementation
+    /// merged).
+    async_by_class: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// class → every selector it declares, so a sync declaration in the
+    /// receiver's own chain wins over another class's async marker.
+    declared_by_class: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// class → superclass.
+    super_of: std::collections::HashMap<String, String>,
+}
+
+impl AsyncSelScope {
+    pub(crate) fn from_unit(unit: &jeti_ast::AstUnit) -> Self {
+        let mut scope = AsyncSelScope {
+            global: std::collections::HashSet::new(),
+            async_by_class: std::collections::HashMap::new(),
+            declared_by_class: std::collections::HashMap::new(),
+            super_of: std::collections::HashMap::new(),
+        };
+        for decl in &unit.decls {
+            if let AstDeclData::Class { methods, super_name, cls_sym, .. } = &decl.data {
+                let Some(cls) = cls_sym.clone().or_else(|| decl.name.clone()) else { continue };
+                if let Some(sup) = super_name.as_ref().filter(|s| !s.is_empty()) {
+                    scope.super_of.entry(cls.clone()).or_insert(sup.clone());
+                }
+                for m in methods {
+                    let Some(sel) = m.name.as_ref() else { continue };
+                    let key = sel.replace(':', "");
+                    scope.declared_by_class.entry(cls.clone()).or_default().insert(key.clone());
+                    if method_is_async(&m) {
+                        scope.async_by_class.entry(cls.clone()).or_default().insert(key.clone());
+                        scope.global.insert(key);
+                    }
+                }
+            }
+        }
+        scope
+    }
+
+    /// Does `sel` on a receiver of static class `recv` yield a task handle?
+    /// The receiver's chain decides (an override in its own class wins, sync
+    /// or async); `recv == None` (`id` / unresolved) keeps the historical
+    /// global answer.
+    pub(crate) fn yields_task_for(&self, recv: Option<&str>, sel: &str) -> bool {
+        let Some(recv) = recv else { return self.global.contains(sel); };
+        let mut cur = recv.to_string();
+        for _ in 0..32 {
+            if self.declared_by_class.get(&cur).map_or(false, |d| d.contains(sel)) {
+                return self.async_by_class.get(&cur).map_or(false, |a| a.contains(sel));
+            }
+            match self.super_of.get(&cur) {
+                Some(s) => cur = s.clone(),
+                None => break,
+            }
+        }
+        // The receiver's chain never declares it: no task handle, and the
+        // checker owns the "no visible method" report.
+        false
+    }
+}
+
+/// Per-body static-class context: the unit-wide table plus this body's `self`
+/// class and its class-typed locals/params.
+pub(crate) struct SelCtx<'a> {
+    pub(crate) scope: &'a AsyncSelScope,
+    pub(crate) self_cls: Option<&'a str>,
+    pub(crate) locals: &'a std::collections::HashMap<String, String>,
+}
+
+/// Class-typed locals of a body: `Foo *x = …` (comma chains included).
+/// Mirrors codegen's LOCAL_VAR_CLASS — the desugar runs before the checker, so
+/// `expr_type` is not stamped yet.
+fn body_locals(body: &AstStmt) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    collect_body_locals(body, &mut out);
+    out
+}
+
+fn collect_body_locals(s: &AstStmt, out: &mut std::collections::HashMap<String, String>) {
+    match &s.data {
+        AstStmtData::Decl(d) => {
+            let mut cur: Option<&AstDecl> = Some(d);
+            while let Some(decl) = cur {
+                if let (Some(name), AstDeclData::Variable { var_type: Some(vt), next, .. }) =
+                    (&decl.name, &decl.data)
+                {
+                    if vt.is_pointer && vt.prim == TypePrim::Named {
+                        if let Some(n) = vt.name.as_deref() {
+                            out.insert(name.clone(), n.split('<').next().unwrap_or(n).to_string());
+                        }
+                    }
+                    cur = next.as_deref();
+                } else {
+                    cur = None;
+                }
+            }
+        }
+        AstStmtData::Compound(stmts) => { for st in stmts { collect_body_locals(st, out); } }
+        AstStmtData::If { then, else_, .. } => {
+            collect_body_locals(then, out);
+            if let Some(e) = else_ { collect_body_locals(e, out); }
+        }
+        AstStmtData::While { body, .. } | AstStmtData::Do { body, .. }
+        | AstStmtData::For { body, .. } | AstStmtData::ForIn { body, .. }
+        | AstStmtData::Switch { body, .. } | AstStmtData::Case { body, .. }
+        | AstStmtData::Default(body) | AstStmtData::Synchronized { body, .. }
+        | AstStmtData::Autoreleasepool(body) | AstStmtData::NoArc(body)
+        | AstStmtData::Defer(body) => collect_body_locals(body, out),
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            collect_body_locals(try_block, out);
+            for c in catches { collect_body_locals(c, out); }
+            if let Some(f) = finally_block { collect_body_locals(f, out); }
+        }
+        _ => collect_expr_locals_stmt_expr(s, out),
+    }
+}
+
+/// Expr-statement / control-expression / initializer expressions can host
+/// block literals (`^{ SyncB *y = …; }` bodies at ANY depth): the block's own
+/// locals must reach the receiver-class table too, or `[y run]` inside the
+/// block falls back to the global set and a same-named sync method on another
+/// class gets misclassified (probe x10, main.jeti's `int d = [y run]`).
+fn collect_expr_locals_stmt_expr(s: &AstStmt, out: &mut std::collections::HashMap<String, String>) {
+    match &s.data {
+        AstStmtData::Expr(e) => collect_expr_locals(e, out),
+        AstStmtData::Return(Some(e)) => collect_expr_locals(e, out),
+        AstStmtData::If { cond, .. } => collect_expr_locals(cond, out),
+        AstStmtData::While { cond, .. } | AstStmtData::Do { cond, .. } => collect_expr_locals(cond, out),
+        AstStmtData::For { init, cond, incr, .. } => {
+            if let Some(i) = init { collect_expr_locals_stmt_expr(i, out); }
+            if let Some(c) = cond { collect_expr_locals(c, out); }
+            if let Some(u) = incr { collect_expr_locals(u, out); }
+        }
+        AstStmtData::Switch { expr, .. } => collect_expr_locals(expr, out),
+        AstStmtData::Case { value, .. } => collect_expr_locals(value, out),
+        _ => {}
+    }
+}
+
+fn collect_expr_locals(e: &AstExpr, out: &mut std::collections::HashMap<String, String>) {
+    match &e.data {
+        AstExprData::Block { body: Some(b), .. } => {
+            collect_body_locals(b, out);
+        }
+        AstExprData::MsgSend { receiver, args, .. } => {
+            collect_expr_locals(receiver, out);
+            for a in args { collect_expr_locals(a, out); }
+        }
+        AstExprData::FuncCall { callee, args, .. } => {
+            if let Some(c) = callee { collect_expr_locals(c, out); }
+            for a in args { collect_expr_locals(a, out); }
+        }
+        AstExprData::Unary { operand, .. } => collect_expr_locals(operand, out),
+        AstExprData::Binary { left, right, .. } => {
+            collect_expr_locals(left, out);
+            collect_expr_locals(right, out);
+        }
+        AstExprData::Assign { target, value } => {
+            collect_expr_locals(target, out);
+            collect_expr_locals(value, out);
+        }
+        AstExprData::Cast { expr, .. } => collect_expr_locals(expr, out),
+        AstExprData::Paren(inner) => collect_expr_locals(inner, out),
+        AstExprData::Ternary { cond, then, else_ } => {
+            collect_expr_locals(cond, out);
+            collect_expr_locals(then, out);
+            collect_expr_locals(else_, out);
+        }
+        AstExprData::Comma(exprs) => { for x in exprs { collect_expr_locals(x, out); } }
+        AstExprData::Subscript { object, key } => {
+            collect_expr_locals(object, out);
+            collect_expr_locals(key, out);
+        }
+        _ => {}
+    }
+}
+
+/// Class-typed parameters of a method/function signature (`Foo *x`).
+fn param_locals(mut cur: Option<&jeti_cst::CstParam>) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    while let Some(p) = cur {
+        if let (Some(name), Some(t)) = (p.name.as_ref().filter(|n| !n.is_empty()), p.par_type.as_deref()) {
+            if t.is_pointer && t.prim == TypePrim::Named {
+                if let Some(n) = t.name.as_deref() {
+                    out.insert(name.clone(), n.split('<').next().unwrap_or(n).to_string());
+                }
+            }
+        }
+        cur = p.next.as_deref();
+    }
+    out
+}
+
+/// The receiver's static class when it is statically known: `self` from the
+/// enclosing class, a local/param from the body's type table. Anything else
+/// (ivar chains, nested sends, `id`) is unresolved → global fallback.
+fn receiver_class_name(recv: &AstExpr, ctx: &SelCtx) -> Option<String> {
+    match &recv.data {
+        AstExprData::VarRef { name, .. } => {
+            if name == "self" || name == "_self" {
+                ctx.self_cls.map(|s| s.to_string())
+            } else {
+                ctx.locals.get(name).cloned()
+            }
+        }
+        AstExprData::Paren(inner) => receiver_class_name(inner, ctx),
+        _ => None,
+    }
+}
+
 /// Does this statement subtree contain a suspension point (an `await`, or a
 /// statement-position call to a known async method / async-block thunk)?
-fn stmt_suspends(s: &AstStmt, async_sels: &std::collections::HashSet<String>) -> bool {
+fn stmt_suspends(s: &AstStmt, ctx: &SelCtx) -> bool {
     match &s.data {
-        AstStmtData::Expr(e) => expr_suspends(e, async_sels),
-        AstStmtData::Compound(stmts) => stmts.iter().any(|st| stmt_suspends(st, async_sels)),
+        AstStmtData::Expr(e) => expr_suspends(e, ctx),
+        AstStmtData::Compound(stmts) => stmts.iter().any(|st| stmt_suspends(st, ctx)),
         AstStmtData::If { cond, then, else_ } => {
-            expr_suspends(cond, async_sels)
-                || stmt_suspends(then, async_sels)
-                || else_.as_ref().map_or(false, |e| stmt_suspends(e, async_sels))
+            expr_suspends(cond, ctx)
+                || stmt_suspends(then, ctx)
+                || else_.as_ref().map_or(false, |e| stmt_suspends(e, ctx))
         }
         AstStmtData::While { cond, body } | AstStmtData::Do { body, cond } => {
-            expr_suspends(cond, async_sels) || stmt_suspends(body, async_sels)
+            expr_suspends(cond, ctx) || stmt_suspends(body, ctx)
         }
         AstStmtData::For { init, cond, incr, body } => {
-            init.as_ref().map_or(false, |x| stmt_suspends(x, async_sels))
-                || cond.as_ref().map_or(false, |x| expr_suspends(x, async_sels))
-                || incr.as_ref().map_or(false, |x| expr_suspends(x, async_sels))
-                || stmt_suspends(body, async_sels)
+            init.as_ref().map_or(false, |x| stmt_suspends(x, ctx))
+                || cond.as_ref().map_or(false, |x| expr_suspends(x, ctx))
+                || incr.as_ref().map_or(false, |x| expr_suspends(x, ctx))
+                || stmt_suspends(body, ctx)
         }
         // Return/Throw are VALUE-ESCAPE positions: `return [self compute:42]`
         // is the legal lazy form A (task created, not started) — it yields a
@@ -147,21 +370,21 @@ fn stmt_suspends(s: &AstStmt, async_sels: &std::collections::HashSet<String>) ->
         // explicit `await` counts there (§2.1 form A).
         AstStmtData::Return(Some(e)) | AstStmtData::Throw(Some(e)) => expr_contains_await(e),
         AstStmtData::Switch { expr, body } => {
-            expr_suspends(expr, async_sels) || stmt_suspends(body, async_sels)
+            expr_suspends(expr, ctx) || stmt_suspends(body, ctx)
         }
         AstStmtData::Case { body, .. } | AstStmtData::Default(body) => {
-            stmt_suspends(body, async_sels)
+            stmt_suspends(body, ctx)
         }
-        AstStmtData::Decl(d) => decl_suspends(d, async_sels),
+        AstStmtData::Decl(d) => decl_suspends(d, ctx),
         _ => false,
     }
 }
 
-fn decl_suspends(d: &AstDecl, async_sels: &std::collections::HashSet<String>) -> bool {
+fn decl_suspends(d: &AstDecl, ctx: &SelCtx) -> bool {
     match &d.data {
         AstDeclData::Variable { init, next, .. } => {
-            init.as_ref().map_or(false, |x| expr_suspends(x, async_sels))
-                || next.as_ref().map_or(false, |x| decl_suspends(x, async_sels))
+            init.as_ref().map_or(false, |x| expr_suspends(x, ctx))
+                || next.as_ref().map_or(false, |x| decl_suspends(x, ctx))
         }
         _ => false,
     }
@@ -170,27 +393,31 @@ fn decl_suspends(d: &AstDecl, async_sels: &std::collections::HashSet<String>) ->
 /// Expression-position suspension: only an explicit `await` counts. A bare
 /// async call in EXPRESSION position (e.g. an argument) yields a handle the
 /// caller decides about — not a suspension of THIS body.
-fn expr_suspends(e: &AstExpr, async_sels: &std::collections::HashSet<String>) -> bool {
+fn expr_suspends(e: &AstExpr, ctx: &SelCtx) -> bool {
     match &e.data {
         AstExprData::Await { .. } => true,
         // STATEMENT-position async call: the statement walk hands the whole
         // statement's expression here, so a top-level call to a known async
         // method is the auto-drive form (§5.1 / §2.1). Recurse into subexpressions
         // only for awaits — a nested async call is handle-yielding, not suspension.
-        AstExprData::MsgSend { selector, .. } => {
-            async_sels.contains(&selector.replace(':', ""))
+        AstExprData::MsgSend { receiver, selector, .. } => {
+            // Receiver-class-scoped: a sync `[b run]` next to another class's
+            // `- (async void)run` is NOT a suspension point (see AsyncSelScope).
+            let sel = selector.replace(':', "");
+            let rc = receiver_class_name(receiver, ctx);
+            ctx.scope.yields_task_for(rc.as_deref(), &sel)
                 || expr_contains_await(e)
         }
-        AstExprData::FuncCall { .. } => expr_yields_task_static(e, async_sels)
+        AstExprData::FuncCall { .. } => expr_yields_task_static(e, ctx)
             || expr_contains_await(e),
         // A ternary of two task-yielding branches at statement position is
         // the same auto-drive shape (§5.1) — count it as a suspension point
         // so reconcile stays consistent with the desugar's drive pass.
         AstExprData::Ternary { .. } => {
-            expr_yields_task_static(e, async_sels) || expr_contains_await(e)
+            expr_yields_task_static(e, ctx) || expr_contains_await(e)
         }
         AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => {
-            expr_suspends(inner, async_sels)
+            expr_suspends(inner, ctx)
         }
         _ => expr_contains_await(e),
     }
@@ -200,10 +427,12 @@ fn expr_suspends(e: &AstExpr, async_sels: &std::collections::HashSet<String>) ->
 /// known from the declaration scan; async-block thunks don't exist yet at
 /// check time, but an async block IIFE still has its callee block — detect
 /// the call shape `FuncCall { callee: Block { is_async: true, … } }`.
-fn expr_yields_task_static(e: &AstExpr, async_sels: &std::collections::HashSet<String>) -> bool {
+fn expr_yields_task_static(e: &AstExpr, ctx: &SelCtx) -> bool {
     match &e.data {
-        AstExprData::MsgSend { selector, .. } => {
-            async_sels.contains(&selector.replace(':', ""))
+        AstExprData::MsgSend { receiver, selector, .. } => {
+            let sel = selector.replace(':', "");
+            let rc = receiver_class_name(receiver, ctx);
+            ctx.scope.yields_task_for(rc.as_deref(), &sel)
         }
         AstExprData::FuncCall { callee, .. } => {
             matches!(&callee.as_ref().map(|c| &c.data),
@@ -220,10 +449,10 @@ fn expr_yields_task_static(e: &AstExpr, async_sels: &std::collections::HashSet<S
                 AstExprData::Cast { expr, .. } => matches!(&expr.data, AstExprData::Int(0)),
                 _ => false,
             };
-            (expr_yields_task_static(then, async_sels)
-                && expr_yields_task_static(else_, async_sels))
-                || (expr_yields_task_static(then, async_sels) && nc(else_))
-                || (nc(then) && expr_yields_task_static(else_, async_sels))
+            (expr_yields_task_static(then, ctx)
+                && expr_yields_task_static(else_, ctx))
+                || (expr_yields_task_static(then, ctx) && nc(else_))
+                || (nc(then) && expr_yields_task_static(else_, ctx))
         }
         _ => false,
     }
@@ -243,54 +472,54 @@ fn expr_yields_task_static(e: &AstExpr, async_sels: &std::collections::HashSet<S
 ///     lowering.
 fn warn_await_on_sync_stmt(
     s: &AstStmt,
-    async_sels: &std::collections::HashSet<String>,
+    ctx: &SelCtx,
     warns: &mut Vec<String>,
 ) {
     match &s.data {
-        AstStmtData::Expr(e) => warn_await_on_sync_expr(e, async_sels, warns),
-        AstStmtData::Return(Some(e)) => warn_await_on_sync_expr(e, async_sels, warns),
-        AstStmtData::Decl(d) => warn_await_on_sync_decl(d, async_sels, warns),
+        AstStmtData::Expr(e) => warn_await_on_sync_expr(e, ctx, warns),
+        AstStmtData::Return(Some(e)) => warn_await_on_sync_expr(e, ctx, warns),
+        AstStmtData::Decl(d) => warn_await_on_sync_decl(d, ctx, warns),
         AstStmtData::If { cond, then, else_, .. } => {
-            warn_await_on_sync_expr(cond, async_sels, warns);
-            warn_await_on_sync_stmt(then, async_sels, warns);
-            if let Some(e) = else_ { warn_await_on_sync_stmt(e, async_sels, warns); }
+            warn_await_on_sync_expr(cond, ctx, warns);
+            warn_await_on_sync_stmt(then, ctx, warns);
+            if let Some(e) = else_ { warn_await_on_sync_stmt(e, ctx, warns); }
         }
         AstStmtData::While { cond, body, .. } => {
-            warn_await_on_sync_expr(cond, async_sels, warns);
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            warn_await_on_sync_expr(cond, ctx, warns);
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
         AstStmtData::Do { cond, body, .. } => {
-            warn_await_on_sync_expr(cond, async_sels, warns);
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            warn_await_on_sync_expr(cond, ctx, warns);
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
         AstStmtData::For { init, cond, body, .. } => {
-            if let Some(i) = init { warn_await_on_sync_stmt(i, async_sels, warns); }
-            if let Some(c) = cond { warn_await_on_sync_expr(c, async_sels, warns); }
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            if let Some(i) = init { warn_await_on_sync_stmt(i, ctx, warns); }
+            if let Some(c) = cond { warn_await_on_sync_expr(c, ctx, warns); }
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
         AstStmtData::Switch { expr, body, .. } => {
-            warn_await_on_sync_expr(expr, async_sels, warns);
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            warn_await_on_sync_expr(expr, ctx, warns);
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
         AstStmtData::Case { value, body, .. } => {
-            warn_await_on_sync_expr(value, async_sels, warns);
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            warn_await_on_sync_expr(value, ctx, warns);
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
-        AstStmtData::Default(body) => warn_await_on_sync_stmt(body, async_sels, warns),
+        AstStmtData::Default(body) => warn_await_on_sync_stmt(body, ctx, warns),
         AstStmtData::Try { try_block, catches, finally_block } => {
-            warn_await_on_sync_stmt(try_block, async_sels, warns);
-            for c in catches { warn_await_on_sync_stmt(c, async_sels, warns); }
-            if let Some(f) = finally_block { warn_await_on_sync_stmt(f, async_sels, warns); }
+            warn_await_on_sync_stmt(try_block, ctx, warns);
+            for c in catches { warn_await_on_sync_stmt(c, ctx, warns); }
+            if let Some(f) = finally_block { warn_await_on_sync_stmt(f, ctx, warns); }
         }
         AstStmtData::Compound(stmts) => {
-            for st in stmts { warn_await_on_sync_stmt(st, async_sels, warns); }
+            for st in stmts { warn_await_on_sync_stmt(st, ctx, warns); }
         }
         AstStmtData::Autoreleasepool(body) | AstStmtData::NoArc(body) => {
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
         AstStmtData::Synchronized { lock, body, .. } => {
-            warn_await_on_sync_expr(lock, async_sels, warns);
-            warn_await_on_sync_stmt(body, async_sels, warns);
+            warn_await_on_sync_expr(lock, ctx, warns);
+            warn_await_on_sync_stmt(body, ctx, warns);
         }
         _ => {}
     }
@@ -298,13 +527,13 @@ fn warn_await_on_sync_stmt(
 
 fn warn_await_on_sync_decl(
     d: &AstDecl,
-    async_sels: &std::collections::HashSet<String>,
+    ctx: &SelCtx,
     warns: &mut Vec<String>,
 ) {
     match &d.data {
         AstDeclData::Variable { init, next, .. } => {
-            if let Some(e) = init { warn_await_on_sync_expr(e, async_sels, warns); }
-            if let Some(n) = next { warn_await_on_sync_decl(n, async_sels, warns); }
+            if let Some(e) = init { warn_await_on_sync_expr(e, ctx, warns); }
+            if let Some(n) = next { warn_await_on_sync_decl(n, ctx, warns); }
         }
         _ => {}
     }
@@ -312,7 +541,7 @@ fn warn_await_on_sync_decl(
 
 fn warn_await_on_sync_expr(
     e: &AstExpr,
-    async_sels: &std::collections::HashSet<String>,
+    ctx: &SelCtx,
     warns: &mut Vec<String>,
 ) {
     match &e.data {
@@ -324,47 +553,47 @@ fn warn_await_on_sync_expr(
                 op = p;
             }
             let identifier_op = matches!(op.data, AstExprData::VarRef { .. });
-            if !identifier_op && !expr_yields_task_static(op, async_sels) {
+            if !identifier_op && !expr_yields_task_static(op, ctx) {
                 warns.push(format!(
                     "{}:{}: 'await' has no effect here — the operand is not async and yields no task handle (Async Semantics v1 rule 6)",
                     e.line, e.col));
             }
-            warn_await_on_sync_expr(inner, async_sels, warns);
+            warn_await_on_sync_expr(inner, ctx, warns);
         }
         AstExprData::MsgSend { receiver, args, .. } => {
-            warn_await_on_sync_expr(receiver, async_sels, warns);
-            for a in args { warn_await_on_sync_expr(a, async_sels, warns); }
+            warn_await_on_sync_expr(receiver, ctx, warns);
+            for a in args { warn_await_on_sync_expr(a, ctx, warns); }
         }
         AstExprData::FuncCall { callee, args, .. } => {
-            if let Some(c) = callee { warn_await_on_sync_expr(c, async_sels, warns); }
-            for a in args { warn_await_on_sync_expr(a, async_sels, warns); }
+            if let Some(c) = callee { warn_await_on_sync_expr(c, ctx, warns); }
+            for a in args { warn_await_on_sync_expr(a, ctx, warns); }
         }
-        AstExprData::Unary { operand, .. } => warn_await_on_sync_expr(operand, async_sels, warns),
+        AstExprData::Unary { operand, .. } => warn_await_on_sync_expr(operand, ctx, warns),
         AstExprData::Binary { left, right, .. }
         | AstExprData::Assign { target: left, value: right } => {
-            warn_await_on_sync_expr(left, async_sels, warns);
-            warn_await_on_sync_expr(right, async_sels, warns);
+            warn_await_on_sync_expr(left, ctx, warns);
+            warn_await_on_sync_expr(right, ctx, warns);
         }
         AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => {
-            warn_await_on_sync_expr(inner, async_sels, warns);
+            warn_await_on_sync_expr(inner, ctx, warns);
         }
         AstExprData::Ternary { cond, then, else_ } => {
-            warn_await_on_sync_expr(cond, async_sels, warns);
-            warn_await_on_sync_expr(then, async_sels, warns);
-            warn_await_on_sync_expr(else_, async_sels, warns);
+            warn_await_on_sync_expr(cond, ctx, warns);
+            warn_await_on_sync_expr(then, ctx, warns);
+            warn_await_on_sync_expr(else_, ctx, warns);
         }
         AstExprData::Comma(exprs) => {
-            for x in exprs { warn_await_on_sync_expr(x, async_sels, warns); }
+            for x in exprs { warn_await_on_sync_expr(x, ctx, warns); }
         }
         AstExprData::Subscript { object, key } => {
-            warn_await_on_sync_expr(object, async_sels, warns);
-            warn_await_on_sync_expr(key, async_sels, warns);
+            warn_await_on_sync_expr(object, ctx, warns);
+            warn_await_on_sync_expr(key, ctx, warns);
         }
         AstExprData::InitList(items) | AstExprData::ArrayLit(items) => {
-            for x in items { warn_await_on_sync_expr(x, async_sels, warns); }
+            for x in items { warn_await_on_sync_expr(x, ctx, warns); }
         }
         AstExprData::Block { body, .. } => {
-            if let Some(b) = body { warn_await_on_sync_stmt(b, async_sels, warns); }
+            if let Some(b) = body { warn_await_on_sync_stmt(b, ctx, warns); }
         }
         _ => {}
     }
@@ -379,60 +608,60 @@ fn warn_await_on_sync_expr(
 /// `await` (casts do NOT count — see the Cast arm).
 fn check_call_site_discipline_stmt(
     s: &AstStmt,
-    async_sels: &std::collections::HashSet<String>,
+    ctx: &SelCtx,
     errs: &mut Vec<String>,
 ) {
     match &s.data {
-        AstStmtData::Expr(e) => check_call_site_discipline_expr(e, false, async_sels, errs),
+        AstStmtData::Expr(e) => check_call_site_discipline_expr(e, false, ctx, errs),
         // v1 rule 2 has NO "capture instead" escape: `return [f x];` and
         // `NPTask<T> *t = [f x];` are bare async calls too — under the Swift
         // model a bare call creates no handle (handles come only from spawn,
         // stage 3), so both are errors here.
         AstStmtData::Return(Some(e)) => {
-            check_call_site_discipline_expr(e, false, async_sels, errs)
+            check_call_site_discipline_expr(e, false, ctx, errs)
         }
-        AstStmtData::Decl(d) => check_call_site_discipline_decl(d, async_sels, errs),
+        AstStmtData::Decl(d) => check_call_site_discipline_decl(d, ctx, errs),
         AstStmtData::If { cond, then, else_, .. } => {
-            check_call_site_discipline_expr(cond, false, async_sels, errs);
-            check_call_site_discipline_stmt(then, async_sels, errs);
-            if let Some(e) = else_ { check_call_site_discipline_stmt(e, async_sels, errs); }
+            check_call_site_discipline_expr(cond, false, ctx, errs);
+            check_call_site_discipline_stmt(then, ctx, errs);
+            if let Some(e) = else_ { check_call_site_discipline_stmt(e, ctx, errs); }
         }
         AstStmtData::While { cond, body, .. } => {
-            check_call_site_discipline_expr(cond, false, async_sels, errs);
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            check_call_site_discipline_expr(cond, false, ctx, errs);
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
         AstStmtData::Do { cond, body, .. } => {
-            check_call_site_discipline_expr(cond, false, async_sels, errs);
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            check_call_site_discipline_expr(cond, false, ctx, errs);
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
         AstStmtData::For { init, cond, body, .. } => {
-            if let Some(i) = init { check_call_site_discipline_stmt(i, async_sels, errs); }
-            if let Some(c) = cond { check_call_site_discipline_expr(c, false, async_sels, errs); }
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            if let Some(i) = init { check_call_site_discipline_stmt(i, ctx, errs); }
+            if let Some(c) = cond { check_call_site_discipline_expr(c, false, ctx, errs); }
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
         AstStmtData::Switch { expr, body, .. } => {
-            check_call_site_discipline_expr(expr, false, async_sels, errs);
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            check_call_site_discipline_expr(expr, false, ctx, errs);
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
         AstStmtData::Case { value, body, .. } => {
-            check_call_site_discipline_expr(value, false, async_sels, errs);
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            check_call_site_discipline_expr(value, false, ctx, errs);
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
-        AstStmtData::Default(body) => check_call_site_discipline_stmt(body, async_sels, errs),
+        AstStmtData::Default(body) => check_call_site_discipline_stmt(body, ctx, errs),
         AstStmtData::Try { try_block, catches, finally_block } => {
-            check_call_site_discipline_stmt(try_block, async_sels, errs);
-            for c in catches { check_call_site_discipline_stmt(c, async_sels, errs); }
-            if let Some(f) = finally_block { check_call_site_discipline_stmt(f, async_sels, errs); }
+            check_call_site_discipline_stmt(try_block, ctx, errs);
+            for c in catches { check_call_site_discipline_stmt(c, ctx, errs); }
+            if let Some(f) = finally_block { check_call_site_discipline_stmt(f, ctx, errs); }
         }
         AstStmtData::Compound(stmts) => {
-            for st in stmts { check_call_site_discipline_stmt(st, async_sels, errs); }
+            for st in stmts { check_call_site_discipline_stmt(st, ctx, errs); }
         }
         AstStmtData::Autoreleasepool(body) | AstStmtData::NoArc(body) => {
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
         AstStmtData::Synchronized { lock, body, .. } => {
-            check_call_site_discipline_expr(lock, false, async_sels, errs);
-            check_call_site_discipline_stmt(body, async_sels, errs);
+            check_call_site_discipline_expr(lock, false, ctx, errs);
+            check_call_site_discipline_stmt(body, ctx, errs);
         }
         _ => {}
     }
@@ -440,13 +669,13 @@ fn check_call_site_discipline_stmt(
 
 fn check_call_site_discipline_decl(
     d: &AstDecl,
-    async_sels: &std::collections::HashSet<String>,
+    ctx: &SelCtx,
     errs: &mut Vec<String>,
 ) {
     match &d.data {
         AstDeclData::Variable { init, next, .. } => {
-            if let Some(e) = init { check_call_site_discipline_expr(e, false, async_sels, errs); }
-            if let Some(n) = next { check_call_site_discipline_decl(n, async_sels, errs); }
+            if let Some(e) = init { check_call_site_discipline_expr(e, false, ctx, errs); }
+            if let Some(n) = next { check_call_site_discipline_decl(n, ctx, errs); }
         }
         _ => {}
     }
@@ -455,7 +684,7 @@ fn check_call_site_discipline_decl(
 fn check_call_site_discipline_expr(
     e: &AstExpr,
     awaited: bool,
-    async_sels: &std::collections::HashSet<String>,
+    ctx: &SelCtx,
     errs: &mut Vec<String>,
 ) {
     let mut awaited = awaited;
@@ -466,20 +695,22 @@ fn check_call_site_discipline_expr(
             // Identifier operands are NOT tracked (task vars are desugar-ctx
             // state this pass doesn't have) — no false positives by design.
             awaited = true;
-            check_call_site_discipline_expr(inner, awaited, async_sels, errs);
+            check_call_site_discipline_expr(inner, awaited, ctx, errs);
         }
         AstExprData::MsgSend { receiver, selector, args, .. } => {
-            check_call_site_discipline_expr(receiver, false, async_sels, errs);
-            for a in args { check_call_site_discipline_expr(a, false, async_sels, errs); }
-            if !awaited && async_sels.contains(&selector.replace(':', "")) {
+            check_call_site_discipline_expr(receiver, false, ctx, errs);
+            for a in args { check_call_site_discipline_expr(a, false, ctx, errs); }
+            let sel = selector.replace(':', "");
+            let rc = receiver_class_name(receiver, ctx);
+            if !awaited && ctx.scope.yields_task_for(rc.as_deref(), &sel) {
                 errs.push(format!(
                     "{0}:{1}: call to async method '{2}' must be awaited — an async call yields a task handle, not a value (Async Semantics v1 rule 2)",
                     e.line, e.col, selector));
             }
         }
         AstExprData::FuncCall { callee, args, .. } => {
-            if let Some(c) = callee { check_call_site_discipline_expr(c, false, async_sels, errs); }
-            for a in args { check_call_site_discipline_expr(a, false, async_sels, errs); }
+            if let Some(c) = callee { check_call_site_discipline_expr(c, false, ctx, errs); }
+            for a in args { check_call_site_discipline_expr(a, false, ctx, errs); }
             // Rule 2 covers async-block IIFEs too: invoking `async ^{…}(args)`
             // yields a task handle, so the invocation must be awaited. The
             // checker runs BEFORE the desugar, so the callee is still the
@@ -502,49 +733,49 @@ fn check_call_site_discipline_expr(
             }
         }
         AstExprData::Unary { operand, .. } => {
-            check_call_site_discipline_expr(operand, false, async_sels, errs)
+            check_call_site_discipline_expr(operand, false, ctx, errs)
         }
         AstExprData::Binary { left, right, .. } => {
-            check_call_site_discipline_expr(left, false, async_sels, errs);
-            check_call_site_discipline_expr(right, false, async_sels, errs);
+            check_call_site_discipline_expr(left, false, ctx, errs);
+            check_call_site_discipline_expr(right, false, ctx, errs);
         }
         AstExprData::Assign { target, value } => {
-            check_call_site_discipline_expr(target, false, async_sels, errs);
-            check_call_site_discipline_expr(value, false, async_sels, errs);
+            check_call_site_discipline_expr(target, false, ctx, errs);
+            check_call_site_discipline_expr(value, false, ctx, errs);
         }
         AstExprData::Paren(inner) => {
-            check_call_site_discipline_expr(inner, awaited, async_sels, errs)
+            check_call_site_discipline_expr(inner, awaited, ctx, errs)
         }
         // A cast cannot satisfy the await requirement: `(void)[self compute]`
         // is an explicit discard, not a consume — the call still leaks its
         // task handle, so it must error like any bare call.
         AstExprData::Cast { expr: inner, .. } => {
-            check_call_site_discipline_expr(inner, false, async_sels, errs)
+            check_call_site_discipline_expr(inner, false, ctx, errs)
         }
         AstExprData::Ternary { cond, then, else_ } => {
-            check_call_site_discipline_expr(cond, false, async_sels, errs);
+            check_call_site_discipline_expr(cond, false, ctx, errs);
             // A ternary is ONE async expression: when the whole thing is
             // awaited (`await (c ? [a] : [b])`), its branches are consumed by
             // that single await — same reasoning as Paren. A BARE ternary
             // passes awaited=false down, so its async branches still error.
-            check_call_site_discipline_expr(then, awaited, async_sels, errs);
-            check_call_site_discipline_expr(else_, awaited, async_sels, errs);
+            check_call_site_discipline_expr(then, awaited, ctx, errs);
+            check_call_site_discipline_expr(else_, awaited, ctx, errs);
         }
         AstExprData::Comma(exprs) => {
             let last = exprs.len().saturating_sub(1);
             for (i, x) in exprs.iter().enumerate() {
-                check_call_site_discipline_expr(x, awaited && i == last, async_sels, errs);
+                check_call_site_discipline_expr(x, awaited && i == last, ctx, errs);
             }
         }
         AstExprData::Subscript { object, key } => {
-            check_call_site_discipline_expr(object, false, async_sels, errs);
-            check_call_site_discipline_expr(key, false, async_sels, errs);
+            check_call_site_discipline_expr(object, false, ctx, errs);
+            check_call_site_discipline_expr(key, false, ctx, errs);
         }
         AstExprData::InitList(items) | AstExprData::ArrayLit(items) => {
-            for x in items { check_call_site_discipline_expr(x, false, async_sels, errs); }
+            for x in items { check_call_site_discipline_expr(x, false, ctx, errs); }
         }
         AstExprData::Block { body: Some(b), is_async: true, .. } => {
-            check_call_site_discipline_stmt(b, async_sels, errs);
+            check_call_site_discipline_stmt(b, ctx, errs);
         }
         _ => {}
     }
@@ -598,29 +829,11 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
     // them (cross-TU safety, same rule as the proto-conformance check).
     // Interface/impl marker agreement is checked separately below.
     let mut iface_markers: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
-    // Async selector set for the §7 self-evidence walk below (same shape as
-    // the desugar pass's pre-collection — colon-stripped).
-    let mut async_sels: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Class IMPLEMENTATIONS only — never protocol requirement names. The
-    // Protocol AST variant stores bare selector strings with no async marker,
-    // so collecting from it classified every sync protocol method (`speak`,
-    // `draw`, `printOn:` …) as async and made rule-2 checker error on
-    // ordinary protocol calls. Calls through `id<Proto>` to conformers
-    // implemented in this unit are covered by the impl classes here; a
-    // conformer in ANOTHER TU cannot be driven anyway (the M2 entry fn is
-    // static to its owner TU — cross-TU async calls are not a supported
-    // shape).
-    for decl in &unit.decls {
-        if let AstDeclData::Class { methods, .. } = &decl.data {
-            for m in methods {
-                if method_is_async(m) {
-                    if let Some(sel) = &m.name {
-                        async_sels.insert(sel.replace(':', ""));
-                    }
-                }
-            }
-        }
-    }
+    // Per-class async selector table for the rule-2/6 walks and §7
+    // self-evidence — receiver-class-scoped (see AsyncSelScope). Class
+    // IMPLEMENTATIONS and interfaces only; protocol requirement names carry no
+    // async marker and would poison the table (they are not Class decls).
+    let scope = AsyncSelScope::from_unit(unit);
     for decl in &unit.decls {
         if let AstDeclData::Class { methods, is_implementation: false, cls_sym: Some(cls), .. } = &decl.data {
             for m in methods {
@@ -660,22 +873,35 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
                     // statement position blocks, it does not suspend and it
                     // has no `await` — legal per §2.1 例1/例2.
                     if let Some(b) = body {
-                        let suspends = stmt_suspends(b, &async_sels);
+                        // Receiver-class context for the rule-2/6 walks: this
+                        // method's class + its class-typed params and locals.
+                        let params = match &m.data {
+                            AstDeclData::Method { params, .. } => params.as_deref(),
+                            _ => None,
+                        };
+                        let mut locals = param_locals(params);
+                        locals.extend(body_locals(b));
+                        let sel_ctx = SelCtx {
+                            scope: &scope,
+                            self_cls: Some(cls.as_str()),
+                            locals: &locals,
+                        };
+                        let suspends = stmt_suspends(b, &sel_ctx);
                         let real_await = stmt_contains_await(b);
                         reconcile_marker(marker, suspends, real_await, sym, m.line, m.col, &mut diags);
                         // v1 rule 6 lint: `await` on a non-async operand. Only
                         // inside async bodies — an `await` in a sync body is
                         // already a hard error from the context walk, and
                         // stacking a warning on it is noise. Needs the
-                        // unit-wide async_sels set, so it runs here rather
+                        // unit-wide table, so it runs here rather
                         // than inside check_async_context.
                         if marker {
-                            warn_await_on_sync_stmt(b, &async_sels, &mut diags.warnings);
+                            warn_await_on_sync_stmt(b, &sel_ctx, &mut diags.warnings);
                         }
                         // v1 rule 2 call-site discipline: every async call in
                         // the body must be awaited — in async bodies AND sync
                         // ones (rule 2 has no context exemption).
-                        check_call_site_discipline_stmt(b, &async_sels, &mut diags.errors);
+                        check_call_site_discipline_stmt(b, &sel_ctx, &mut diags.errors);
                     }
                 }
             }
@@ -749,11 +975,20 @@ pub fn check_unit(unit: &jeti_ast::AstUnit) -> AsyncDiagnostics {
                 // async_semantics_v1.md §3). The reverse check (await without
                 // the modifier) stays a hard error, enforced below.
                 check_async_context(b, &sym, *async_marker, &mut diags);
+                // Plain functions have no `self`; params + locals still resolve
+                // their receivers by static class.
+                let params = match &decl.data {
+                    AstDeclData::Function { params, .. } => params.as_deref(),
+                    _ => None,
+                };
+                let mut locals = param_locals(params);
+                locals.extend(body_locals(b));
+                let sel_ctx = SelCtx { scope: &scope, self_cls: None, locals: &locals };
                 if *async_marker {
-                    warn_await_on_sync_stmt(b, &async_sels, &mut diags.warnings);
+                    warn_await_on_sync_stmt(b, &sel_ctx, &mut diags.warnings);
                 }
                 // v1 rule 2 call-site discipline — same rule as methods.
-                check_call_site_discipline_stmt(b, &async_sels, &mut diags.errors);
+                check_call_site_discipline_stmt(b, &sel_ctx, &mut diags.errors);
             }
             _ => {}
         }
@@ -1658,7 +1893,13 @@ fn desugar_method_m2(
 /// not annotated — all "does this yield a task?" decisions come from here.
 #[derive(Default)]
 struct AsyncCtx {
-    async_sels: std::collections::HashSet<String>,
+    /// Receiver-class-scoped async selector table (`AsyncSelScope`): the
+    /// name-keyed global set inside it is only the `id`-receiver fallback.
+    scope: AsyncSelScope,
+    /// Class-typed locals/params of the body currently being lowered, so
+    /// `[local sel]` resolves the receiver's static class (rebuilt per body —
+    /// the desugar runs before the checker, so expr_type is unavailable).
+    local_classes: std::collections::HashMap<String, String>,
     task_vars: std::collections::HashSet<String>,
     /// Hidden async-block thunk function names (§5 desugar): a call to one of
     /// these yields a task handle, so statement-position IIFEs drive like
@@ -1941,8 +2182,15 @@ fn classify_elided_ret(e: &AstExpr, ctx: &AsyncCtx) -> Option<bool> {
 fn expr_yields_task(e: &AstExpr, ctx: &AsyncCtx) -> bool {
     match &e.data {
         AstExprData::VarRef { name, .. } => ctx.task_vars.contains(name),
-        AstExprData::MsgSend { selector, .. } => {
-            ctx.async_sels.contains(&selector.replace(':', ""))
+        AstExprData::MsgSend { receiver, selector, .. } => {
+            let sel = selector.replace(':', "");
+            let sel_ctx = SelCtx {
+                scope: &ctx.scope,
+                self_cls: ctx.current_class.as_deref(),
+                locals: &ctx.local_classes,
+            };
+            let rc = receiver_class_name(receiver, &sel_ctx);
+            ctx.scope.yields_task_for(rc.as_deref(), &sel)
         }
         AstExprData::FuncCall { name, .. } => ctx.async_block_fns.contains(name),
         AstExprData::Paren(inner) | AstExprData::Cast { expr: inner, .. } => {
@@ -2603,10 +2851,10 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
     // the handle form, exactly as if the source had used the old spelling).
     normalize_async_signatures(unit);
 
-    // Pre-collect async method selectors (colon-stripped) so await lowering
-    // can tell task-yielding calls from sync ones (expr_type is not
+    // Per-class async selector table (see AsyncSelScope) — await lowering
+    // resolves the receiver's static class against it (expr_type is not
     // annotated yet — desugar runs before the checker).
-    let mut async_sels: std::collections::HashSet<String> = std::collections::HashSet::new();
+    //
     // §9 await-value typing: the declared business result type of each async
     // method, so the await lowering can cast scalar results back to a word and
     // leave object results alone (see AsyncCtx::sel_ret_obj).
@@ -2617,13 +2865,12 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
     let mut sel_ret_scalar_ty: std::collections::HashMap<String, AstType> =
         std::collections::HashMap::new();
     for decl in unit.decls.iter() {
-        // Class implementations only — see check_unit's async_sels note
-        // (protocol names carry no async marker and would poison the set).
+        // Class implementations only — protocol names carry no async marker
+        // and would poison the table.
         if let AstDeclData::Class { methods, .. } = &decl.data {
             for m in methods {
                 if method_is_async(m) {
                     if let Some(sel) = &m.name {
-                        async_sels.insert(sel.replace(':', ""));
                         if let AstDeclData::Method { return_type, .. } = &m.data {
                             // The AST stores an async method's return type as
                             // the TASK HANDLE `NPTask<T> *` (same shape the
@@ -2686,7 +2933,8 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
         }
     }
     let mut ctx = AsyncCtx {
-        async_sels,
+        scope: AsyncSelScope::from_unit(unit),
+        local_classes: std::collections::HashMap::new(),
         task_vars: std::collections::HashSet::new(),
         async_block_fns: std::collections::HashSet::new(),
         sel_ret_obj,
@@ -2718,14 +2966,20 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
                 ctx.current_class = cls_sym.clone();
                 ctx.in_method = true;
                 for m in methods.iter_mut() {
-                    if let AstDeclData::Method { body: Some(ref mut b), .. } = &mut m.data {
+                    if let AstDeclData::Method { body: Some(ref mut b), params, .. } = &mut m.data {
+                        let mut locals = param_locals(params.as_deref());
+                        locals.extend(body_locals(b));
+                        ctx.local_classes = locals;
                         lower_async_blocks_stmt(b, &mut block_thunk_seq, &mut top_decls2, &mut ctx);
                     }
                 }
             }
-            AstDeclData::Function { body: Some(ref mut b), .. } => {
+            AstDeclData::Function { body: Some(ref mut b), params, .. } => {
                 ctx.current_class = None;
                 ctx.in_method = false;
+                let mut locals = param_locals(params.as_deref());
+                locals.extend(body_locals(b));
+                ctx.local_classes = locals;
                 lower_async_blocks_stmt(b, &mut block_thunk_seq, &mut top_decls2, &mut ctx);
             }
             _ => {}
@@ -2743,6 +2997,9 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
                 let is_async = method_is_async(m);
                 if !is_async { continue; }
                 if let AstDeclData::Method { body: Some(ref mut b), return_type, params, .. } = &mut m.data {
+                    let mut locals = param_locals(params.as_deref());
+                    locals.extend(body_locals(b));
+                    ctx.local_classes = locals;
                     // Extract param list (name, type) from CstParam chain.
                     let mut plist: Vec<(String, AstType)> = Vec::new();
                     let mut p = params.as_ref().map(|b| &**b);
@@ -3383,6 +3640,22 @@ fn build_async_block_thunk(
     // (type, name) — flip before delegating.
     let m2_params: Vec<(String, AstType)> =
         params.iter().map(|(t, n)| (n.clone(), t.clone())).collect();
+    // The thunk body carries its own locals (`Foo *x = …` declared inside the
+    // block) — rebuild the receiver-class table for it. Without this a
+    // `[x run]` inside the block falls back to the name-keyed global set and a
+    // sync send gets driven as a task handle (probe x10).
+    {
+        let mut locals = std::collections::HashMap::new();
+        for (n, t) in &m2_params {
+            if t.is_pointer && t.prim == TypePrim::Named {
+                if let Some(nm) = t.name.as_deref() {
+                    locals.insert(n.clone(), nm.split('<').next().unwrap_or(nm).to_string());
+                }
+            }
+        }
+        locals.extend(body_locals(&driver_body));
+        ctx.local_classes = locals;
+    }
     // The thunk's hidden capture param is the task's self_obj, so block-body
     // `self` flows through the same `__jeti_task->self_obj` rewrite as method
     // bodies — pass the enclosing class for the typed-self cast too.

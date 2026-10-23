@@ -1,0 +1,115 @@
+#import <Foundation/NPMutableOrderedSet.hje>
+#include <stdlib.h>
+
+@implementation NPMutableOrderedSet
+
+- (NPMutableOrderedSet *)init {
+    self = [super init];
+    if (self) {
+        _items = NULL;
+        _count = 0;
+        _capacity = 0;
+    }
+    return self;
+}
+
+- (NPMutableOrderedSet *)initWithCapacity:(size_t)capacity {
+    self = [self init];
+    if (self && capacity > 0) {
+        _items = (NPObject **)calloc(capacity, sizeof(NPObject *));
+        _capacity = _items ? capacity : 0;
+    }
+    return self;
+}
+
+- (NPMutableOrderedSet *)initWithArray:(NPArray *)other {
+    self = [self init];
+    if (self && other) {
+        // addObject: (NPSet) skips duplicates without touching the existing
+        // slot, so first-insertion order survives.
+        [self addObjectsFromArray:other];
+    }
+    return self;
+}
+
++ (NPMutableOrderedSet *)orderedSet {
+    return [[self alloc] init];
+}
+
++ (NPMutableOrderedSet *)orderedSetWithObject:(id)object {
+    NPMutableOrderedSet *s = [[self alloc] init];
+    [s addObject:object];
+    return s;
+}
+
++ (NPMutableOrderedSet *)orderedSetWithArray:(NPArray *)array {
+    return [[self alloc] initWithArray:array];
+}
+
+// Dense-shift removal: the tail moves down one, so indices stay contiguous.
+- (void)removeObject:(T)obj {
+    if (!obj) return;
+    for (size_t i = 0; i < _count; i++) {
+        if (_items[i] && [_items[i] isEqual:obj]) {
+            jeti_release(_items[i]);
+            for (size_t j = i; j + 1 < _count; j++) {
+                _items[j] = _items[j + 1];
+            }
+            _count--;
+            _items[_count] = NULL;
+            return;
+        }
+    }
+}
+
+- (void)removeObjectAtIndex:(size_t)index {
+    if (index >= _count) return;
+    jeti_release(_items[index]);
+    for (size_t j = index; j + 1 < _count; j++) {
+        _items[j] = _items[j + 1];
+    }
+    _count--;
+    _items[_count] = NULL;
+}
+
+- (void)removeAllObjects {
+    for (size_t i = 0; i < _count; i++) {
+        if (_items[i]) {
+            jeti_release(_items[i]);
+            _items[i] = NULL;
+        }
+    }
+    _count = 0;
+}
+
+// Insert a NEW element at the position, pushing the rest back. An equal
+// element already present is a no-op — its position does not move (same rule
+// as re-adding via addObject:).
+- (void)insertObject:(T)obj atIndex:(size_t)index {
+    if (!obj) return;
+    if ([self containsObject:obj]) return;
+    if (index > _count) { index = _count; }
+    // Grow first (NPSet's _grow is private to its add path; grow here).
+    if (_count == _capacity) {
+        size_t ncap = _capacity ? _capacity * 2 : 8;
+        NPObject **ni = (NPObject **)realloc(_items, ncap * sizeof(NPObject *));
+        if (!ni) return;
+        _items = ni;
+        _capacity = ncap;
+    }
+    for (size_t j = _count; j > index; j--) {
+        _items[j] = _items[j - 1];
+    }
+    _items[index] = obj;
+    jeti_retain(obj);
+    _count++;
+}
+
+- (void)exchangeObjectsAtIndexes:(size_t)i1 and:(size_t)i2 {
+    if (i1 >= _count || i2 >= _count || i1 == i2) return;
+    NPObject *tmp = _items[i1];
+    _items[i1] = _items[i2];
+    _items[i2] = tmp;
+}
+
+@end

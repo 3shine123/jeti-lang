@@ -1,0 +1,151 @@
+#import <Foundation/NPExpression.hje>
+#import <Foundation/NPObject.jeti>
+#import <Foundation/NPString.jeti>
+#include <stdlib.h>
+#include <stdio.h>
+
+@implementation NPExpression
+
+// 统一的构造路径：四个工厂只决定 type 与各自那一个载荷字段。
+- (NPExpression *)initWithType:(NPExpressionType)type {
+    self = [super init];
+    if (self) {
+        _type = type;
+        _constant = NULL;
+        _keyPath = NULL;
+        _variable = NULL;
+    }
+    return self;
+}
+
+- (void)dealloc {
+    if (_constant) { jeti_release(_constant); _constant = NULL; }
+    if (_keyPath) { jeti_release(_keyPath); _keyPath = NULL; }
+    if (_variable) { jeti_release(_variable); _variable = NULL; }
+    [super dealloc];
+}
+
++ (NPExpression *)expressionForConstantValue:(id)object {
+    @noarc {
+        NPExpression *e = [[self alloc] initWithType:NPConstantValueExpressionType];
+        // 常量按 ObjC 的 property 语义持有（retain）；nil 也是合法常量。
+        if (object) {
+            e->_constant = jeti_retain(object);
+        }
+        return [e autorelease];
+    }
+}
+
++ (NPExpression *)expressionForEvaluatedObject {
+    @noarc {
+        return [[[self alloc] initWithType:NPEvaluatedObjectExpressionType] autorelease];
+    }
+}
+
++ (NPExpression *)expressionForVariable:(NPString *)name {
+    @noarc {
+        NPExpression *e = [[self alloc] initWithType:NPVariableExpressionType];
+        e->_variable = name ? [name copy] : NULL;
+        return [e autorelease];
+    }
+}
+
++ (NPExpression *)expressionForKeyPath:(NPString *)keyPath {
+    @noarc {
+        NPExpression *e = [[self alloc] initWithType:NPKeyPathExpressionType];
+        e->_keyPath = keyPath ? [keyPath copy] : NULL;
+        return [e autorelease];
+    }
+}
+
+- (NPExpressionType)expressionType {
+    return _type;
+}
+
+- (id)constantValue {
+    return _constant;
+}
+
+- (NPString *)keyPath {
+    return _keyPath;
+}
+
+- (NPString *)variable {
+    return _variable;
+}
+
+// 求值。键路径走与 NPPredicate 同一套编译期 KVC 表；键不满足 KVC 时响亮中止，
+// 与 NPPredicate 同款取舍 —— 静态派发下没有可注入异常的运行期，静默返回 nil
+// 会把「键写错」变成难以察觉的空值。
+- (id)expressionValueWithObject:(id)object context:(NPDictionary *)context {
+    if (_type == NPConstantValueExpressionType) {
+        return _constant;
+    }
+    if (_type == NPEvaluatedObjectExpressionType) {
+        return object;
+    }
+    if (_type == NPVariableExpressionType) {
+        if (!_variable || !context) return nil;
+        return [context objectForKey:_variable];
+    }
+    if (_type == NPKeyPathExpressionType) {
+        if (!_keyPath || !object) return nil;
+        const char *key = [_keyPath UTF8String];
+        id v = jeti_kvc_value(object, key);
+        if (!v) {
+            fprintf(stderr, "*** NPExpression: key '%s' is not key-value coding "
+                    "compliant for the receiver\n", key);
+            abort();
+        }
+        return v;
+    }
+    return nil;
+}
+
+// 可解析文本形式（对应 ObjC 的 predicateFormat）。字符串常量带单引号，与
+// NPPredicate 的格式 DSL 一致；其余常量用 description。
+- (NPString *)predicateFormat {
+    if (_type == NPKeyPathExpressionType) {
+        return _keyPath ? _keyPath : [NPString stringWithUTF8String:"<nil keyPath>"];
+    }
+    if (_type == NPVariableExpressionType) {
+        if (!_variable) return [NPString stringWithUTF8String:"<nil variable>"];
+        const char *n = [_variable UTF8String];
+        size_t len = 0;
+        while (n[len] != '\0') len++;
+        char *buf = (char *)malloc(len + 2);
+        if (!buf) return [NPString stringWithUTF8String:"$"];
+        buf[0] = '$';
+        size_t i;
+        for (i = 0; i <= len; i++) buf[i + 1] = n[i];
+        NPString *s = [NPString stringWithUTF8String:buf];
+        free(buf);
+        return s;
+    }
+    if (_type == NPEvaluatedObjectExpressionType) {
+        return [NPString stringWithUTF8String:"SELF"];
+    }
+    // 常量
+    if (!_constant) return [NPString stringWithUTF8String:"nil"];
+    if ([_constant isKindOfClass:[NPString class]]) {
+        // 先落到局部 `id` 再转：直接对 ivar 写强转会触发
+        // "cast from smaller integer type 'int'" 警告（局部 id 不会）。
+        id cv = _constant;
+        const char *c = [(NPString *)cv UTF8String];
+        size_t len = 0;
+        while (c[len] != '\0') len++;
+        char *buf = (char *)malloc(len + 3);
+        if (!buf) return [NPString stringWithUTF8String:"<alloc failed>"];
+        buf[0] = '\'';
+        size_t i;
+        for (i = 0; i <= len; i++) buf[i + 1] = c[i];
+        buf[len + 1] = '\'';
+        buf[len + 2] = '\0';
+        NPString *s = [NPString stringWithUTF8String:buf];
+        free(buf);
+        return s;
+    }
+    return [_constant description];
+}
+
+@end

@@ -1,0 +1,46 @@
+#ifndef NPJSONSERIALIZATION_NH
+#define NPJSONSERIALIZATION_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPNumber.hje>
+#import <Foundation/NPArray.hje>
+#import <Foundation/NPDictionary.hje>
+#import <Foundation/NPNull.hje>
+
+// NPJSONSerialization —— JSON ↔ Foundation 对象（对应 ObjC 的
+// NSJSONSerialization 的**子集**）。
+//
+// 对象映射（ObjC 对齐）：object/array/string/number(true/false/null 亦为
+// NPNumber/NPNull) ↔ NPDictionary/NPArray/NPString/NPNumber/NPNull。
+// 顶层可以是任意 JSON 值（RFC 8259）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **数字**：整数走 long long 精确路径；带 `.`/`e`/`E` 的走 double。
+//   超出 double 有效位的浮点尾部会舍入（ObjC 同样按 double 读）。
+// - **字符串转义**：支持 `\" \\ \/ \b \f \n \r \t \uXXXX`（含代理对合成
+//   UTF-8）；`\uXXXX` 的字面量按字节收（v1 不做 UTF-16 代理对以外的
+//   规范化）。
+// - **错误即 nil**：`JSONObjectWithData:` 解析失败返回 nil，不出错误参数
+//   （ObjC 的 NSError out 参数 v1 不做；失败原因打印到 stderr 的
+//   `-json-debug` 不存在——就是 nil，配合探针定位）。
+// - **序列化**：`dataWithJSONObject:` 输出**紧凑**形态（无空白）；键按
+//   插入序（NPDictionary 保序存储）。NPNull → `null`；NPString 的控制
+//   字符/引号/反斜杠按 RFC 8259 转义；非 ASCII 字节原样输出（UTF-8
+//   直通，不做 \u 降级——ObjC 默认也是 UTF-8 直通）。
+// - **不支持**：碎片（顶层数组外裸值——v1 顶层收任意值，其实支持；
+//   见 NSJSONSerialization 的 fragmentsNotAllowed 差异）、
+//   NSJSONWriting 选项位。
+@interface NPJSONSerialization : NPObject
+
+// 解析。非法 JSON 返回 nil；深度超上限（64）返回 nil。
++ (id)JSONObjectWithData:(NPData *)data;
++ (id)JSONObjectWithString:(NPString *)str;
+
+// 序列化（紧凑形态）。顶层为 NPDictionary/NPArray；对象图含不支持的类型
+// 返回 nil（ObjC 对齐：invalid type 抛异常，Jeti 返回 nil——诚实边界）。
++ (NPString *)stringWithJSONObject:(id)obj;
+
+@end
+
+#endif

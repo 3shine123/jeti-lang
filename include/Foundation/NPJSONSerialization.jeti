@@ -1,0 +1,391 @@
+#import <Foundation/NPJSONSerialization.hje>
+#import <Foundation/NPData.hje>
+#import <Foundation/NPMutableArray.hje>
+#import <Foundation/NPMutableDictionary.hje>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+// np_json_ 前缀：裸名撞系统符号会静默走错实现（golden 14_uuid 命名注记）。
+// 解析器状态：字节数组 + 位置。全部 np_json_* 辅助是文件级纯 C——不收块
+// 参数（文件级发射器会丢块参数，golden 17_array_sort 注记），标量安全。
+typedef struct {
+    const char *p;
+    size_t len;
+    size_t pos;
+    int depth;
+    int failed;
+} np_json_parser;
+
+#define NP_JSON_MAX_DEPTH 64
+
+static void np_json_skip_ws(np_json_parser *ps) {
+    while (ps->pos < ps->len) {
+        char c = ps->p[ps->pos];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { ps->pos++; }
+        else { break; }
+    }
+}
+
+static int np_json_peek(np_json_parser *ps) {
+    return ps->pos < ps->len ? (unsigned char)ps->p[ps->pos] : -1;
+}
+
+// \uXXXX → UTF-8。返回写入字节数（1..4），坏转义 0。
+static int np_json_utf8_encode(unsigned int cp, char *out) {
+    if (cp < 0x80) { out[0] = (char)cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+static int np_json_hex4(np_json_parser *ps, unsigned int *out) {
+    if (ps->pos + 4 > ps->len) { return 0; }
+    unsigned int v = 0;
+    for (int i = 0; i < 4; i++) {
+        char c = ps->p[ps->pos + i];
+        v <<= 4;
+        if (c >= '0' && c <= '9') { v |= (unsigned)(c - '0'); }
+        else if (c >= 'a' && c <= 'f') { v |= (unsigned)(c - 'a' + 10); }
+        else if (c >= 'A' && c <= 'F') { v |= (unsigned)(c - 'A' + 10); }
+        else { return 0; }
+    }
+    ps->pos += 4;
+    *out = v;
+    return 1;
+}
+
+// 解析字符串字面量（调用方已吃掉开引号）。返回 malloc 的 UTF-8 串（调用方
+// free），失败 NULL。
+static char *np_json_parse_string(np_json_parser *ps) {
+    // 先量长度：转义只会变短，原样段原样拷。缓冲上限 = 剩余字节 + 4（\u
+    // 合成最多 4 字节/6 源字节，不会超）。
+    size_t cap = ps->len - ps->pos + 4;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { ps->failed = 1; return NULL; }
+    size_t n = 0;
+    while (ps->pos < ps->len) {
+        unsigned char c = (unsigned char)ps->p[ps->pos++];
+        if (c == '"') {
+            buf[n] = '\0';
+            return buf;
+        }
+        if (c != '\\') {
+            buf[n++] = (char)c;
+            continue;
+        }
+        if (ps->pos >= ps->len) { break; }
+        char e = ps->p[ps->pos++];
+        switch (e) {
+            case '"': buf[n++] = '"'; break;
+            case '\\': buf[n++] = '\\'; break;
+            case '/': buf[n++] = '/'; break;
+            case 'b': buf[n++] = '\b'; break;
+            case 'f': buf[n++] = '\f'; break;
+            case 'n': buf[n++] = '\n'; break;
+            case 'r': buf[n++] = '\r'; break;
+            case 't': buf[n++] = '\t'; break;
+            case 'u': {
+                unsigned int cp = 0;
+                if (!np_json_hex4(ps, &cp)) { free(buf); ps->failed = 1; return NULL; }
+                // 代理对：D800-DBFF 后必须跟 \uDC00-DFFF，合成增补平面码点。
+                if (cp >= 0xD800 && cp <= 0xDBFF) {
+                    if (ps->pos + 1 < ps->len && ps->p[ps->pos] == '\\' && ps->p[ps->pos + 1] == 'u') {
+                        ps->pos += 2;
+                        unsigned int lo = 0;
+                        if (!np_json_hex4(ps, &lo) || lo < 0xDC00 || lo > 0xDFFF) {
+                            free(buf); ps->failed = 1; return NULL;
+                        }
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                    } else {
+                        free(buf); ps->failed = 1; return NULL;
+                    }
+                } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                    free(buf); ps->failed = 1; return NULL;  // 孤立低代理
+                }
+                n += (size_t)np_json_utf8_encode(cp, buf + n);
+                break;
+            }
+            default:
+                free(buf); ps->failed = 1; return NULL;
+        }
+    }
+    free(buf);
+    ps->failed = 1;   // 未闭合
+    return NULL;
+}
+
+// 数字：-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
+// 整数（无 . e E）走 long long 精确路径；否则 double。
+static NPObject *np_json_parse_number(np_json_parser *ps) {
+    size_t start = ps->pos;
+    int is_double = 0;
+    if (ps->pos < ps->len && ps->p[ps->pos] == '-') { ps->pos++; }
+    while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { ps->pos++; }
+    if (ps->pos < ps->len && ps->p[ps->pos] == '.') {
+        is_double = 1;
+        ps->pos++;
+        while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { ps->pos++; }
+    }
+    if (ps->pos < ps->len && (ps->p[ps->pos] == 'e' || ps->p[ps->pos] == 'E')) {
+        is_double = 1;
+        ps->pos++;
+        if (ps->pos < ps->len && (ps->p[ps->pos] == '+' || ps->p[ps->pos] == '-')) { ps->pos++; }
+        while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { ps->pos++; }
+    }
+    size_t n = ps->pos - start;
+    if (n == 0 || (n == 1 && ps->p[start] == '-')) { ps->failed = 1; return NULL; }
+    char buf[64];
+    if (n >= sizeof(buf)) { ps->failed = 1; return NULL; }
+    memcpy(buf, ps->p + start, n);
+    buf[n] = '\0';
+    if (!is_double) {
+        return [NPNumber numberWithLongLong:(long long)atoll(buf)];
+    }
+    return [NPNumber numberWithDouble:atof(buf)];
+}
+
+static NPObject *np_json_parse_value(np_json_parser *ps);
+
+static NPObject *np_json_parse_array(np_json_parser *ps) {
+    ps->pos++;   // '['
+    NPMutableArray *arr = [NPMutableArray array];
+    np_json_skip_ws(ps);
+    if (np_json_peek(ps) == ']') { ps->pos++; return arr; }
+    for (;;) {
+        np_json_skip_ws(ps);
+        NPObject *v = np_json_parse_value(ps);
+        if (ps->failed) { return NULL; }
+        [arr addObject:v];
+        np_json_skip_ws(ps);
+        int c = np_json_peek(ps);
+        if (c == ',') { ps->pos++; continue; }
+        if (c == ']') { ps->pos++; return arr; }
+        ps->failed = 1;
+        return NULL;
+    }
+}
+
+static NPObject *np_json_parse_object(np_json_parser *ps) {
+    ps->pos++;   // '{'
+    NPMutableDictionary *d = [NPMutableDictionary dictionary];
+    np_json_skip_ws(ps);
+    if (np_json_peek(ps) == '}') { ps->pos++; return d; }
+    for (;;) {
+        np_json_skip_ws(ps);
+        if (np_json_peek(ps) != '"') { ps->failed = 1; return NULL; }
+        ps->pos++;   // 开引号
+        char *key = np_json_parse_string(ps);
+        if (ps->failed) { return NULL; }
+        NPString *k = [NPString stringWithUTF8String:key];
+        free(key);
+        np_json_skip_ws(ps);
+        if (np_json_peek(ps) != ':') { ps->failed = 1; return NULL; }
+        ps->pos++;
+        np_json_skip_ws(ps);
+        NPObject *v = np_json_parse_value(ps);
+        if (ps->failed) { return NULL; }
+        [d setObject:v forKey:k];
+        np_json_skip_ws(ps);
+        int c = np_json_peek(ps);
+        if (c == ',') { ps->pos++; continue; }
+        if (c == '}') { ps->pos++; return d; }
+        ps->failed = 1;
+        return NULL;
+    }
+}
+
+static NPObject *np_json_parse_value(np_json_parser *ps) {
+    if (ps->depth >= NP_JSON_MAX_DEPTH) { ps->failed = 1; return NULL; }
+    np_json_skip_ws(ps);
+    int c = np_json_peek(ps);
+    if (c == '{') {
+        ps->depth++;
+        NPObject *v = np_json_parse_object(ps);
+        ps->depth--;
+        return v;
+    }
+    if (c == '[') {
+        ps->depth++;
+        NPObject *v = np_json_parse_array(ps);
+        ps->depth--;
+        return v;
+    }
+    if (c == '"') {
+        ps->pos++;
+        char *s = np_json_parse_string(ps);
+        if (ps->failed) { return NULL; }
+        NPString *out = [NPString stringWithUTF8String:s];
+        free(s);
+        return out;
+    }
+    if (c == 't') {
+        if (ps->pos + 4 <= ps->len && memcmp(ps->p + ps->pos, "true", 4) == 0) {
+            ps->pos += 4;
+            return [NPNumber numberWithBool:1];
+        }
+        ps->failed = 1;
+        return NULL;
+    }
+    if (c == 'f') {
+        if (ps->pos + 5 <= ps->len && memcmp(ps->p + ps->pos, "false", 5) == 0) {
+            ps->pos += 5;
+            return [NPNumber numberWithBool:0];
+        }
+        ps->failed = 1;
+        return NULL;
+    }
+    if (c == 'n') {
+        if (ps->pos + 4 <= ps->len && memcmp(ps->p + ps->pos, "null", 4) == 0) {
+            ps->pos += 4;
+            return [NPNull null];
+        }
+        ps->failed = 1;
+        return NULL;
+    }
+    if (c == '-' || (c >= '0' && c <= '9')) {
+        return np_json_parse_number(ps);
+    }
+    ps->failed = 1;
+    return NULL;
+}
+
+// —— 序列化 ——
+
+// 字符串转义输出（RFC 8259：控制字符/引号/反斜杠；UTF-8 直通）。
+// 追加到 NPMutableString。
+static void np_json_escape_string(NPString *s, NPMutableString *out) {
+    const char *p = [s UTF8String];
+    size_t n = [s length];
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)p[i];
+        switch (c) {
+            case '"':  [out appendUTF8String:"\\\""]; break;
+            case '\\': [out appendUTF8String:"\\\\"]; break;
+            case '\b': [out appendUTF8String:"\\b"]; break;
+            case '\f': [out appendUTF8String:"\\f"]; break;
+            case '\n': [out appendUTF8String:"\\n"]; break;
+            case '\r': [out appendUTF8String:"\\r"]; break;
+            case '\t': [out appendUTF8String:"\\t"]; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    [out appendUTF8String:buf];
+                } else {
+                    // UTF-8 直通：≥0x80 的字节原样进 out。
+                    char one[2] = { (char)c, '\0' };
+                    [out appendUTF8String:one];
+                }
+                break;
+        }
+    }
+}
+
+@implementation NPJSONSerialization
+
++ (id)JSONObjectWithString:(NPString *)str {
+    if (!str) return NULL;
+    np_json_parser ps;
+    ps.p = [str UTF8String];
+    ps.len = strlen(ps.p);
+    ps.pos = 0;
+    ps.depth = 0;
+    ps.failed = 0;
+    np_json_skip_ws(&ps);
+    NPObject *v = np_json_parse_value(&ps);
+    if (ps.failed) { return NULL; }
+    np_json_skip_ws(&ps);
+    if (ps.pos != ps.len) { return NULL; }   // 尾部有残余 → 非法
+    return v;
+}
+
++ (id)JSONObjectWithData:(NPData *)data {
+    if (!data || data->_length == 0) { return NULL; }
+    // NUL 保险：借用 bytes 前按长度拷一份，utf8 域严格等于数据。
+    char *tmp = (char *)malloc(data->_length + 1);
+    if (!tmp) { return NULL; }
+    memcpy(tmp, data->_bytes, data->_length);
+    tmp[data->_length] = '\0';
+    NPString *s = [NPString stringWithUTF8String:tmp];
+    free(tmp);
+    return [self JSONObjectWithString:s];
+}
+
++ (NPString *)stringWithJSONObject:(id)obj {
+    if ([obj isKindOfClass:[NPDictionary class]]) {
+        NPMutableString *out = [NPMutableString stringWithUTF8String:""];
+        [out appendUTF8String:"{"];
+        NPArray *keys = [obj allKeys];
+        for (size_t i = 0; i < [keys count]; i++) {
+            if (i > 0) { [out appendUTF8String:","]; }
+            NPString *k = [keys objectAtIndex:i];
+            NPString *ks = [NPJSONSerialization stringWithJSONObject:k];
+            if (!ks) { return NULL; }
+            [out appendUTF8String:[ks UTF8String]];
+            [out appendUTF8String:":"];
+            NPObject *v = [obj objectForKey:k];
+            NPString *vs = [NPJSONSerialization stringWithJSONObject:v];
+            if (!vs) { return NULL; }
+            [out appendUTF8String:[vs UTF8String]];
+        }
+        [out appendUTF8String:"}"];
+        return out;
+    }
+    if ([obj isKindOfClass:[NPArray class]]) {
+        NPMutableString *out = [NPMutableString stringWithUTF8String:""];
+        [out appendUTF8String:"["];
+        for (size_t i = 0; i < [obj count]; i++) {
+            if (i > 0) { [out appendUTF8String:","]; }
+            NPObject *v = [obj objectAtIndex:i];
+            NPString *vs = [NPJSONSerialization stringWithJSONObject:v];
+            if (!vs) { return NULL; }
+            [out appendUTF8String:[vs UTF8String]];
+        }
+        [out appendUTF8String:"]"];
+        return out;
+    }
+    if ([obj isKindOfClass:[NPString class]]) {
+        NPMutableString *out = [NPMutableString stringWithUTF8String:""];
+        [out appendUTF8String:"\""];
+        np_json_escape_string(obj, out);
+        [out appendUTF8String:"\""];
+        return out;
+    }
+    if ([obj isKindOfClass:[NPNumber class]]) {
+        NPNumber *num = obj;
+        // Bool 优先：true/false 往返保真（否则 true 会变 1，ObjC 是保真的）。
+        if (num->_isBool) {
+            return [NPString stringWithUTF8String:num->_intValue ? "true" : "false"];
+        }
+        // 整数（无小数部分且在精确范围内）走 long long；否则 double。
+        double dv = [num doubleValue];
+        long long lv = [num longLongValue];
+        char buf[40];
+        if (dv == (double)lv && dv >= -9.0e15 && dv <= 9.0e15) {
+            snprintf(buf, sizeof(buf), "%lld", lv);
+        } else {
+            snprintf(buf, sizeof(buf), "%.17g", dv);
+        }
+        return [NPString stringWithUTF8String:buf];
+    }
+    if ([obj isKindOfClass:[NPNull class]]) {
+        return [NPString stringWithUTF8String:"null"];
+    }
+    return NULL;   // 不支持的类型（ObjC 抛异常；这里 nil——诚实边界）
+}
+
+@end

@@ -1,0 +1,72 @@
+/* NPNotification golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * P1-2：独立通知对象 NPNotification（对应 ObjC 的 NSNotification）与
+ * NPNotificationCenter 的接入。ObjC 的块式观察者
+ * （addObserverForName:object:queue:usingBlock:）收的是 NSNotification，
+ * 所以这里观察者块也改收 NPNotification —— name/object/userInfo 都从通知
+ * 对象上取。
+ *
+ * A1 三个属性（name/object/userInfo）+ 两个工厂（带/不带 userInfo）
+ * A2 name 是 **copy** 语义：构造后改原可变字符串，通知里的名字不受影响
+ * A3 postNotification: 直接投递已构造的通知，块能读到 userInfo
+ * A4 postNotificationName:object:userInfo: 便捷入口等价
+ * A5 object 维按身份过滤；注册时 object 为 NULL = 通配该维
+ * 期望输出：A1..A5 各一行。
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+int main(void) {
+    NPNotificationCenter *nc = [NPNotificationCenter defaultCenter];
+
+    /* A1：属性 + 两个工厂 */
+    NPString *nm = [NPString stringWithUTF8String:"evt"];
+    NPString *sender = [NPString stringWithUTF8String:"sender"];
+    NPDictionary *ui = [NPDictionary dictionaryWithObject:@"v" forKey:@"k"];
+    // 显式转 `id`：类方法工厂走直接函数调用，发射出的形参是 `NPObject *`，
+    // 而 NPString * 与它是不同的 struct 指针类型 —— 直接调用路径不做隐式
+    // 转换，clang 会报 incompatible pointer types（实例方法的 vtable 路径不
+    // 报）。ObjC 里这个转换本就是隐式合法的，这里显式写出来等价。
+    NPNotification *n1 = [NPNotification notificationWithName:nm object:(id)sender userInfo:ui];
+    NPNotification *n1b = [NPNotification notificationWithName:nm object:(id)sender];
+    NPString *n1name = [n1 name];
+    id n1obj = [n1 object];
+    NPDictionary *n1ui = [n1 userInfo];
+    NPDictionary *n1bui = [n1b userInfo];
+    printf("A1 name=%s obj=%s ui=%zu ui-noarg=%s\n",
+           [n1name UTF8String], [(NPString *)n1obj UTF8String], [n1ui count],
+           n1bui ? "set" : "nil");
+
+    /* A2：name 是 copy —— 构造后改原对象，通知里的名字必须不变 */
+    NPMutableString *mname = [NPMutableString stringWithUTF8String:"orig"];
+    NPNotification *n2 = [NPNotification notificationWithName:(NPString *)mname object:NULL userInfo:NULL];
+    [mname appendUTF8String:"-mutated"];
+    NPString *n2name = [n2 name];
+    printf("A2 notif=%s original=%s\n", [n2name UTF8String], [mname UTF8String]);
+
+    /* A3：postNotification: 投递已构造通知，块读到 userInfo */
+    [nc addObserver:NULL forName:[NPString stringWithUTF8String:"evt"] object:NULL
+         usingBlock:^(NPNotification *note) {
+            NPString *n = [note name];
+            NPDictionary *u = [note userInfo];
+            printf("A3 got=%s ui=%zu\n", [n UTF8String], [u count]);
+        }];
+    [nc postNotification:n1];
+
+    /* A4：便捷入口等价 */
+    [nc postNotificationName:[NPString stringWithUTF8String:"evt"] object:sender userInfo:ui];
+
+    /* A5：object 身份过滤 + 通配。倒序投递（后注册先收到）。 */
+    [nc addObserver:NULL forName:[NPString stringWithUTF8String:"only"] object:sender
+         usingBlock:^(NPNotification *note) { printf("A5 identity "); }];
+    [nc addObserver:NULL forName:[NPString stringWithUTF8String:"only"] object:NULL
+         usingBlock:^(NPNotification *note) { printf("A5 wildcard "); }];
+    [nc postNotificationName:[NPString stringWithUTF8String:"only"] object:sender];
+    printf("\n");
+    /* object 不匹配时只有通配观察者收到 */
+    NPString *other = [NPString stringWithUTF8String:"other"];
+    [nc postNotificationName:[NPString stringWithUTF8String:"only"] object:other];
+    printf("\n");
+    return 0;
+}

@@ -353,6 +353,17 @@ static METHOD_METADATA: OnceLock<HashMap<String, (usize, String)>> = OnceLock::n
 // Two classes may share a selector (e.g. get:) with DIFFERENT signatures, so
 // dispatch must cast the vtable member using the receiver's static class.
 static CLASS_METHOD_METADATA: OnceLock<HashMap<String, HashMap<String, (usize, String)>>> = OnceLock::new();
+/// Per-class signature for **class** methods: class_flat → method name →
+/// declared parameter type list (self/SEL first, then the real parameters).
+///
+/// `CLASS_METHOD_METADATA` is deliberately instance-only — it feeds the
+/// uniform-vtable fn-ptr cast, which has no class-method slots. Class-method
+/// sends therefore had *no* parameter types at all, so a direct call emitted
+/// its arguments uncast and clang reported `incompatible pointer types` for
+/// perfectly legal sends (`[Maker makeWith:someNPString]`, `[C make:subclassObj]`,
+/// `[C makeWith:@"literal"]`). This table gives them the same treatment the
+/// instance path already had.
+static CLASS_METHOD_PARAMS: OnceLock<HashMap<String, HashMap<String, Vec<String>>>> = OnceLock::new();
 
 /// Local variable declarations seen during body conversion: name → flat class
 /// name (only class-typed locals are recorded). The dispatch cast must use the
@@ -381,7 +392,19 @@ fn get_vtable_param_type_for_class(class_flat: &str, method_name: &str, param_in
         .and_then(|classes| classes.get(class_flat))
         .and_then(|methods| methods.get(method_name))
         .and_then(|(_, ptr_type)| parse_vtable_param_type(ptr_type, param_index))
+        .or_else(|| get_class_method_param_type(class_flat, method_name, param_index))
         .or_else(|| get_vtable_param_type(method_name, param_index))
+}
+
+/// Declared parameter type of a CLASS method (`+foo:`), by the same
+/// `param_index` convention the instance path uses: 0 = self, 1 = SEL,
+/// 2 = the first real parameter.
+fn get_class_method_param_type(class_flat: &str, method_name: &str, param_index: usize) -> Option<String> {
+    CLASS_METHOD_PARAMS.get()
+        .and_then(|classes| classes.get(class_flat))
+        .and_then(|methods| methods.get(method_name))
+        .and_then(|params| params.get(param_index))
+        .cloned()
 }
 
 fn parse_vtable_param_type(ptr_type: &str, param_index: usize) -> Option<String> {
@@ -721,6 +744,11 @@ pub enum CgDeclData {
         var_type: String,
         init: Option<Box<CgExpr>>,
         is_static: bool,
+        /// `extern` storage class. Dropping it turned a file-level
+        /// `extern char **environ;` into a *definition* — a zero-initialized
+        /// tentative definition that shadowed libc's `environ` and made the
+        /// whole environment table read as empty.
+        is_extern: bool,
         is_const: bool,
         is_weak: bool,
         is_block: bool,
@@ -2196,6 +2224,50 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
                         })
                     })
                 });
+                // Typed-self receivers from the async desugar: `self` inside an
+                // async method body is rewritten to
+                // `((struct Cls *)__jeti_task->self_obj)` — the cast target IS
+                // the receiver's static class. Without this arm the send fell
+                // through to the any-class-with-this-selector guess, which
+                // could pick a DIFFERENT class sharing the selector name
+                // (`[self run]` in Probe hitting AsyncA's `- (async int)run`)
+                // and cast the call to that class's signature.
+                if vtable_class.is_none() {
+                    if let AstExprData::Cast { target_type, .. } = &receiver.data {
+                        // `((struct Cls *)…)` from the async desugar spells as a
+                        // pointer to a struct-tagged Named — the class name sits
+                        // on the subtype (`struct_ptr_type`).
+                        let cast_cls = target_type.name.as_deref().map(|s| s.to_string())
+                            .or_else(|| {
+                                target_type.subtype.as_deref().and_then(|s| {
+                                    let is_struct_ptr = target_type.is_pointer
+                                        && s.is_struct && s.prim == TypePrim::Named;
+                                    if is_struct_ptr { s.name.clone() } else { None }
+                                })
+                            });
+                        if let Some(cls) = cast_cls {
+                            if let Some(info) = class_infos.get(&name_flat(&cls)) {
+                                let mut cur = info.class_name.clone();
+                                loop {
+                                    let cflat = name_flat(&cur);
+                                    if let Some(ci) = class_infos.get(&cflat) {
+                                        if let Some(idx) = ci.method_names.iter().position(|n| n == &sel) {
+                                            vtable_class = Some(ci.class_name.clone());
+                                            effective_is_class = ci.is_class_methods[idx];
+                                            break;
+                                        }
+                                        match ci.super_name.clone() {
+                                            Some(sup) => cur = sup,
+                                            None => break,
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // If the receiver is a concrete class variable, use its type.
                 if vtable_class.is_none() {
                     if let AstExprData::VarRef { name, .. } = &receiver.data {
@@ -3921,7 +3993,7 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
                     bv.get_or_insert_with(std::collections::HashSet::new).insert(name.clone());
                 }
             }
-            let (var_type, init, is_static, _is_extern, is_const, is_block_qual, is_weak) = match &ad.data {
+            let (var_type, init, is_static, is_extern, is_const, is_block_qual, is_weak) = match &ad.data {
                 AstDeclData::Variable { var_type, init, is_static, is_extern, is_const, is_block_qual, is_weak, .. } => {
                     let vt = var_type.as_ref().map(|t| ast_type_to_c_str(t)).unwrap_or_else(|| "int".into());
                     let mut init_cg = init.as_ref().map(|i| Box::new(convert_expr(i, &class_infos)));
@@ -3984,7 +4056,7 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
             }
             result.push(CgDecl {
                 kind: CgDeclKind::Variable, name,
-                data: CgDeclData::Variable { var_type, init, is_static, is_const, is_weak, is_block: is_block_qual, next: next_decls },
+                data: CgDeclData::Variable { var_type, init, is_static, is_extern, is_const, is_weak, is_block: is_block_qual, next: next_decls },
                 attributes: ad.attributes.clone(),
 });
         }
@@ -4063,7 +4135,7 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
                 _ => (&Vec::new(), false),
             };
             if fields.is_empty() {
-                result.push(CgDecl { kind: CgDeclKind::Variable, name, data: CgDeclData::Variable { var_type: "void".into(), init: None, is_static: false, is_const: false, is_weak: false, is_block: false, next: vec![] }, attributes: Vec::new() });
+                result.push(CgDecl { kind: CgDeclKind::Variable, name, data: CgDeclData::Variable { var_type: "void".into(), init: None, is_static: false, is_extern: false, is_const: false, is_weak: false, is_block: false, next: vec![] }, attributes: Vec::new() });
             } else {
                 let mut fields_simple: Vec<(String, String, Vec<String>)> = Vec::new();
                 for f in fields {
@@ -4101,7 +4173,7 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
             result.push(CgDecl { kind: CgDeclKind::Enum, name, data: CgDeclData::Enum { members }, attributes: ad.attributes.clone() });
         }
         AstDeclKind::Class | AstDeclKind::Protocol => {
-            result.push(CgDecl { kind: CgDeclKind::Variable, name, data: CgDeclData::Variable { var_type: "void".into(), init: None, is_static: false, is_const: false, is_weak: false, is_block: false, next: vec![] }, attributes: Vec::new() });
+            result.push(CgDecl { kind: CgDeclKind::Variable, name, data: CgDeclData::Variable { var_type: "void".into(), init: None, is_static: false, is_extern: false, is_const: false, is_weak: false, is_block: false, next: vec![] }, attributes: Vec::new() });
         }
         AstDeclKind::Asm => {
             let (is_volatile, is_goto, template, outputs, inputs, clobbers, labels) = match &ad.data {
@@ -4119,7 +4191,7 @@ fn convert_decl(ad: &AstDecl, class_infos: &std::collections::BTreeMap<String, C
             result.push(CgDecl { kind: CgDeclKind::Asm, name: String::new(), data: CgDeclData::Asm { is_volatile, is_goto, template, outputs, inputs, clobbers, labels }, attributes: ad.attributes.clone() });
         }
         AstDeclKind::Ivar | AstDeclKind::Method | AstDeclKind::Property | AstDeclKind::Union | AstDeclKind::Namespace => {
-            result.push(CgDecl { kind: CgDeclKind::Variable, name, data: CgDeclData::Variable { var_type: "int".into(), init: None, is_static: false, is_const: false, is_weak: false, is_block: false, next: vec![] }, attributes: Vec::new() });
+            result.push(CgDecl { kind: CgDeclKind::Variable, name, data: CgDeclData::Variable { var_type: "int".into(), init: None, is_static: false, is_extern: false, is_const: false, is_weak: false, is_block: false, next: vec![] }, attributes: Vec::new() });
         }
         AstDeclKind::ForwardClass => {
             let names: Vec<String> = match &ad.data {
@@ -6575,6 +6647,25 @@ method_names: info.method_names,
     }
     CLASS_METHOD_METADATA.set(class_method_meta).unwrap();
 
+    // Class methods need their own table (see CLASS_METHOD_PARAMS): the one
+    // above holds instance methods only, so class-method sends found no
+    // parameter types and emitted their arguments uncast.
+    let mut class_method_params: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+    for cm in &classes {
+        let flat = name_flat(&cm.class_name);
+        let mut inner = HashMap::new();
+        for (j, mname) in cm.method_names.iter().enumerate() {
+            if cm.is_class_methods[j] {
+                let params = cm.method_params_list.get(j)
+                    .map(|p| p.iter().map(|(pt, _)| pt.clone()).collect::<Vec<_>>())
+                    .unwrap_or_else(|| vec!["NPClass *".into(), "SEL".into()]);
+                inner.insert(mname.clone(), params);
+            }
+        }
+        class_method_params.insert(flat, inner);
+    }
+    CLASS_METHOD_PARAMS.set(class_method_params).unwrap();
+
     // `no_arc` stays false here: this entry point feeds the header/prototype
     // paths, which never emit the ARC dealloc wrappers (that decision belongs
     // to the pipeline, which sets the flag on its own CgUnit).
@@ -7893,10 +7984,18 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
                 }
                 if let Some(suffix) = array_suffix { out.push_str(suffix); }
                 if let Some(i) = init {
-                    // When init has type NPObject * but decl_type is a subclass pointer,
-                    // add an explicit cast to avoid -Wincompatible-pointer-types.
-                    let needs_cast = decl_type.ends_with(" *") && decl_type != "NPObject *"
-                        && !is_block_type
+                    // A call initializer is cast to the DECLARED type whenever
+                    // that type is an object pointer. The checker has already
+                    // proved the assignment legal, so the cast is always safe —
+                    // and it is needed because the emitted statement-expression
+                    // takes its C type from the dispatched fn-ptr's return type,
+                    // which can differ from the declaration:
+                    //   `id a = [e keyPath];`  →  ({ ... (NPString *(*)(..))(..) ... })
+                    // `NPObject *` (the checker's fallback for an unresolved
+                    // return type) vs `NPString *` here. Excluding
+                    // `NPObject *` from this cast left exactly that case
+                    // warning (`incompatible pointer types initializing`).
+                    let needs_cast = decl_type.ends_with(" *") && !is_block_type
                         && matches!(i.data, CgExprData::Call { .. });
                     let needs_reverse_cast = decl_type == "NPObject *"
                         && i.type_str.as_ref().map_or(false, |t| t.ends_with(" *") && t != "NPObject *");
@@ -8031,7 +8130,7 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
                 out.push_str(";\n");
             }
         }
-        CgDeclData::Variable { var_type, init, is_static, is_const, is_block, next, .. } => {
+        CgDeclData::Variable { var_type, init, is_static, is_extern, is_const, is_block, next, .. } => {
             if *is_block {
                 let byref_name = format!("__jeti_byref_{}", d.name);
                 let _ = write!(out, "struct {} {{\n", byref_name);
@@ -8058,6 +8157,10 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
                 return;
             }
             emit_attrs_prefix(&d.attributes, out);
+            // `extern` is a declaration, not a definition: emitting it as a
+            // plain `char **environ;` created a zero-initialized tentative
+            // definition that shadowed libc's symbol.
+            if *is_extern { out.push_str("extern "); }
             if *is_static { out.push_str("static "); }
             if *is_const { out.push_str("const "); }
             // For block types like `int (^name)(int)` (and function-pointer
@@ -8170,8 +8273,12 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
             // typedef alias so that `GameState var;` (source uses typedef-enum
             // form `typedef enum {...} GameState;`) resolves. Without this,
             // C only sees `enum GameState` but not the bare `GameState` name,
-            // causing `unknown type name 'GameState'`.
-            let _ = write!(out, "typedef enum {} {};\n", d.name, d.name);
+            // causing `unknown type name 'GameState'`. An *anonymous* enum has
+            // no tag to alias, and emitting the alias anyway produced the
+            // invalid `typedef enum  ;`.
+            if !d.name.is_empty() {
+                let _ = write!(out, "typedef enum {} {};\n", d.name, d.name);
+            }
         }
     }
 }
@@ -8445,7 +8552,9 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
                 let _ = write!(out, "    {} = {}", m, v);
             }
             out.push_str("\n};\n");
-            let _ = write!(out, "typedef enum {} {};\n", decl.name, decl.name);
+            if !decl.name.is_empty() {
+                let _ = write!(out, "typedef enum {} {};\n", decl.name, decl.name);
+            }
         }
     }
     if unit.decls.iter().any(|d| matches!(d.data, CgDeclData::Enum { .. })) { out.push('\n'); }
@@ -8520,7 +8629,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     // File-level variable declarations (must precede function definitions)
     section_comment(&mut out, comments, "Section 7 · File-level variables");
     for decl in &unit.decls {
-        if let CgDeclData::Variable { ref var_type, ref init, is_static, is_const, is_block, .. } = decl.data {
+        if let CgDeclData::Variable { ref var_type, ref init, is_static, is_extern, is_const, is_block, .. } = decl.data {
             if is_block {
                 let byref_name = format!("__jeti_byref_{}", decl.name);
                 let _ = write!(out, "struct {} {{\n", byref_name);
@@ -8547,6 +8656,7 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
                 continue;
             }
             emit_attrs_prefix(&decl.attributes, &mut out);
+            if is_extern { out.push_str("extern "); }
             if is_static { out.push_str("static "); }
             if is_const { out.push_str("const "); }
             let is_block_type = var_type.contains("(^") || var_type.contains("(*");

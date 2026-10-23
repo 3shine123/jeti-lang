@@ -1,0 +1,158 @@
+#import <Foundation/NPCharacterSet.hje>
+#include <string.h>
+#include <stdlib.h>
+
+// Inclusive char-range → NPRange helper for the builtin sets. np_ prefix:
+// a bare name colliding with a system symbol silently dispatches wrong
+// (golden 14_uuid naming note). Plain scalar params — safe at file scope
+// (only BLOCK parameters get dropped by the file-level emitter).
+static NPRange np_char_range(unsigned char from, unsigned char to) {
+    NPRange r;
+    r.location = from;
+    r.length = (size_t)(to - from) + 1;
+    return r;
+}
+
+@implementation NPCharacterSet
+
+- (id)init {
+    self = [super init];
+    if (self) {
+        // 256-bit table, calloc'd — a fixed-size array ivar hits the codegen
+        // ivar boundary (NPUUID's two-u64 halves are the same precedent).
+        _flags = (unsigned char *)calloc(32, 1);
+    }
+    return self;
+}
+
+- (void)dealloc {
+    if (_flags) {
+        free(_flags);
+        _flags = NULL;
+    }
+    [super dealloc];
+}
+
+// Internal range primitives — every builtin set and the mutable API route
+// through these. Bit i of the table = character (char)i.
+- (void)np_addRange:(NPRange)range {
+    if (!_flags) return;
+    for (size_t i = 0; i < range.length; i++) {
+        size_t c = range.location + i;
+        if (c < 256) {
+            _flags[c >> 3] |= (unsigned char)(1u << (c & 7));
+        }
+    }
+}
+
+- (void)np_removeRange:(NPRange)range {
+    if (!_flags) return;
+    for (size_t i = 0; i < range.length; i++) {
+        size_t c = range.location + i;
+        if (c < 256) {
+            _flags[c >> 3] &= (unsigned char)~(1u << (c & 7));
+        }
+    }
+}
+
+- (BOOL)characterIsMember:(char)c {
+    if (!_flags) return 0;
+    unsigned char u = (unsigned char)c;
+    return (_flags[u >> 3] >> (u & 7)) & 1;
+}
+
++ (NPCharacterSet *)alphanumericCharacterSet {
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInRange:np_char_range('0', '9')];
+    [s addCharactersInRange:np_char_range('A', 'Z')];
+    [s addCharactersInRange:np_char_range('a', 'z')];
+    return s;
+}
+
++ (NPCharacterSet *)letterCharacterSet {
+    // ASCII letters — see the honest boundary in the header (NOT the Unicode
+    // letter category ObjC's version covers).
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInRange:np_char_range('A', 'Z')];
+    [s addCharactersInRange:np_char_range('a', 'z')];
+    return s;
+}
+
++ (NPCharacterSet *)decimalDigitCharacterSet {
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInRange:np_char_range('0', '9')];
+    return s;
+}
+
++ (NPCharacterSet *)whitespaceCharacterSet {
+    // ObjC's whitespace: space + tab (newline EXCLUDED — that's the
+    // whitespaceAndNewline variant).
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInRange:np_char_range(' ', ' ')];
+    [s addCharactersInRange:np_char_range('\t', '\t')];
+    return s;
+}
+
++ (NPCharacterSet *)whitespaceAndNewlineCharacterSet {
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInRange:np_char_range(' ', ' ')];
+    [s addCharactersInRange:np_char_range('\t', '\t')];
+    [s addCharactersInRange:np_char_range('\n', '\n')];
+    [s addCharactersInRange:np_char_range('\r', '\r')];
+    return s;
+}
+
++ (NPCharacterSet *)characterSetWithCharactersInString:(NPString *)str {
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInString:str];
+    return s;
+}
+
++ (NPCharacterSet *)characterSetWithRange:(NPRange)range {
+    NPMutableCharacterSet *s = [NPMutableCharacterSet characterSet];
+    [s addCharactersInRange:range];
+    return s;
+}
+
+@end
+
+@implementation NPMutableCharacterSet
+
++ (NPMutableCharacterSet *)characterSet {
+    return [[self alloc] init];
+}
+
+- (void)addCharactersInRange:(NPRange)range {
+    [self np_addRange:range];
+}
+
+- (void)removeCharactersInRange:(NPRange)range {
+    [self np_removeRange:range];
+}
+
+- (void)addCharactersInString:(NPString *)str {
+    if (!_flags || !str) return;
+    size_t n = [str length];
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)[str characterAtIndex:i];
+        _flags[c >> 3] |= (unsigned char)(1u << (c & 7));
+    }
+}
+
+- (void)removeCharactersInString:(NPString *)str {
+    if (!_flags || !str) return;
+    size_t n = [str length];
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)[str characterAtIndex:i];
+        _flags[c >> 3] &= (unsigned char)~(1u << (c & 7));
+    }
+}
+
+- (void)invert {
+    if (!_flags) return;
+    for (int i = 0; i < 32; i++) {
+        _flags[i] = (unsigned char)~_flags[i];
+    }
+}
+
+@end

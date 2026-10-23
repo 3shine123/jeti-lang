@@ -1,5 +1,6 @@
 #import <Foundation/NPArray.hje>
 #import <Foundation/NPString.hje>
+#import <Foundation/NPSortDescriptor.hje>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -119,8 +120,81 @@
 
 // `-copy` honors the ObjC convention: the caller owns the result (+1).
 // Returns an immutable NPArray even when invoked on a mutable subclass.
+- (NPArray *)sortedArrayUsingDescriptors:(NPArray *)descriptors {
+    // Nil/empty → unsorted copy (the container API's nil-tolerant stance).
+    if (!descriptors || [descriptors count] == 0) {
+        return [NPArray arrayWithObjects:_items count:_count];
+    }
+    NPArray *out = [NPArray arrayWithObjects:_items count:_count];
+    if (!out || out->_count < 2) { return out; }
+    size_t n = out->_count;
+    NPObject **buf = out->_items;
+    NPObject **scratch = (NPObject **)malloc(n * sizeof(NPObject *));
+    if (!scratch) { return out; }
+    // Same iterative bottom-up merge as sortedArrayUsingComparator:, but the
+    // comparison walks the descriptor array: first descriptor with a nonzero
+    // verdict wins; full ties → 0 (stable).
+    for (size_t width = 1; width < n; width *= 2) {
+        for (size_t lo = 0; lo < n; lo += 2 * width) {
+            size_t mid = lo + width < n ? lo + width : n;
+            size_t hi = lo + 2 * width < n ? lo + 2 * width : n;
+            size_t i = lo, j = mid, k = lo;
+            while (i < mid && j < hi) {
+                int r = 0;
+                for (size_t di = 0; di < [descriptors count]; di++) {
+                    NPSortDescriptor *sd = [descriptors objectAtIndex:di];
+                    r = [sd compareObject:buf[i] toObject:buf[j]];
+                    if (r != 0) { break; }
+                }
+                // Left-first on ties keeps the sort stable.
+                if (r <= 0) { scratch[k++] = buf[i++]; }
+                else { scratch[k++] = buf[j++]; }
+            }
+            while (i < mid) { scratch[k++] = buf[i++]; }
+            while (j < hi) { scratch[k++] = buf[j++]; }
+        }
+        for (size_t t = 0; t < n; t++) { buf[t] = scratch[t]; }
+    }
+    free(scratch);
+    return out;
+}
+
 - (id)copy {
     return jeti_retain([NPArray arrayWithObjects:_items count:_count]);
+}
+
+- (NPArray *)sortedArrayUsingComparator:(int (^)(id, id))cmp {
+    // Nil-tolerant: no comparator, no sort — an unsorted copy.
+    if (!cmp) {
+        return [NPArray arrayWithObjects:_items count:_count];
+    }
+    NPArray *out = [NPArray arrayWithObjects:_items count:_count];
+    if (!out || out->_count < 2) { return out; }
+    size_t n = out->_count;
+    NPObject **buf = out->_items;
+    NPObject **scratch = (NPObject **)malloc(n * sizeof(NPObject *));
+    if (!scratch) { return out; }
+    // Bottom-up stable merge, iterative — the whole sort lives in the method
+    // body because a file-scope C helper's BLOCK parameter is dropped by the
+    // file-level function emitter (the block-ivar drop's sibling); method
+    // bodies call block parameters fine (NPTimer precedent).
+    for (size_t width = 1; width < n; width *= 2) {
+        for (size_t lo = 0; lo < n; lo += 2 * width) {
+            size_t mid = lo + width < n ? lo + width : n;
+            size_t hi = lo + 2 * width < n ? lo + 2 * width : n;
+            size_t i = lo, j = mid, k = lo;
+            while (i < mid && j < hi) {
+                // Left-first on ties keeps the sort stable.
+                if (cmp(buf[i], buf[j]) <= 0) { scratch[k++] = buf[i++]; }
+                else { scratch[k++] = buf[j++]; }
+            }
+            while (i < mid) { scratch[k++] = buf[i++]; }
+            while (j < hi) { scratch[k++] = buf[j++]; }
+        }
+        for (size_t t = 0; t < n; t++) { buf[t] = scratch[t]; }
+    }
+    free(scratch);
+    return out;
 }
 
 - (NPString *)description {

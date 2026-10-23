@@ -1,0 +1,80 @@
+/* NPMutableOrderedSet golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * 语义全部 ObjC 对齐（NSMutableOrderedSet）：
+ *   A1 构造 + 首插序：initWithArray 去重保序；objectAtIndex/first/last/indexOf
+ *   A2 重加不移位：已有元素再 add，位置与计数都不动
+ *   A3 密集删除：removeObjectAtIndex / removeObject 尾部下移，索引连续
+ *   A4 定位插入：insertObject:atIndex: 新元素落位、其余后推；已存在 no-op
+ *   A5 交换：exchangeObjectsAtIndexes:and:；越界 no-op
+ *   A6 继承查询：count/containsObject/allObjects 走 NPSet 语义
+ * 期望输出（逐行 GOLDEN-MATCH）：A1 ok … A6 ok
+ */
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static int str_eq(NPString *s, const char *c) {
+    return s && strcmp([s UTF8String], c) == 0;
+}
+
+int main(void) {
+    /* A1 构造 + 首插序 */
+    NPMutableArray *arr = [NPMutableArray array];
+    [arr addObject:[NPString stringWithUTF8String:"a"]];
+    [arr addObject:[NPString stringWithUTF8String:"b"]];
+    [arr addObject:[NPString stringWithUTF8String:"c"]];
+    [arr addObject:[NPString stringWithUTF8String:"b"]];   /* 重复 */
+    NPMutableOrderedSet *mos = [NPMutableOrderedSet orderedSetWithArray:arr];
+    int a1 = [mos count] == 3
+        && str_eq([mos objectAtIndex:0], "a")
+        && str_eq([mos objectAtIndex:2], "c")
+        && str_eq([mos firstObject], "a")
+        && str_eq([mos lastObject], "c")
+        && [mos indexOfObject:[NPString stringWithUTF8String:"b"]] == 1;
+    printf("A1 %s\n", a1 ? "ok" : "FAIL");
+
+    /* A2 重加不移位 */
+    [mos addObject:[NPString stringWithUTF8String:"a"]];
+    int a2 = [mos count] == 3 && str_eq([mos objectAtIndex:0], "a")
+        && str_eq([mos firstObject], "a") && str_eq([mos lastObject], "c");
+    printf("A2 %s\n", a2 ? "ok" : "FAIL");
+
+    /* A3 密集删除 */
+    NPMutableOrderedSet *m3 = [NPMutableOrderedSet orderedSetWithArray:arr];
+    [m3 removeObjectAtIndex:1];                     /* 去 b → a c */
+    int a3 = [m3 count] == 2
+        && str_eq([m3 objectAtIndex:0], "a")
+        && str_eq([m3 objectAtIndex:1], "c")
+        && str_eq([m3 lastObject], "c");
+    [m3 removeObject:[NPString stringWithUTF8String:"a"]];  /* → c */
+    a3 = a3 && [m3 count] == 1 && str_eq([m3 firstObject], "c");
+    printf("A3 %s\n", a3 ? "ok" : "FAIL");
+
+    /* A4 定位插入 */
+    NPMutableOrderedSet *m4 = [NPMutableOrderedSet orderedSetWithArray:arr];
+    [m4 insertObject:[NPString stringWithUTF8String:"x"] atIndex:1];  /* a x b c */
+    int a4 = [m4 count] == 4
+        && str_eq([m4 objectAtIndex:1], "x")
+        && str_eq([m4 objectAtIndex:2], "b");
+    [m4 insertObject:[NPString stringWithUTF8String:"a"] atIndex:0];  /* 已存在 no-op */
+    a4 = a4 && [m4 count] == 4 && str_eq([m4 objectAtIndex:0], "a");
+    printf("A4 %s\n", a4 ? "ok" : "FAIL");
+
+    /* A5 交换 */
+    NPMutableOrderedSet *m5 = [NPMutableOrderedSet orderedSetWithArray:arr];
+    [m5 exchangeObjectsAtIndexes:0 and:2];          /* c b a */
+    int a5 = str_eq([m5 objectAtIndex:0], "c") && str_eq([m5 objectAtIndex:2], "a");
+    [m5 exchangeObjectsAtIndexes:0 and:99];         /* 越界 no-op */
+    a5 = a5 && str_eq([m5 objectAtIndex:0], "c");
+    printf("A5 %s\n", a5 ? "ok" : "FAIL");
+
+    /* A6 继承查询 */
+    int a6 = [m5 containsObject:[NPString stringWithUTF8String:"b"]]
+        && [m5 containsObject:[NPString stringWithUTF8String:"zzz"]] == 0
+        && [m5 count] == 3;
+    NPArray *all = [m5 allObjects];
+    a6 = a6 && [all count] == 3;
+    printf("A6 %s\n", a6 ? "ok" : "FAIL");
+    return 0;
+}

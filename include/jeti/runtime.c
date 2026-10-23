@@ -718,3 +718,78 @@ id jeti_kvc_value(id obj, const char *key) {
     }
     return NULL;
 }
+
+// ─── Process arguments (NPProcessInfo -arguments) ───────────────────────────
+// Read from the platform, not from `main`: jetic never synthesizes main, so a
+// library cannot otherwise see the program's arguments. Index 0 is the program
+// path, matching ObjC's NSProcessInfo.arguments.
+#if defined(__APPLE__)
+#include <crt_externs.h>
+int jeti_argc(void) {
+    return *_NSGetArgc();
+}
+const char *jeti_argv(int index) {
+    int n = *_NSGetArgc();
+    if (index < 0 || index >= n) return NULL;
+    return (*_NSGetArgv())[index];
+}
+#elif defined(__linux__)
+// /proc/self/cmdline holds the arguments NUL-separated. Split once into a
+// cached array; absent or unreadable (no procfs) leaves argc 0.
+static char  *jeti_argv_blob = NULL;
+static char **jeti_argv_ptrs = NULL;
+static int    jeti_argc_cache = 0;
+
+static void jeti_argv_load(void) {
+    if (jeti_argv_blob) return;
+    FILE *f = fopen("/proc/self/cmdline", "rb");
+    if (!f) return;
+    size_t cap = 4096, len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { fclose(f); return; }
+    for (;;) {
+        if (len + 1024 > cap) {
+            size_t ncap = cap * 2;
+            char *nb = (char *)realloc(buf, ncap);
+            if (!nb) break;
+            buf = nb;
+            cap = ncap;
+        }
+        size_t got = fread(buf + len, 1, cap - len, f);
+        if (got == 0) break;
+        len += got;
+    }
+    fclose(f);
+    if (len == 0) { free(buf); return; }
+    int n = 0;
+    for (size_t i = 0; i < len; i++) if (buf[i] == '\0') n++;
+    if (buf[len - 1] != '\0') n++;          // last entry unterminated
+    if (n == 0) { free(buf); return; }
+    char **ptrs = (char **)malloc(sizeof(char *) * (size_t)(n + 1));
+    if (!ptrs) { free(buf); return; }
+    int k = 0;
+    ptrs[k++] = buf;
+    for (size_t i = 0; i + 1 < len; i++) {
+        if (buf[i] == '\0') ptrs[k++] = buf + i + 1;
+    }
+    jeti_argv_blob = buf;
+    jeti_argv_ptrs = ptrs;
+    jeti_argc_cache = k;
+}
+
+int jeti_argc(void) {
+    jeti_argv_load();
+    return jeti_argc_cache;
+}
+
+const char *jeti_argv(int index) {
+    jeti_argv_load();
+    if (index < 0 || index >= jeti_argc_cache) return NULL;
+    return jeti_argv_ptrs[index];
+}
+#else
+// Documented platform gap (see the header): no capture path is wired up here,
+// so callers see an empty argument list rather than a guess.
+int jeti_argc(void) { return 0; }
+const char *jeti_argv(int index) { (void)index; return NULL; }
+#endif

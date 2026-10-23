@@ -31,6 +31,18 @@
 // container API takes.
 - (NPArray *)filteredArrayUsingPredicate:(NPPredicate *)pred;
 - (size_t)indexOfObjectMatchingPredicate:(NPPredicate *)pred;
+// Comparator sort (NSComparator shape: the block returns <0 / 0 / >0).
+// Stable merge sort — equal elements keep their relative order. A nil
+// comparator yields an unsorted copy (the nil-tolerant stance the rest of
+// this container API takes). No file-static state: the block travels as a
+// parameter end to end.
+- (NPArray *)sortedArrayUsingComparator:(int (^)(id, id))cmp;
+// Multi-key sort (NSSortDescriptor shape): descriptors earlier in the array
+// take precedence; a tie at one level falls through to the next; full ties
+// keep their relative order (stable). Descriptors compare via
+// compareObject:toObject: (direction already folded in there). A nil/empty
+// descriptor array returns an unsorted copy.
+- (NPArray *)sortedArrayUsingDescriptors:(NPArray *)descriptors;
 - (id)copy;
 - (NPString *)description;
 

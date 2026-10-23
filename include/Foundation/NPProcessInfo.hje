@@ -3,19 +3,33 @@
 
 #import <Foundation/NPObject.hje>
 #import <Foundation/NPString.hje>
+#import <Foundation/NPDictionary.hje>
+#import <Foundation/NPArray.hje>
+
+// 操作系统版本三元组（对应 ObjC 的 NSOperatingSystemVersion，字段名与含义
+// 逐一对齐：majorVersion 是 10.9.3 里的 10）。
+typedef struct {
+    long majorVersion;
+    long minorVersion;
+    long patchVersion;
+} NPROperatingSystemVersion;
 
 // NPProcessInfo — 进程环境信息（对应 ObjC 的 NSProcessInfo）。
 //
-// 边界：argc/argv 不在此重复暴露 —— Jeti 的 main 本来就是 C 的
-// `int main(int argc, char **argv)`，参数已在用户手里；本类补的是
-// 参数之外的环境事实。v1 全部为只读查询，无 processInfo 单例
-// 惰性缓存之外的状态。
+// 进程参数经**运行期钩子**读取（`jeti_argc`/`jeti_argv`，见 jeti/runtime.h）：
+// jetic 不合成 `main`（由用户书写），库内部无从拿到 `main` 的 argc/argv，所以改由
+// 运行期从平台侧捕获 —— Apple 用 `_NSGetArgv`，Linux 读 `/proc/self/cmdline`，
+// 其余平台为空（**文档化的平台差异**，不是静默猜值）。下标 0 是程序路径，与 ObjC
+// 的 NSProcessInfo.arguments 一致。
+// 除 `environment` 与 `arguments` 每次现查外，全部为只读查询，无单例缓存之外的状态。
 @interface NPProcessInfo : NPObject {
 @public
     // 无 ivar —— 每次查询直连 OS。
 }
 + (NPProcessInfo *)processInfo;                     // 共享单例
 - (int)processIdentifier;                           // getpid
+- (NPArray *)arguments;                             // 程序参数（[0] 为程序路径）
+- (NPDictionary *)environment;                      // 完整环境变量表
 - (NPString *)environmentVariable:(NPString *)name; // getenv；未设返回 nil
 - (int)setEnvironmentVariable:(NPString *)name value:(NPString *)value; // setenv；0=成功
 - (int)unsetEnvironmentVariable:(NPString *)name;
@@ -23,6 +37,16 @@
 - (NPString *)userName;                             // getenv USER/LOGNAME
 - (NPString *)operatingSystem;                      // uname -s
 - (NPString *)machine;                              // uname -m
+// 全局唯一串。形状对齐 ObjC（clang 探针实测 `<UUID 大写>-<pid>-<16 位十六进制>`）；
+// 具体值每次不同是契约本身（唯一性），对齐的是可解析的形状。
+- (NPString *)globallyUniqueString;
+// OS 版本。Apple 平台取 `kern.osproductversion`；其余平台退化为 `uname -r`
+// 的内核版本（文档化的差异，不是静默降级）。
+- (NPROperatingSystemVersion)operatingSystemVersion;
+- (BOOL)isOperatingSystemAtLeastVersion:(NPROperatingSystemVersion)version;
+// 形如 `Version 27.2 (Build 26B5101f)`；取不到 build 时退化为
+// `Version M.m.p`（Apple 平台才有 build 串）。
+- (NPString *)operatingSystemVersionString;
 @end
 
 #endif

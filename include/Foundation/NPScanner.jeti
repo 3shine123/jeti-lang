@@ -1,0 +1,244 @@
+#import <Foundation/NPScanner.hje>
+#include <string.h>
+#include <stdlib.h>
+
+@implementation NPScanner
+
+- (id)initWithString:(NPString *)str {
+    self = [super init];
+    if (self) {
+        // Strong hold: the scanned string outlives the scanner.
+        _scanString = str ? (NPString *)jeti_retain(str) : NULL;
+        _scanLocation = 0;
+        // ObjC default: whitespace + newlines are skipped before every scan.
+        _skipSet = (NPCharacterSet *)jeti_retain([NPCharacterSet whitespaceAndNewlineCharacterSet]);
+    }
+    return self;
+}
+
+- (void)dealloc {
+    if (_scanString) {
+        jeti_release(_scanString);
+        _scanString = NULL;
+    }
+    if (_skipSet) {
+        jeti_release(_skipSet);
+        _skipSet = NULL;
+    }
+    [super dealloc];
+}
+
++ (NPScanner *)scannerWithString:(NPString *)str {
+    return [[self alloc] initWithString:str];
+}
+
+- (NPString *)string {
+    return _scanString;
+}
+
+- (size_t)scanLocation {
+    return _scanLocation;
+}
+
+- (void)setScanLocation:(size_t)loc {
+    size_t n = _scanString ? [_scanString length] : 0;
+    _scanLocation = loc <= n ? loc : n;
+}
+
+- (void)setCharactersToBeSkipped:(NPCharacterSet *)set {
+    if (_skipSet) {
+        jeti_release(_skipSet);
+    }
+    // nil disables skipping (ObjC-aligned).
+    _skipSet = set ? (NPCharacterSet *)jeti_retain(set) : NULL;
+}
+
+- (BOOL)isAtEnd {
+    size_t n = _scanString ? [_scanString length] : 0;
+    return _scanLocation >= n;
+}
+
+// Consume the skip set from the current position.
+- (void)np_skip {
+    if (!_skipSet || !_scanString) return;
+    size_t n = [_scanString length];
+    while (_scanLocation < n
+           && [_skipSet characterIsMember:[_scanString characterAtIndex:_scanLocation]]) {
+        _scanLocation++;
+    }
+}
+
+// Sign + digit run from the current position (skip set already consumed).
+// Returns the character count consumed via sign/digits (0 = no digits).
+- (size_t)np_scanNumber:(long long *)outInt dbl:(double *)outDouble {
+    if (!_scanString) return 0;
+    size_t n = [_scanString length];
+    size_t pos = _scanLocation;
+    int neg = 0;
+    if (pos < n && ([_scanString characterAtIndex:pos] == '-' || [_scanString characterAtIndex:pos] == '+')) {
+        neg = [_scanString characterAtIndex:pos] == '-';
+        pos++;
+    }
+    size_t digits = 0;
+    double d = 0;
+    while (pos < n) {
+        char c = [_scanString characterAtIndex:pos];
+        if (c < '0' || c > '9') { break; }
+        d = d * 10 + (c - '0');
+        pos++;
+        digits++;
+    }
+    if (digits == 0) return 0;
+    if (outInt) { *outInt = (long long)(neg ? -d : d); }
+    if (outDouble) { *outDouble = neg ? -d : d; }
+    return pos - _scanLocation;
+}
+
+- (BOOL)scanInt:(int *)out {
+    [self np_skip];
+    long long v = 0;
+    size_t used = [self np_scanNumber:&v dbl:NULL];
+    if (used == 0) return 0;
+    _scanLocation += used;
+    if (out) { *out = (int)v; }
+    return 1;
+}
+
+- (BOOL)scanLongLong:(long long *)out {
+    [self np_skip];
+    long long v = 0;
+    size_t used = [self np_scanNumber:&v dbl:NULL];
+    if (used == 0) return 0;
+    _scanLocation += used;
+    if (out) { *out = v; }
+    return 1;
+}
+
+- (BOOL)scanDouble:(double *)out {
+    [self np_skip];
+    // Integral part first, then the optional .fraction tail.
+    double v = 0;
+    size_t used = [self np_scanNumber:NULL dbl:&v];
+    if (used == 0) return 0;
+    size_t pos = _scanLocation + used;
+    size_t n = _scanString ? [_scanString length] : 0;
+    if (pos + 1 < n && [_scanString characterAtIndex:pos] == '.') {
+        // Consume fraction digits from pos+1; the '.' itself is only eaten
+        // when at least one digit follows (the first draft jumped it and the
+        // leading digit together — "3.5" scanned as 3.0).
+        size_t fpos = pos + 1;
+        double frac = 0, scale = 0.1;
+        int fdigits = 0;
+        while (fpos < n) {
+            char c = [_scanString characterAtIndex:fpos];
+            if (c < '0' || c > '9') { break; }
+            frac += (c - '0') * scale;
+            scale *= 0.1;
+            fpos++;
+            fdigits++;
+        }
+        if (fdigits > 0) {
+            v += frac;
+            used = fpos - _scanLocation;
+        }
+    }
+    _scanLocation += used;
+    if (out) { *out = v; }
+    return 1;
+}
+
+- (BOOL)scanCharactersFromSet:(NPCharacterSet *)set intoString:(NPString **)out {
+    [self np_skip];
+    if (!set || !_scanString) return 0;
+    size_t n = [_scanString length];
+    size_t start = _scanLocation;
+    size_t pos = start;
+    while (pos < n && [set characterIsMember:[_scanString characterAtIndex:pos]]) {
+        pos++;
+    }
+    if (pos == start) return 0;   // no members consumed — no advance
+    _scanLocation = pos;
+    if (out) {
+        // The CONSUMED prefix, not the tail (substringFromIndex: is the tail).
+        NPRange r;
+        r.location = start;
+        r.length = pos - start;
+        *out = [_scanString substringWithRange:r];
+    }
+    return 1;
+}
+
+- (BOOL)scanUpToCharactersFromSet:(NPCharacterSet *)set intoString:(NPString **)out {
+    [self np_skip];
+    if (!set || !_scanString) return 0;
+    size_t n = [_scanString length];
+    size_t start = _scanLocation;
+    size_t pos = start;
+    while (pos < n && ![set characterIsMember:[_scanString characterAtIndex:pos]]) {
+        pos++;
+    }
+    if (pos == start) return 0;   // stopped immediately — no advance
+    _scanLocation = pos;
+    if (out) {
+        NPRange r;
+        r.location = start;
+        r.length = pos - start;
+        *out = [_scanString substringWithRange:r];
+    }
+    return 1;
+}
+
+- (BOOL)scanUpToString:(NPString *)stop intoString:(NPString **)out {
+    [self np_skip];
+    if (!stop || !_scanString) return 0;
+    // v1 needle search: byte-wise (n, m are small in scanner workloads).
+    size_t n = [_scanString length];
+    size_t m = [stop length];
+    if (m == 0) return 0;
+    const char *hay = [_scanString UTF8String];
+    const char *needle = [stop UTF8String];
+    if (!hay || !needle) return 0;
+    size_t start = _scanLocation;
+    for (size_t pos = start; pos + m <= n; pos++) {
+        if (memcmp(hay + pos, needle, m) == 0) {
+            if (pos == start) return 0;   // stop string right here — no advance
+            _scanLocation = pos;
+            if (out) {
+                NPRange r;
+                r.location = start;
+                r.length = pos - start;
+                *out = [_scanString substringWithRange:r];
+            }
+            return 1;
+        }
+    }
+    // ObjC-aligned: a stop string that never appears consumes to the END of
+    // the string and succeeds (NSScanner's documented behavior). Nothing left
+    // to consume → fail without advancing.
+    if (start >= n) return 0;
+    _scanLocation = n;
+    if (out) {
+        NPRange r;
+        r.location = start;
+        r.length = n - start;
+        *out = [_scanString substringWithRange:r];
+    }
+    return 1;
+}
+
+- (BOOL)scanString:(NPString *)literal intoString:(NPString **)out {
+    [self np_skip];
+    if (!literal || !_scanString) return 0;
+    size_t m = [literal length];
+    if (m == 0) return 0;
+    const char *hay = [_scanString UTF8String];
+    const char *needle = [literal UTF8String];
+    size_t n = hay ? strlen(hay) : 0;
+    if (_scanLocation + m > n) return 0;
+    if (memcmp(hay + _scanLocation, needle, m) != 0) return 0;
+    _scanLocation += m;
+    if (out) { *out = literal; }
+    return 1;
+}
+
+@end

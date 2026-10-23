@@ -15,11 +15,12 @@ int main(void) {
     NPNotificationCenter *nc = [NPNotificationCenter defaultCenter];
     NPObject *token = [[NPObject alloc] init];
     [nc addObserver:token forName:[NPString stringWithUTF8String:"evt"] object:NULL
-         usingBlock:^(NPString *name, id object) {
-            printf("got=%s ", [(NPString *)object UTF8String]);
+         usingBlock:^(NPNotification *note) {
+            id payload = [note object];
+            printf("got=%s ", [(NPString *)payload UTF8String]);
         }];
     [nc addObserver:NULL forName:NULL object:NULL
-         usingBlock:^(NPString *name, id object) {
+         usingBlock:^(NPNotification *note) {
             printf("wildcard ");
         }];
     printf("notify=n=%zu ", [nc observerCount]);
