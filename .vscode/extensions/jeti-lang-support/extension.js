@@ -199,6 +199,20 @@ function toHover(hover) {
   return new vscode.Hover(new vscode.MarkdownString(markdown), range);
 }
 
+/** LSP `InlayHint[]` → VS Code's `InlayHint[]` (gray, hover-less). */
+function toInlayHints(hints) {
+  return (hints || []).map((hint) => {
+    const converted = new vscode.InlayHint(
+      new vscode.Position(hint.position.line, hint.position.character),
+      hint.label,
+    );
+    // LSP InlayHintKind: 1 = Parameter, 2 = Type.
+    if (hint.kind === 2) converted.kind = vscode.InlayHintKind.Type;
+    else if (hint.kind === 1) converted.kind = vscode.InlayHintKind.Parameter;
+    return converted;
+  });
+}
+
 /** LSP `CompletionItem[]` → VS Code's `CompletionItem[]`. */
 function toCompletionItems(items) {
   return (items || []).map((item) => {
@@ -365,6 +379,20 @@ function restart() {
         return (await client.documentLinks(document.uri.toString()))
           .filter((link) => link?.target)
           .map((link) => new vscode.DocumentLink(toRange(link.range), vscode.Uri.parse(link.target)));
+      },
+    }),
+    // Gray, hover-less hints over the source (clangd's parameter/type inlays).
+    // The server advertises `inlayHintProvider`, but a custom client must bridge
+    // the request itself — without this registration VS Code never asks and the
+    // editor shows nothing, however many hints the server would return.
+    vscode.languages.registerInlayHintsProvider(LANGUAGE_ID, {
+      provideInlayHints: async (document, range) => {
+        if (!client) return [];
+        const hints = await client.inlayHints(document.uri.toString(), {
+          start: { line: range.start.line, character: range.start.character },
+          end: { line: range.end.line, character: range.end.character },
+        });
+        return toInlayHints(hints);
       },
     }),
     vscode.workspace.onDidOpenTextDocument((document) => {

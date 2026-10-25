@@ -110,9 +110,21 @@ fn poison_top_guard(cond_stack: &mut Vec<CondFrame>, c_out: &mut Vec<String>) {
     if let Some(frame) = cond_stack.last_mut() {
         if frame.guard_name.is_some() || frame.pending_define.is_some() {
             frame.dirty = true;
-            frame.guard_name = None;
+            let guard = frame.guard_name.take();
             if let Some(def) = frame.pending_define.take() {
-                c_out.push(def.trim().to_string());
+                // A guard candidate turns out to have content, so the guard
+                // directives are flattened away — but the companion
+                // `#define NAME` of `#ifndef NAME` must NOT be re-emitted bare.
+                // It is a marker, not a macro: on its own it makes a *re-emitted*
+                // guarded definition (`#ifndef NAME` around the same struct)
+                // skip itself and leave an incomplete type. A valued define is a
+                // real macro and still comes through.
+                let own_marker = guard
+                    .as_deref()
+                    .is_some_and(|g| def.trim() == format!("#define {}", g));
+                if !own_marker {
+                    c_out.push(def.trim().to_string());
+                }
             }
         }
     }
@@ -1009,6 +1021,34 @@ mod directive_tests {
         let e = run("#if 0\nA\n").unwrap_err();
         assert!(e.contains("unterminated conditional"), "got: {e}");
         assert_eq!(body("#if 1\nA\n#endif\n"), "A");
+    }
+
+    #[test]
+    fn a_guard_marker_is_not_re_emitted_bare() {
+        // `#ifndef NAME / #define NAME / <content> / #endif` cannot keep its
+        // guard — the content lives on the jeti track while `c_out` is a
+        // separate stream — but the companion `#define NAME` must NOT survive
+        // alone: a bare marker makes a re-emitted `#ifndef NAME` around the
+        // same struct skip itself and leave an incomplete type.
+        let p = Preprocessor::process(
+            "#ifndef FOO_DEFINED\n#define FOO_DEFINED\nstruct Foo { int a; };\n#endif\n",
+            "t.jeti", &[], &[],
+        ).expect("resolve");
+        assert!(
+            !p.c_headers.iter().any(|l| l.trim() == "#define FOO_DEFINED"),
+            "bare guard marker leaked into the C output: {:?}",
+            p.c_headers,
+        );
+        // A valued define is a real macro, not a marker — it still comes through.
+        let p = Preprocessor::process(
+            "#ifndef BAR\n#define BAR 42\nstruct Bar { int b; };\n#endif\n",
+            "t.jeti", &[], &[],
+        ).expect("resolve");
+        assert!(
+            p.c_headers.iter().any(|l| l.trim() == "#define BAR 42"),
+            "a valued define must survive: {:?}",
+            p.c_headers,
+        );
     }
 
     #[test]

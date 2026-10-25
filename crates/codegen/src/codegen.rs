@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::collections::HashMap;
 use jeti_ast::*;
-use jeti_cst::{TypePrim, CstParam};
+use jeti_cst::{TypePrim, CstParam, TagKind};
 use jeti_cst::source_map::SourceMap;
 use attrs::Backend;
 
@@ -610,6 +610,9 @@ pub enum CgExprKind {
     Unary, Binary, Assign, Cast,
     Call, Comma, Paren, Member, Arrow, Index, Ternary,
     InitList, DesignatedInit, BlockLit, TypeLiteral,
+    /// Pre-rendered C text emitted verbatim — statement expressions `({ ... })`,
+    /// whose body statements are converted and rendered ahead of time.
+    Raw,
 }
 
 #[derive(Debug, Clone)]
@@ -654,6 +657,8 @@ pub enum CgExprData {
     BlockLit(BlockLiteralData),
     Sizeof { type_str: String, is_alignof: bool },
     TypeLiteral(String),
+    /// Verbatim C text (statement-expression bodies).
+    Raw(String),
 }
 
 /// One link of a C99 designated-initializer designator chain: `.field` / `[index]`.
@@ -1319,6 +1324,15 @@ fn mangle_one_arg(arg: &str) -> String {
 }
 
 fn cst_type_to_c_str(ct: &jeti_cst::CstType) -> String {
+    // Anonymous inline struct/union — see `ast_type_to_c_str` above.
+    if let Some(ref body) = ct.anon_struct_body {
+        let tag = match ct.tag {
+            TagKind::Union => "union",
+            TagKind::Enum => "enum",
+            _ => "struct",
+        };
+        return format!("{} {}", tag, body);
+    }
     if ct.is_fn_ptr {
         let ret = ct.subtype.as_ref().map(|s| cst_type_to_c_str(s)).unwrap_or_else(|| "void".into());
         let mut params = String::new();
@@ -1329,6 +1343,11 @@ fn cst_type_to_c_str(ct: &jeti_cst::CstType) -> String {
             bp = b.next.as_ref();
         }
         if params.is_empty() { params.push_str("void"); }
+        // `int (*fp)(int, ...)`: the ellipsis is part of the TYPE, and the cast
+        // must stay signature-exact (AGENTS.md iron law 6).
+        if ct.is_variadic {
+            params = if ct.block_params.is_none() { "...".into() } else { format!("{params}, ...") };
+        }
         if let Some(ref name) = ct.block_name {
             return format!("{} (*{})({})", ret, name, params);
         }
@@ -1425,6 +1444,17 @@ fn cst_type_to_c_str(ct: &jeti_cst::CstType) -> String {
 }
 
 pub fn ast_type_to_c_str(t: &AstType) -> String {
+    // An anonymous inline struct/union (`static struct { … } t[N];`): there is
+    // no tag to name, so re-emit the body verbatim. Without this the type
+    // rendered as `int` and every field access on it failed to compile.
+    if let Some(ref body) = t.anon_struct_body {
+        let tag = match t.tag {
+            TagKind::Union => "union",
+            TagKind::Enum => "enum",
+            _ => "struct",
+        };
+        return format!("{} {}", tag, body);
+    }
     if t.is_fn_ptr {
         let ret = t.subtype.as_ref().map(|s| ast_type_to_c_str(s)).unwrap_or_else(|| "void".into());
         let mut params = String::new();
@@ -1435,6 +1465,10 @@ pub fn ast_type_to_c_str(t: &AstType) -> String {
             bp = b.next.as_ref();
         }
         if params.is_empty() { params.push_str("void"); }
+        // `int (*fp)(int, ...)` — see the CST arm above.
+        if t.is_variadic {
+            params = if t.block_params.is_none() { "...".into() } else { format!("{params}, ...") };
+        }
         if let Some(ref name) = t.block_name {
             // Function pointer array: `int (*row[4])(int)`
             if t.is_array {
@@ -1704,6 +1738,30 @@ fn render_callee_expr(ae: &AstExpr) -> String {
                 format!("{}.{}", obj_str, name)
             }
         }
+        // A parenthesized receiver: `(v).m`, `(v)->m`. The Paren wraps the
+        // object, so without this arm the object rendered empty and the whole
+        // call collapsed to a bare `(args)` — silent miscompile.
+        AstExprData::Paren(inner) => format!("({})", render_callee_expr(inner)),
+        // A prefix-operator receiver: `(&v)->m`, `(*p).m`, …. Parenthesized so
+        // it composes as an object (`(&v)->m`) and as a call target
+        // (`(&f)(x)` — `&` binds looser than the call, so the parens matter).
+        AstExprData::Unary { op, operand, .. } => {
+            let op_str = match op {
+                1 => "++", 2 => "--", 3 => "*", 4 => "&", 5 => "-", 6 => "+", 7 => "~", 8 => "!",
+                _ => "?",
+            };
+            format!("({}{})", op_str, render_callee_expr(operand))
+        }
+        // A cast receiver: `((struct V *)p)->m`. Parenthesized for the same
+        // reason — as a call target it must read `((T)x->m)(args)`, never
+        // `(T)x->m(args)` (which casts the call result instead).
+        AstExprData::Cast { target_type, expr } => {
+            format!("(({}){})", ast_type_to_c_str(target_type), render_callee_expr(expr))
+        }
+        // An indexed receiver: `fns[i](args)`.
+        AstExprData::Subscript { object, key } => {
+            format!("{}[{}]", render_callee_expr(object), render_callee_expr(key))
+        }
         _ => String::new(),
     }
 }
@@ -1860,6 +1918,17 @@ fn convert_expr(ae: &AstExpr, class_infos: &std::collections::BTreeMap<String, C
         // passthrough safety net (`-fno-checker`): treat it as its inner
         // expression, which is what a boxing-free reading of the source means.
         AstExprData::Boxed(inner) => convert_expr(inner, class_infos),
+        // `({ ... })` statement expression: CgExpr has no statement slot, so
+        // the body statements are converted and rendered to C text up front.
+        AstExprData::StmtExpr(body) => {
+            let mut inner = String::new();
+            for s in body {
+                let cs = convert_stmt(s, class_infos);
+                emit_stmt_inline(&cs, &mut inner);
+                inner.push(' ');
+            }
+            CgExpr { kind: CgExprKind::Raw, type_str, line, col, data: CgExprData::Raw(format!("({{ {} }})", inner.trim_end())) }
+        }
         AstExprData::Int(val) => CgExpr { kind: CgExprKind::Int, type_str, line, col, data: CgExprData::Int(*val) },
         AstExprData::Float(val) => CgExpr { kind: CgExprKind::Float, type_str, line, col, data: CgExprData::Float(*val) },
         AstExprData::FloatRaw(raw) => CgExpr { kind: CgExprKind::Float, type_str, line, col, data: CgExprData::FloatRaw(raw.clone()) },
@@ -3256,6 +3325,22 @@ fn convert_stmt(as_: &AstStmt, class_infos: &std::collections::BTreeMap<String, 
             }
             let decls = convert_decl(d, &class_infos);
             if let Some(decl_cg) = decls.into_iter().next() {
+                // A type definition in statement position (`struct X { … };`
+                // inside a function body) must emit the definition itself.
+                // Falling through to the empty-`return` arm dropped it, so the
+                // following `struct X x;` became an incomplete type.
+                if matches!(
+                    &decl_cg.data,
+                    CgDeclData::Struct { .. } | CgDeclData::Typedef { .. } | CgDeclData::Enum { .. }
+                ) {
+                    let mut text = String::new();
+                    emit_decl(&decl_cg, &mut text);
+                    return CgStmt {
+                        kind: CgStmtKind::Decl,
+                        line, col,
+                        data: CgStmtData::RawLine(text.trim_end().to_string()),
+                    };
+                }
                 match decl_cg.data {
                     CgDeclData::Variable { var_type, init, is_static, is_weak, is_block, next, .. } => {
                         let (decl_type, array_suffix) = if let Some(pos) = var_type.find('[') {
@@ -4445,6 +4530,19 @@ fn emit_aggregate_definitions(unit: &CgUnit, out: &mut String) -> bool {
         defs.iter().enumerate().map(|(i, d)| (d.decl_idx, i)).collect();
 
     fn emit_agg_def(d: &AggDef, out: &mut String) {
+        // `jeti_root` / `NPObject` are also defined by `jeti/runtime.h`, behind
+        // these macros. Re-emit the guard around a *parsed* definition too, or a
+        // re-processed file collides with the header it includes (the source
+        // guard is a preprocessor line, so it does not survive re-emission).
+        let guard = match d.tag.as_str() {
+            "jeti_root" => Some("JETI_ROOT_DEFINED"),
+            "NPObject" => Some("NPOBJECT_DEFINED"),
+            _ => None,
+        };
+        if let Some(g) = guard {
+            let _ = writeln!(out, "#ifndef {}", g);
+            let _ = writeln!(out, "#define {}", g);
+        }
         if d.is_typedef {
             out.push_str("typedef ");
             emit_attrs_prefix(&d.attributes, out);
@@ -4461,6 +4559,9 @@ fn emit_aggregate_definitions(unit: &CgUnit, out: &mut String) -> bool {
             out.push_str("}");
             emit_attrs_prefix(&d.attributes, out);
             out.push_str(";\n");
+        }
+        if guard.is_some() {
+            out.push_str("#endif\n");
         }
     }
 
@@ -4559,6 +4660,15 @@ fn format_param_decl(pt: &str, pn: &str) -> String {
     } else if let Some(block_pos) = pt.find("(^") {
         let before = &pt[..block_pos + 2];
         let after = &pt[block_pos + 2..];
+        format!("{}{}{}", before, pn, after)
+    } else if let Some(fn_pos) = pt.find("(*") {
+        // Function-pointer declarator: same splice rationale as the block
+        // branch — the declarator name lives INSIDE the parens (`int (*cb)(int)`),
+        // never after the type. The parser now carries the name in CstParam.name
+        // (adopted from block_name so the checker binds it); without this branch
+        // the name was appended after the type: `int (*)(int) cb` — invalid C.
+        let before = &pt[..fn_pos + 2];
+        let after = &pt[fn_pos + 2..];
         format!("{}{}{}", before, pn, after)
     } else {
         let (base, arr_suffix) = split_array_type(pt);
@@ -6777,6 +6887,10 @@ fn rewrite_block_var_refs(unit: &mut CgUnit) {
             CgExprData::Index { arr, index } => { rewrite_expr(arr, bv); rewrite_expr(index, bv); }
             CgExprData::Ternary { cond, then, else_ } => { rewrite_expr(cond, bv); rewrite_expr(then, bv); rewrite_expr(else_, bv); }
             CgExprData::InitList(elements) => { for e in elements { rewrite_expr(e, bv); } }
+            // A parenthesized use — `(weakref != NULL)` — must be descended
+            // into too. Without this arm the rewrite stopped at the parens and
+            // left the byref cell compared against NULL (a struct vs pointer).
+            CgExprData::Paren(inner) => rewrite_expr(inner, bv),
             CgExprData::BlockLit(data) => {
                 if let Some(ref mut body) = data.body {
                     rewrite_stmt(body, bv);
@@ -7158,6 +7272,7 @@ fn emit_expr(e: &CgExpr, out: &mut String) {
             let _ = write!(out, "'{}'", escaped);
         }
         CgExprData::Ident(s) => { out.push_str(s); }
+        CgExprData::Raw(s) => { out.push_str(s); }
         CgExprData::Unary { op_str, operand, is_postfix } => {
             if *is_postfix {
                 out.push('(');
@@ -8162,7 +8277,9 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
             // definition that shadowed libc's symbol.
             if *is_extern { out.push_str("extern "); }
             if *is_static { out.push_str("static "); }
-            if *is_const { out.push_str("const "); }
+            // `convert_decl` folds the decl-level `const` into the spelled type
+            // (`const SEL`), so adding it again here produced `const const`.
+            if *is_const && !var_type.starts_with("const ") { out.push_str("const "); }
             // For block types like `int (^name)(int)` (and function-pointer
             // types like `void (*cb)(...)`), the variable name is already
             // inside the type
@@ -8658,7 +8775,9 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             emit_attrs_prefix(&decl.attributes, &mut out);
             if is_extern { out.push_str("extern "); }
             if is_static { out.push_str("static "); }
-            if is_const { out.push_str("const "); }
+            // See the statement-level emitter: the decl-level `const` is already
+            // folded into `var_type`.
+            if is_const && !var_type.starts_with("const ") { out.push_str("const "); }
             let is_block_type = var_type.contains("(^") || var_type.contains("(*");
             if is_block_type {
                 out.push_str(var_type);
@@ -9385,10 +9504,16 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     // (ARC dealloc wrappers are computed and emitted above, before Section 11:
     // both the owned-class static definitions and jeti_metaInit reference them.)
 
-    // jeti_metaInit() — always emitted (weak, empty when the unit has no
-    // classes): hand-written `main` naturally calls jeti_meta_init(), and a
-    // class-less TU must still link.
-    {
+    // jeti_metaInit() — emitted (weak, empty when the unit has no classes):
+    // hand-written `main` naturally calls jeti_meta_init(), and a class-less TU
+    // must still link. Skipped when the source already carries one — re-processing
+    // jeti's own generated C sees that definition as ordinary source, and a
+    // second copy is a hard redefinition.
+    let source_defines_meta_init = unit.decls.iter().any(|d| {
+        matches!(d.data, CgDeclData::Function { .. })
+            && (d.name == "jeti_metaInit" || d.name == "jeti_meta_init")
+    });
+    if !source_defines_meta_init {
         out.push_str(&format!("{}void jeti_metaInit(void) {{\n", meta_weak));
         for cm in &unit.classes {
             let _ = write!(out, "    {} = (NPClass){{\n", meta_symbol("CLASS_", &name_flat(&cm.class_name)));

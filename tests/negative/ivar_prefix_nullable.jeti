@@ -1,0 +1,32 @@
+// ivar 位前置 nullability 负例 —— parser 必须响亮拒绝。
+//
+// 基准（2026-10-24，host clang 实测，/tmp/ivar_probe_*.m）：
+//   - ivar 位只收后置拼法：`NSString * _Nullable x;` 编译通过（v1/v3）
+//   - 前置裸拼法 `nullable NSString *x;` → error: unknown type name
+//     'nullable'（v2；-E 证实该位置词法不展开，是关键字位置问题非宏问题）
+//   - 前置下划线 `_Nullable NSString *x;` → error: nullability specifier
+//     '_Nullable' cannot be applied to non-pointer type（v7）
+//   - 星号后裸拼法 `NSString * nullable x;` → error: expected ';'（v10，
+//     clang 把裸拼法当 ivar 名读）
+//   - 方法位不受影响：`(nullable NSString *)s` 通过（v5）
+//
+// jeti 行为：ivar 位前置形式（两种拼法）报一条定向错误、箭头指到注解词，
+// 并指到后置拼法；声明继续恢复解析（注解语义保留给 checker），无级联误报。
+// 本文件不进 test_all 运行器（negative 目录被跳过）；断言入口是 cargo 单测
+// crates/parser/tests/nullability_probe.rs（ivar_prefix_* / ivar_postfix_* /
+// ivar_region_default_* / c_struct_field_named_nullable_still_parses）。
+#import <Foundation/Foundation.hje>
+
+@interface Probe {
+    // error: nullability annotations in ivar declarations must follow the pointer
+    nullable NPString *preBare;
+    // error: nullability annotations in ivar declarations must follow the pointer
+    _Nullable NPString *preUnderscore;
+    NPString * _Nullable postOK;   // 合法：后置拼法
+}
+@end
+
+@implementation Probe
+@end
+
+int main(void) { return 0; }

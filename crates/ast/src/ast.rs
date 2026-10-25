@@ -37,6 +37,14 @@ pub struct AstType {
     /// Nullability annotation, carried through from `CstType` for the checker.
     /// Codegen never reads it (zero runtime cost, same contract as ObjC).
     pub nulls: Nullability,
+    /// Anonymous inline struct/union body, as raw source text (`{ … }`), for a
+    /// type spelled `struct { … }` directly in a declaration. Codegen re-emits
+    /// it verbatim; without it the type collapsed to `int` and every field
+    /// access on it was rejected by the C compiler.
+    pub anon_struct_body: Option<String>,
+    /// Function-pointer type whose parameter list ends in `...` — see
+    /// [`jeti_cst::CstType::is_variadic`]. Codegen must emit the ellipsis.
+    pub is_variadic: bool,
 }
 
 impl AstType {
@@ -49,6 +57,8 @@ impl AstType {
             class_ref: None, protocol_ref: None, protocol_refs: Vec::new(),
             array_size_name: None,
             nulls: Nullability::Unspecified,
+            anon_struct_body: None,
+            is_variadic: false,
         }
     }
 
@@ -158,6 +168,10 @@ pub enum AstExprKind {
     /// `NPNumber` factory matching the expression's static type; a codegen
     /// fallback arm keeps `-fno-checker` from emitting bad C.
     Boxed,
+    /// GNU C statement expression `({ stmts...; value; })` — the EH backend
+    /// emits one per caught evaluation. The value is the last expression
+    /// statement of the body.
+    StmtExpr,
 }
 
 #[derive(Debug, Clone)]
@@ -242,6 +256,9 @@ pub enum AstExprData {
     /// `@(expr)` — the boxed expression, before the checker rewrites it into
     /// the `NPNumber` factory matching its static type.
     Boxed(Box<AstExpr>),
+    /// `({ ... })` statement expression body: the statements exactly as
+    /// written, last expression statement included (it carries the value).
+    StmtExpr(Vec<AstStmt>),
 }
 
 // ─── Statement kinds ─────────────────────────────────────────────────────────

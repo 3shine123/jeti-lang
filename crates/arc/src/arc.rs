@@ -1056,3 +1056,109 @@ fn is_retain_release_pair(s1: &AstStmt, s2: &AstStmt) -> Option<bool> {
         None
     }
 }
+// ─── returned-object rule (ObjC ARC) ────────────────────────────────────────
+
+/// ObjC ARC's "returned object" rule: a method outside the
+/// alloc/new/copy/mutableCopy family that returns a freshly created (+1)
+/// value must hand it to the caller at +0 — clang balances this by
+/// autoreleasing the return. Without it the value leaks: the caller never
+/// releases a non-alloc selector's result, and nothing else balances it
+/// (found by the refcount tracer — `+make { return [[X alloc] init]; }`
+/// compiled to a value nobody releases). init-family methods legitimately
+/// return +1 (`self`); a thrown value is balanced by the EH machinery
+/// (`@throw` retains/autoreleases/releases it), so only `return` wraps.
+pub fn autorelease_owned_returns(body: &mut AstStmt, selector: &str) {
+    if selector.starts_with("alloc")
+        || selector.starts_with("new")
+        || selector.starts_with("copy")
+        || selector.starts_with("mutableCopy")
+        || selector.starts_with("init")
+    {
+        return;
+    }
+    autorelease_returns_stmt(body);
+}
+
+/// A +1 value: an alloc/new/copy/mutableCopy send, or an `init` send on one.
+/// Literals are excluded — `return @"x"` hands back a constant.
+fn expr_is_owned_creation(e: &AstExpr) -> bool {
+    match &e.data {
+        AstExprData::MsgSend { receiver, selector, .. } => {
+            let s = selector.as_str();
+            if s.starts_with("alloc")
+                || s.starts_with("new")
+                || s.starts_with("copy")
+                || s == "mutableCopy"
+            {
+                true
+            } else if s.starts_with("init") {
+                expr_is_owned_creation(receiver)
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn autorelease_returns_stmt(s: &mut AstStmt) {
+    match &mut s.data {
+        AstStmtData::Compound(v) => {
+            for x in v.iter_mut() {
+                autorelease_returns_stmt(x);
+            }
+        }
+        AstStmtData::Return(Some(e)) => {
+            if expr_is_owned_creation(e) {
+                let (line, col) = (e.line, e.col);
+                let inner = (**e).clone();
+                *e = Box::new(AstExpr {
+                    kind: AstExprKind::FuncCall,
+                    expr_type: None,
+                    line,
+                    col,
+                    data: AstExprData::FuncCall {
+                        func: None,
+                        name: "jeti_autorelease".to_string(),
+                        callee: None,
+                        args: vec![inner],
+                    },
+                    end_line: line,
+                    end_col: col,
+                });
+            }
+        }
+        AstStmtData::If { then, else_, .. } => {
+            autorelease_returns_stmt(then);
+            if let Some(el) = else_ {
+                autorelease_returns_stmt(el);
+            }
+        }
+        AstStmtData::While { body, .. } | AstStmtData::Do { body, .. } => {
+            autorelease_returns_stmt(body)
+        }
+        AstStmtData::For { init, body, .. } => {
+            if let Some(i) = init {
+                autorelease_returns_stmt(i);
+            }
+            autorelease_returns_stmt(body);
+        }
+        AstStmtData::ForIn { body, .. } => autorelease_returns_stmt(body),
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            autorelease_returns_stmt(try_block);
+            for c in catches.iter_mut() {
+                autorelease_returns_stmt(c);
+            }
+            if let Some(f) = finally_block {
+                autorelease_returns_stmt(f);
+            }
+        }
+        AstStmtData::Catch { body, .. } => autorelease_returns_stmt(body),
+        AstStmtData::Finally(b) => autorelease_returns_stmt(b),
+        AstStmtData::Synchronized { body, .. } => autorelease_returns_stmt(body),
+        AstStmtData::Autoreleasepool(b) | AstStmtData::NoArc(b) | AstStmtData::Defer(b) => {
+            autorelease_returns_stmt(b)
+        }
+        _ => {}
+    }
+}

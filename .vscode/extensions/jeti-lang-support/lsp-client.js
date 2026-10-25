@@ -205,6 +205,18 @@ class JetiLanguageClient {
     return this.request('textDocument/documentLink', { textDocument: { uri } }).then((links) => links || []);
   }
 
+  /**
+   * `textDocument/inlayHint` → the gray, hover-less hints the server computes
+   * for `range` (parameter names today; type hints as they are added).
+   *
+   * @param {string} uri
+   * @param {{start: object, end: object}} range
+   * @returns {Promise<object[]>}
+   */
+  inlayHints(uri, range) {
+    return this.request('textDocument/inlayHint', { textDocument: { uri }, range }).then((hints) => hints || []);
+  }
+
   /** `shutdown` + `exit`, then resolve with the server's exit code. */
   async stop({ timeoutMs = 10000 } = {}) {
     const proc = this.process;

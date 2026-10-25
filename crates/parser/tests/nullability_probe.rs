@@ -289,3 +289,135 @@ fn annotation_word_as_a_declarator_name_still_parses() {
     assert!(!p.has_error(), "broke legal C: {}", p.last_error());
     assert_eq!(unit.unwrap().decls.len(), 1);
 }
+
+/// Extract ivars from every class in the unit: (name, nulls) pairs, plus the
+/// parser's error state. Ivars are the position under test here: clang
+/// (probe-verified) accepts nullability there only in the postfix spelling
+/// (`NPString * _Nullable x`) and rejects the prefix form.
+fn ivars_of(src: &str) -> (Vec<(String, Nullability)>, bool, String) {
+    let mut p = Parser::new(src);
+    let unit = p.parse_translation_unit().expect("unit");
+    let mut out = Vec::new();
+    for d in &unit.decls {
+        if let CstDeclData::Class { ivars, .. } = &d.data {
+            for v in ivars {
+                if let CstDeclData::Ivar { ivar_type, .. } = &v.data {
+                    out.push((
+                        v.name.clone().unwrap_or_default(),
+                        ivar_type
+                            .as_ref()
+                            .map(|t| t.nulls)
+                            .unwrap_or(Nullability::Unspecified),
+                    ));
+                }
+            }
+        }
+    }
+    (out, p.has_error(), p.last_error().to_string())
+}
+
+#[test]
+fn ivar_postfix_nullable_is_recorded() {
+    // The form ObjC allows in ivar position — and the one Foundation headers
+    // use for explicit region opt-out (`NPString * _Nullable x`).
+    let (got, err, msg) =
+        ivars_of("@interface S : NPObject {\n    NPString * _Nullable x;\n}\n@end\n");
+    println!("ivar postfix nullable -> {:?} err={}", got, err);
+    assert!(!err, "postfix nullability in ivar must parse: {}", msg);
+    assert_eq!(
+        got,
+        vec![("x".into(), Nullability::Nullable)],
+        "postfix not recorded: {:?}",
+        got
+    );
+}
+
+#[test]
+fn ivar_postfix_nonnull_is_recorded() {
+    let (got, err, msg) =
+        ivars_of("@interface S : NPObject {\n    NPString * _Nonnull x;\n}\n@end\n");
+    println!("ivar postfix nonnull -> {:?} err={}", got, err);
+    assert!(!err, "postfix _Nonnull in ivar must parse: {}", msg);
+    assert_eq!(
+        got,
+        vec![("x".into(), Nullability::Nonnull)],
+        "postfix not recorded: {:?}",
+        got
+    );
+}
+
+#[test]
+fn ivar_prefix_bare_is_rejected() {
+    // clang: "unknown type name 'nullable'". Jeti says the same thing more
+    // usefully: one targeted error, and the declaration still parses with the
+    // annotation's meaning preserved (recovery, no cascade).
+    let (got, err, msg) =
+        ivars_of("@interface S : NPObject {\n    nullable NPString *x;\n}\n@end\n");
+    println!("ivar prefix bare -> {:?} err={} msg={}", got, err, msg);
+    assert!(err, "prefix nullability in ivar must be rejected");
+    assert!(
+        msg.contains("follow the pointer"),
+        "wrong message: {}",
+        msg
+    );
+    assert_eq!(
+        got,
+        vec![("x".into(), Nullability::Nullable)],
+        "recovery lost the ivar: {:?}",
+        got
+    );
+}
+
+#[test]
+fn ivar_prefix_underscore_is_rejected() {
+    // clang: "nullability specifier '_Nullable' cannot be applied to
+    // non-pointer type 'NSString'". Same targeted rejection as the bare form.
+    let (got, err, msg) =
+        ivars_of("@interface S : NPObject {\n    _Nullable NPString *x;\n}\n@end\n");
+    println!("ivar prefix underscore -> {:?} err={} msg={}", got, err, msg);
+    assert!(err, "prefix _Nullable in ivar must be rejected");
+    assert!(
+        msg.contains("follow the pointer"),
+        "wrong message: {}",
+        msg
+    );
+    assert_eq!(
+        got,
+        vec![("x".into(), Nullability::Nullable)],
+        "recovery lost the ivar: {:?}",
+        got
+    );
+}
+
+#[test]
+fn ivar_region_default_still_applies() {
+    // The region's unannotated-pointer default must keep working for ivars —
+    // the rejection only targets EXPLICIT prefix annotations.
+    let (got, err, msg) = ivars_of(
+        "NP_ASSUME_NONNULL_BEGIN\n\
+         @interface R : NPObject {\n\
+         NPString *x;\n\
+         }\n\
+         @end\n\
+         NP_ASSUME_NONNULL_END\n",
+    );
+    println!("ivar region default -> {:?} err={}", got, err);
+    assert!(!err, "region default broke ivar parsing: {}", msg);
+    assert_eq!(
+        got,
+        vec![("x".into(), Nullability::Nonnull)],
+        "region default NOT applied to ivar: {:?}",
+        got
+    );
+}
+
+#[test]
+fn c_struct_field_named_nullable_still_parses() {
+    // C superset: struct fields parse through `parse_type_full` (never with
+    // `annotating` set), so a field NAMED nullable is untouched by the ivar
+    // rule, and the ivar flag must not leak into struct parsing.
+    let mut p = Parser::new("struct S { int nullable; };\n");
+    let unit = p.parse_translation_unit();
+    assert!(!p.has_error(), "broke legal C struct: {}", p.last_error());
+    assert_eq!(unit.unwrap().decls.len(), 1);
+}

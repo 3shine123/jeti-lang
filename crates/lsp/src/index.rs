@@ -203,6 +203,18 @@ pub struct SignatureHelp {
     pub active_parameter: usize,
 }
 
+/// One inlay hint: the parameter name the argument at `position` fills in.
+/// The editor draws these as gray, hover-less text over the source (clangd's
+/// parameter hints) — they add a word the file does not contain.
+#[derive(Debug, Clone)]
+pub struct InlayHint {
+    pub position: LspPosition,
+    pub label: String,
+    /// LSP `InlayHintKind`: 1 = Parameter, 2 = Type. The editor colors the two
+    /// the same but uses the kind for its own filtering.
+    pub kind: u8,
+}
+
 /// A member offered after a receiver: a method selector, a property or an ivar.
 #[derive(Debug, Clone)]
 pub struct MemberEntry {
@@ -367,6 +379,15 @@ pub struct SymbolIndex {
     sites: Vec<SendSite>,
     /// Free-function calls of the document being edited.
     calls: Vec<CallSite>,
+    /// Type inlays collected on the same body walk: at each variable *use*
+    /// (outside its own declaration) the declared type is shown as a gray
+    /// `: T`, clangd-style.
+    type_hints: Vec<InlayHint>,
+    /// Byte offset of each line's start in the document. Anchoring a hint per
+    /// declaration needs its line, and `text.lines().nth(n)` per declaration is
+    /// quadratic. Shared (an `Arc`) so the body walk can hold it beside the
+    /// mutable hint vector.
+    line_offsets: std::sync::Arc<Vec<usize>>,
     /// Free functions by name: what signature help shows for `name(...)`.
     functions: HashMap<String, Signature>,
     /// Namespace names seen in the qualified names of the index
@@ -417,6 +438,9 @@ impl SymbolIndex {
         };
         let mut index = SymbolIndex::default();
         index.document = document.to_string();
+        index.line_offsets = std::sync::Arc::new(line_offsets(
+            lookup(document).as_deref().unwrap_or(""),
+        ));
         let (layouts, typedef_types) = jeti_layout::collect_layouts(&ast.decls);
         index.layouts = layouts;
         index.typedef_types = typedef_types;
@@ -543,7 +567,7 @@ impl SymbolIndex {
                 detail: String::new(),
                 container: None,
                 path,
-                range: span.to_lsp_range(&text),
+                range: source_map.to_lsp_range(&span, &text),
                 children: Vec::new(),
             };
             self.record(&symbol);
@@ -594,6 +618,13 @@ impl SymbolIndex {
     /// indistinguishable: every reference to either one answered with all of
     /// them.
     pub fn resolve_at(&self, text: &str, position: LspPosition) -> Option<Resolved> {
+        // The @property attribute list holds no symbols: a bare `copy` there
+        // used to hover as "method copy in NPArray" because the member search
+        // matched any class's `- copy`. clangd answers nothing in the list —
+        // clang's grammar colors it as keyword.other.property.attribute.
+        if position_inside_property_attrs(text, position) {
+            return None;
+        }
         lookup_names(text, position)
             .into_iter()
             .find_map(|candidate| self.resolve_candidate(&candidate, position))
@@ -657,10 +688,12 @@ impl SymbolIndex {
         None
     }
 
-    /// The `#include <...>` headers a document pulls in — the system surface
-    /// the toolchain probe (`cc -E`) extracts symbols from. Quoted includes
-    /// name project files and never belong to this table.
-    pub fn system_headers_in(text: &str) -> Vec<String> {
+    /// The C headers a document pulls in — the passthrough surface the toolchain
+    /// probe (`cc -E`) extracts symbols from. Every `#include <...>` qualifies;
+    /// a quoted `#include "..."` qualifies only when it names a C header (`.h`),
+    /// which is how the runtime reaches generated code (`"jeti/runtime.h"`).
+    /// Quoted `.hje`/`.jeti` are jeti sources and stay out of this table.
+    pub fn c_headers_in(text: &str) -> Vec<String> {
         let mut headers = Vec::new();
         for line in text.lines() {
             let rest = line.trim_start();
@@ -672,13 +705,19 @@ impl SymbolIndex {
                 continue;
             };
             let rest = rest.trim_start();
-            if !rest.starts_with('<') {
-                continue;
-            }
-            let Some(end) = rest.find('>') else {
+            let name = if let Some(rest) = rest.strip_prefix('<') {
+                let Some(end) = rest.find('>') else { continue };
+                rest[..end].to_string()
+            } else if let Some(rest) = rest.strip_prefix('"') {
+                let Some(end) = rest.find('"') else { continue };
+                let quoted = &rest[..end];
+                if !quoted.ends_with(".h") {
+                    continue;
+                }
+                quoted.to_string()
+            } else {
                 continue;
             };
-            let name = rest[1..end].to_string();
             if !name.is_empty() && !headers.contains(&name) {
                 headers.push(name);
             }
@@ -732,7 +771,7 @@ impl SymbolIndex {
         let mask = code_mask(text);
         // The passthrough C surface comes from the real toolchain for exactly
         // the system headers this document includes.
-        let c_table = crate::cheader::signatures_for(&Self::system_headers_in(text));
+        let c_table = crate::cheader::signatures_for(&Self::c_headers_in(text), &[]);
         // Byte offset of each line's start in the full text, so line-local
         // `char_indices` can index the global mask (works for LF and CRLF).
         let line_starts: Vec<usize> = std::iter::once(0usize)
@@ -769,9 +808,16 @@ impl SymbolIndex {
                     let word = &line[from..col];
                     let pos = LspPosition { line: i as u32, character: start16 };
                     let rest = &text[line_starts[i] + col..];
-                    if let Some((t, mods)) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
-                        let len = word.chars().map(|c| c.len_utf16() as u32).sum();
-                        tokens.push((i as u32, start16, len, t, mods));
+                    // Attribute-list words get no semantic token — clang's
+                    // grammar colors them (keyword.other.property.attribute);
+                    // emitting one turned `copy` into a method (it matched
+                    // any class's `- copy` member).
+                    let attr_pos = inside_property_attrs(line, from);
+                    if !attr_pos {
+                        if let Some((t, mods)) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
+                            let len = word.chars().map(|c| c.len_utf16() as u32).sum();
+                            tokens.push((i as u32, start16, len, t, mods));
+                        }
                     }
                     // `.` or `->` between words: what follows is a member.
                     // The `>` of `->` must keep the tail alive, not reset it.
@@ -795,9 +841,11 @@ impl SymbolIndex {
                 let word = &line[from..];
                 let pos = LspPosition { line: i as u32, character: start16 };
                 let rest = &text[line_starts[i] + line.len()..];
-                if let Some((t, mods)) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
-                    let len = word.chars().map(|c| c.len_utf16() as u32).sum();
-                    tokens.push((i as u32, start16, len, t, mods));
+                if !inside_property_attrs(line, from) {
+                    if let Some((t, mods)) = self.classify_token(word, pos, &macros, &c_table, rest, access_tail) {
+                        let len = word.chars().map(|c| c.len_utf16() as u32).sum();
+                        tokens.push((i as u32, start16, len, t, mods));
+                    }
                 }
             }
         }
@@ -830,6 +878,20 @@ impl SymbolIndex {
         access: bool,
     ) -> Option<(u8, u8)> {
         if BUILTIN_AND_KEYWORDS.contains(&word) {
+            return None;
+        }
+        // Nullability qualifiers: clangd emits no semantic token for these —
+        // they are type qualifiers, never declarations, and clang's TextMate
+        // grammar colors them via storage.modifier.protocol. Without this,
+        // the bare spellings fell through to the member search below and
+        // words like `nullable` could pick up a `method` color from any
+        // class that happened to declare a member of that name. The `__`
+        // spellings join the same suppression.
+        if matches!(
+            word,
+            "nonnull" | "nullable" | "null_unspecified" | "null_resettable"
+                | "__nullable" | "__nonnull" | "__unsafe_unretained"
+        ) {
             return None;
         }
         // A soft keyword in keyword position colors as a keyword; the same
@@ -1394,7 +1456,7 @@ impl SymbolIndex {
         }
         let path = source_map.registry().path_of(span.file).to_string();
         let Some(text) = lookup(&path) else { return };
-        let range = span.to_lsp_range(&text);
+        let range = source_map.to_lsp_range(&span, &text);
         for field in fields {
             let (Some(name), AstDeclData::Ivar { .. }) = (&field.name, &field.data) else {
                 continue;
@@ -1451,11 +1513,13 @@ impl SymbolIndex {
         document: &str,
         text_of: &mut impl FnMut(&str) -> Option<String>,
     ) -> Option<Scope> {
-        let (params, body, self_type) = match &decl.data {
-            AstDeclData::Method { params, body, .. } => {
-                (params.as_deref(), body.as_deref(), container)
+        let (params, body, self_type, return_type) = match &decl.data {
+            AstDeclData::Method { params, body, return_type, .. } => {
+                (params.as_deref(), body.as_deref(), container, return_type.as_deref())
             }
-            AstDeclData::Function { params, body, .. } => (params.as_deref(), body.as_deref(), None),
+            AstDeclData::Function { params, body, return_type, .. } => {
+                (params.as_deref(), body.as_deref(), None, return_type.as_deref())
+            }
             AstDeclData::Variable { .. } => {
                 // A file-scope variable is visible everywhere in the document.
                 let path = decl_path(decl, source_map)?;
@@ -1507,7 +1571,7 @@ impl SymbolIndex {
         );
         let text = text_of(&path)?;
         let mut scope = Scope {
-            range: Some(span.to_lsp_range(&text)),
+            range: Some(source_map.to_lsp_range(&span, &text)),
             owner: decl.name.clone().unwrap_or_default(),
             self_type: self_type.map(str::to_string),
             locals: Vec::new(),
@@ -1532,11 +1596,31 @@ impl SymbolIndex {
                 }
                 scope.hover_locals.push(ScopeLocal {
                     name: name.clone(), class, protocols, type_args,
-                    type_spelling: spelling,
+                    type_spelling: spelling.clone(),
                     decl_line: None,
                 });
+                // Signature inlay: the parameter's type after its name.
+                if let Some(position) =
+                    name_end_after(&text, &self.line_offsets, source_map, decl.line, decl.col, name)
+                {
+                    self.type_hints.push(InlayHint {
+                        position,
+                        label: format!(": {spelling}"),
+                        kind: 2,
+                    });
+                }
             }
             param = current.next.as_deref();
+        }
+        // The return type, after the parameter list (`(int a) -> int`).
+        if let Some(return_type) = return_type {
+            if let Some(position) = param_list_end(&text, &self.line_offsets, source_map, decl) {
+                self.type_hints.push(InlayHint {
+                    position,
+                    label: format!("-> {}", ast_type_spell(return_type)),
+                    kind: 2,
+                });
+            }
         }
         // The enclosing class's ivars are visible by name inside its methods.
         if let Some(class) = self_type {
@@ -1572,6 +1656,9 @@ impl SymbolIndex {
                 hover_locals: &mut scope.hover_locals,
                 sites: &mut self.sites,
                 calls: &mut self.calls,
+                type_hints: &mut self.type_hints,
+                line_offsets: self.line_offsets.clone(),
+                layouts: &self.layouts,
                 source_map,
                 text: &text,
             };
@@ -1700,6 +1787,50 @@ impl SymbolIndex {
             active_signature: 0,
             signatures: vec![signature],
         })
+    }
+
+    /// The parameter-name inlays for every free-function call this index can
+    /// type: each argument is labeled with the declared name of the parameter
+    /// it fills in (clangd's gray, hover-less parameter hints).
+    ///
+    /// Message sends get none by construction — they live in `sites`, not
+    /// `calls`, and a selector already names its arguments. A call no
+    /// declaration describes (the document's own table first, then the
+    /// system-header table) gets none: a missing hint is acceptable, a wrong
+    /// label is not.
+    pub fn inlay_hints(&self, c_table: &crate::cheader::CSignatures) -> Vec<InlayHint> {
+        let mut hints: Vec<InlayHint> = Vec::new();
+        for call in &self.calls {
+            let parameter_names: Vec<Option<String>> = match self.functions.get(&call.name) {
+                Some(signature) => signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter_name(parameter))
+                    .collect(),
+                None => match c_table.decl(&call.name) {
+                    Some((crate::cheader::DeclKind::Function, decl)) => decl
+                        .params
+                        .iter()
+                        .map(|parameter| parameter_name(parameter))
+                        .collect(),
+                    _ => continue,
+                },
+            };
+            for (arg, name) in call.args.iter().zip(&parameter_names) {
+                if let Some(name) = name {
+                    hints.push(InlayHint {
+                        position: arg.start,
+                        label: format!("{name}: "),
+                        kind: 1,
+                    });
+                }
+            }
+        }
+        // Variable-use type hints, collected on the same analysis. Source order
+        // so the array reads the way the file does.
+        hints.extend(self.type_hints.iter().cloned());
+        hints.sort_by_key(|hint| (hint.position.line, hint.position.character));
+        hints
     }
 
     /// The receiver class of a send site, without the "is the cursor in an
@@ -1908,7 +2039,7 @@ impl SymbolIndex {
         }
         let path = source_map.registry().path_of(span.file).to_string();
         let text = text_of(&path)?;
-        let range = span.to_lsp_range(&text);
+        let range = source_map.to_lsp_range(&span, &text);
 
         // Display name: the container already spells the namespace, so strip the
         // prefix rather than repeating `NS::` in every line of the outline.
@@ -2098,6 +2229,99 @@ fn mapped_line(source_map: &SourceMap, line: usize) -> u32 {
 /// stars, struct/union/enum tags, generic arguments, and const/volatile
 /// qualifiers where C puts them. Mirrors clangd's terse rendering — this is
 /// what the editor shows as the type, not what codegen emits.
+/// `__auto_type` — GNU C's inference marker (the EH desugar's hoisted temp).
+/// The declared type is a placeholder; the initializer's type is the real one.
+fn is_auto_type(ty: &AstType) -> bool {
+    ty.prim == TypePrim::Named && ty.name.as_deref() == Some("__auto_type")
+}
+
+/// Byte offset of each line's start (line 1 at offset 0).
+fn line_offsets(text: &str) -> Vec<usize> {
+    let mut starts = vec![0usize];
+    for (i, b) in text.bytes().enumerate() {
+        if b == b'\n' {
+            starts.push(i + 1);
+        }
+    }
+    starts
+}
+
+/// One line's text (1-based line) in O(1). `text.lines().nth(n)` is O(n) per
+/// call, which turned the whole build quadratic once a hint was anchored per
+/// declaration.
+fn line_slice<'a>(text: &'a str, offsets: &[usize], line: usize) -> Option<&'a str> {
+    let start = *offsets.get(line.checked_sub(1)?)?;
+    let end = offsets.get(line).copied().unwrap_or(text.len());
+    text.get(start..end)
+}
+
+/// The position just past `name` on `line` (1-based), searching from `from_col`
+/// (1-based byte column): the first whole-word match. Where a type inlay that
+/// sits after a declarator/parameter name is anchored. The span is handed to
+/// the source map, so the one position projection stays in `to_lsp_range`.
+fn name_end_after(
+    text: &str,
+    offsets: &[usize],
+    source_map: &SourceMap,
+    line: usize,
+    from_col: usize,
+    name: &str,
+) -> Option<LspPosition> {
+    let line_text = line_slice(text, offsets, line)?;
+    let bytes = line_text.as_bytes();
+    let mut search = from_col.saturating_sub(1);
+    while let Some(rel) = line_text.get(search..)?.find(name) {
+        let start = search + rel;
+        let end = start + name.len();
+        let before_ok = start == 0
+            || !(bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_');
+        let after_ok = end >= line_text.len()
+            || !(bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_');
+        if before_ok && after_ok {
+            let span = source_map.span_from_node(
+                (line as u32, (end + 1) as u32),
+                (line as u32, (end + 1) as u32),
+            );
+            return Some(source_map.to_lsp_range(&span, text).start);
+        }
+        search = end;
+    }
+    None
+}
+
+/// The position just past a function/method's parameter list on its own line —
+/// where a return-type inlay sits (`(int a) -> int`). The `(` is the first one
+/// after the name; its matching `)` closes the list.
+fn param_list_end(
+    text: &str,
+    offsets: &[usize],
+    source_map: &SourceMap,
+    decl: &AstDecl,
+) -> Option<LspPosition> {
+    let line = line_slice(text, offsets, decl.line)?;
+    let name = decl.name.as_deref()?;
+    let name_at = line.find(name)?;
+    let open = line[name_at + name.len()..].find('(')? + name_at + name.len();
+    let mut depth = 0usize;
+    for (i, b) in line.as_bytes().iter().enumerate().skip(open) {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let span = source_map.span_from_node(
+                        (decl.line as u32, (i + 2) as u32),
+                        (decl.line as u32, (i + 2) as u32),
+                    );
+                    return Some(source_map.to_lsp_range(&span, text).start);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn ast_type_spell(ty: &AstType) -> String {
     let mut s = String::new();
     if ty.is_const && !ty.is_pointer { s.push_str("const "); }
@@ -2463,6 +2687,41 @@ fn function_signature(
     Signature { label, parameters }
 }
 
+/// The declared name inside a parameter spelling: `int value` → `value`,
+/// `const char *restrict` → `restrict`. An unnamed spelling — `int`,
+/// `char *`, or a type whose last word is an attribute (`__restrict`,
+/// `_Nullable`, …) — has no name to show, and labeling an argument with a
+/// type word would be a wrong hint: a miss is acceptable, a misspelled name
+/// is not.
+fn parameter_name(spelling: &str) -> Option<String> {
+    let words: Vec<&str> = spelling.split_whitespace().collect();
+    if words.len() < 2 {
+        return None;
+    }
+    // The declarator may hug the name (`char *fmt`, `NPObject *obj`, `char **argv`):
+    // the star(s) belong to the type, the identifier after them is the name.
+    let last = words[words.len() - 1].trim_start_matches('*');
+    if last.is_empty() {
+        return None;
+    }
+    let is_identifier = last
+        .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && last
+            .chars()
+            .all(|c: char| c.is_ascii_alphanumeric() || c == '_');
+    if !is_identifier {
+        return None;
+    }
+    const NOT_NAMES: &[&str] = &[
+        "const", "volatile", "restrict", "__restrict", "unsigned", "signed",
+        "_Nullable", "_Nonnull", "_Null_unspecified", "_Null_resettable",
+    ];
+    if NOT_NAMES.contains(&last) {
+        return None;
+    }
+    Some(last.to_string())
+}
+
 /// A type as it reads in a signature. Display-only text: the checker's printer
 /// is private and takes only AST types, while a method's parameters keep their
 /// CST type nodes, so both spellings are rendered here from the same rules.
@@ -2543,6 +2802,12 @@ struct BodyWalk<'a> {
     hover_locals: &'a mut Vec<ScopeLocal>,
     sites: &'a mut Vec<SendSite>,
     calls: &'a mut Vec<CallSite>,
+    /// Use-site type inlays, collected here (see [`SymbolIndex::type_hints`]).
+    type_hints: &'a mut Vec<InlayHint>,
+    /// Line-start offsets, shared with the index (see [`SymbolIndex::line_offsets`]).
+    line_offsets: std::sync::Arc<Vec<usize>>,
+    /// Struct/union layouts, for the field names a designator inlay spells.
+    layouts: &'a HashMap<String, jeti_layout::StructLayout>,
     source_map: &'a SourceMap,
     text: &'a str,
 }
@@ -2553,11 +2818,17 @@ impl BodyWalk<'_> {
             (line as u32, col as u32),
             (end_line as u32, end_col as u32),
         );
-        (!span.is_synthetic()).then(|| span.to_lsp_range(self.text))
+        (!span.is_synthetic()).then(|| self.source_map.to_lsp_range(&span, self.text))
     }
 
     fn expr_range(&self, expr: &AstExpr) -> Option<LspRange> {
         self.range(expr.line, expr.col, expr.end_line, expr.end_col)
+    }
+
+    /// The position just past the declarator `name` on the declaration's first
+    /// line — where a definition-site type inlay sits.
+    fn declarator_end(&self, decl: &AstDecl, name: &str) -> Option<LspPosition> {
+        name_end_after(self.text, &self.line_offsets, self.source_map, decl.line, decl.col, name)
     }
 
     /// Locals declared by one declaration (including a `T *a, *b;` chain) and by
@@ -2572,8 +2843,32 @@ impl BodyWalk<'_> {
                 let class = ast_type_name(ty);
                 let protocols = ast_id_protocols(ty);
                 let type_args = ast_type_args(ty);
-                let spelling = ast_type_spell(ty);
+                // `__auto_type x = expr;` (GNU C's inference marker, the shape
+                // the EH desugar emits for `__jeti_eh_tmp_N`): the declared
+                // type is a placeholder. The real type is the initializer's,
+                // stamped by the checker — record and show that, never the
+                // marker.
+                let inferred = if is_auto_type(ty) {
+                    init.as_deref().and_then(|i| i.expr_type.as_deref())
+                } else {
+                    None
+                };
+                let spelling = match inferred {
+                    Some(inferred_ty) => ast_type_spell(inferred_ty),
+                    None => ast_type_spell(ty),
+                };
                 let line = Some(mapped_line(self.source_map, declaration.line));
+                // At the definition the inferred type is the whole point:
+                // `__auto_type tmp = …;` reads `tmp: T = …`.
+                if let (Some(inferred_ty), Some(position)) =
+                    (inferred, self.declarator_end(declaration, name))
+                {
+                    self.type_hints.push(InlayHint {
+                        position,
+                        label: format!(": {}", ast_type_spell(inferred_ty)),
+                        kind: 2,
+                    });
+                }
                 if class.is_some() || !protocols.is_empty() {
                     self.locals.push(ScopeLocal {
                         name: name.clone(), class, protocols, type_args,
@@ -2588,6 +2883,37 @@ impl BodyWalk<'_> {
                     type_spelling: spelling,
                     decl_line: line,
                 });
+            }
+            // Designator inlays: a positional initializer list spells no member
+            // names, so show them — `int a[] = {1, 2}` reads `{[0]=1, [1]=2}`
+            // and `Point p = {1, 2}` reads `{.x=1, .y=2}`.
+            if let (Some(ty), Some(init_expr)) = (var_type.as_deref(), init.as_deref()) {
+                if let AstExprData::InitList(elems) | AstExprData::ArrayLit(elems) = &init_expr.data {
+                    for (i, elem) in elems.iter().enumerate() {
+                        let designator = if ty.is_array {
+                            format!("[{i}]=")
+                        } else if ty.is_struct {
+                            match ty
+                                .name
+                                .as_deref()
+                                .and_then(|n| self.layouts.get(n))
+                                .and_then(|layout| layout.fields.get(i))
+                            {
+                                Some(field) => format!(".{}=", field.name),
+                                None => continue,
+                            }
+                        } else {
+                            continue;
+                        };
+                        if let Some(range) = self.expr_range(elem) {
+                            self.type_hints.push(InlayHint {
+                                position: range.start,
+                                label: designator,
+                                kind: 2,
+                            });
+                        }
+                    }
+                }
             }
             if let Some(init) = init {
                 self.expr(init);
@@ -2821,6 +3147,29 @@ impl BodyWalk<'_> {
                     self.stmt(body);
                 }
             }
+            // Statement expression `({ ... })`: its body declarations and the
+            // calls/sends inside must be indexed like any block body.
+            AstExprData::StmtExpr(body) => {
+                for s in body {
+                    self.stmt(s);
+                }
+            }
+            // A variable *use*: show its declared type as a gray `: T`. The
+            // declaration's own name is a decl field, never a VarRef, so this
+            // cannot duplicate the definition.
+            AstExprData::VarRef { name, .. } => {
+                if let Some(local) = self.hover_locals.iter().find(|l| &l.name == name) {
+                    if !local.type_spelling.is_empty() {
+                        if let Some(range) = self.expr_range(expr) {
+                            self.type_hints.push(InlayHint {
+                                position: range.end,
+                                label: format!(": {}", local.type_spelling),
+                                kind: 2,
+                            });
+                        }
+                    }
+                }
+            }
             AstExprData::Int(_)
             | AstExprData::Float(_)
             | AstExprData::FloatRaw(_)
@@ -2828,7 +3177,6 @@ impl BodyWalk<'_> {
             | AstExprData::String(_)
             | AstExprData::AtString(_)
             | AstExprData::Bool(_)
-            | AstExprData::VarRef { .. }
             | AstExprData::Selector(_)
             | AstExprData::TypeLiteral(_)
             | AstExprData::Alignof(_) => {}
@@ -3238,6 +3586,34 @@ fn rename_segment(token: &str, start: usize, end: usize, is_selector: bool, text
     (seg_start, seg_end)
 }
 
+/// Is `col` (a BYTE index into `line`) inside the attribute list of an
+/// `@property ( ... )` declaration on that line? Jeti property declarations
+/// are single-line, so a line-local scan is exact.
+fn inside_property_attrs(line: &str, col: usize) -> bool {
+    let Some(prop) = line.find("@property") else {
+        return false;
+    };
+    let rest = &line[prop..];
+    let Some(open) = rest.find('(') else {
+        return false;
+    };
+    match rest[open..].find(')') {
+        Some(close_rel) => col > prop + open && col < prop + open + close_rel,
+        // Unterminated list: the attribute position runs to end of line.
+        None => col > prop + open,
+    }
+}
+
+/// `inside_property_attrs` over a full document + LSP position.
+fn position_inside_property_attrs(text: &str, position: LspPosition) -> bool {
+    let Some(offset) = jeti_cst::source_map::SourceFile::lsp_to_offset(text, position) else {
+        return false;
+    };
+    let line_start = text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = text[offset..].find('\n').map(|i| offset + i).unwrap_or(text.len());
+    inside_property_attrs(&text[line_start..line_end], offset - line_start)
+}
+
 /// A name that is whole by itself — a selector (`greet:from:`) or a declared
 /// keyword part (`run:`) — has one candidate, itself: it is never taken apart.
 fn lookup_names(text: &str, position: LspPosition) -> Vec<String> {
@@ -3528,6 +3904,330 @@ int helper(int value, int other) { return helper(1, 2); }
         );
         println!("calls: {:?}", index.calls);
         println!("functions: {:?}", index.functions);
+    }
+
+    /// Parameter hints only (kind 1). The type hints (kind 2) are exercised by
+    /// their own tests; these cases are about argument labeling.
+    fn parameter_hints(hints: Vec<InlayHint>) -> Vec<InlayHint> {
+        hints.into_iter().filter(|h| h.kind == 1).collect()
+    }
+
+    #[test]
+    fn variable_uses_carry_their_declared_type() {
+        // At every *use* of a variable — never its own declaration — the type
+        // is shown: `a = 8;` reads `a: int = 8;`, `i != 2345` reads
+        // `i: long != 2345`.
+        let src = "\
+int f(void) {
+    int a = 1;
+    long i = 2;
+    a = 8;
+    if (i != 2345) { return a; }
+    return 0;
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints: Vec<InlayHint> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .filter(|h| h.kind == 2)
+            .collect();
+        let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
+        // `f`'s return type, then the three uses (the `int a` / `long i`
+        // declarations themselves are not uses).
+        assert_eq!(labels, vec!["-> int", ": int", ": long", ": int"], "{hints:?}");
+    }
+
+    #[test]
+    fn auto_type_variables_show_their_inferred_type() {
+        // `__auto_type` (GNU C; the shape the EH desugar emits for its hoisted
+        // `__jeti_eh_tmp_N`) declares no type — the initializer decides. Both
+        // the definition and every use must show the inferred type, never the
+        // `__auto_type` marker.
+        let src = "\
+int f(void) {
+    __auto_type x = 5;
+    return x + 1;
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints: Vec<InlayHint> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .filter(|h| h.kind == 2)
+            .collect();
+        let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
+        // `f`'s return type, then the `__auto_type` definition and the use —
+        // both inferred as `int`, never the `__auto_type` marker.
+        assert_eq!(labels, vec!["-> int", ": int", ": int"], "{hints:?}");
+    }
+
+    #[test]
+    fn signatures_carry_their_return_and_parameter_types() {
+        // Each parameter's type after its name, and the return type after the
+        // parameter list. The body has no variable use, so these are the only
+        // type hints.
+        let src = "int add(int a, int b) { return 0; }\n";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints: Vec<InlayHint> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .filter(|h| h.kind == 2)
+            .collect();
+        let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
+        assert_eq!(labels, vec![": int", ": int", "-> int"], "{hints:?}");
+    }
+
+    #[test]
+    fn positional_initializers_show_their_designators() {
+        // A positional initializer spells no member names: an array reads
+        // `{[0]=1, [1]=2}`, a struct `{.x=1, .y=2}` — the `[i]=` / `.field=`
+        // parts are gray, non-editable hints.
+        let src = "\
+struct Point { int x; int y; };
+int use(void) {
+    int a[3] = {1, 2, 3};
+    struct Point p = {4, 5};
+    return a[0] + p.x;
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let labels: Vec<String> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .map(|h| h.label)
+            .filter(|l| l.ends_with('='))
+            .collect();
+        assert_eq!(labels, vec!["[0]=", "[1]=", "[2]=", ".x=", ".y="], "{labels:?}");
+    }
+
+    #[test]
+    fn parameter_inlays_label_the_arguments_of_a_known_call() {
+        let src = "int add(int a, int b) { return a + b; } int use_it() { return add(1, 2); }";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints = parameter_hints(index.inlay_hints(&crate::cheader::CSignatures::default()));
+        assert_eq!(hints.len(), 2, "{hints:?}");
+        assert_eq!(hints[0].position, at(src, "add(1", 4));
+        assert_eq!(hints[0].label, "a: ");
+        assert_eq!(hints[1].position, at(src, "2);", 0));
+        assert_eq!(hints[1].label, "b: ");
+    }
+
+    #[test]
+    fn message_sends_contribute_no_parameter_inlays() {
+        // The send's arguments sit under their own selector, which already
+        // names them: only the free call in the same document is hinted.
+        let src = "\
+@interface Thing : jeti_root
+@end
+@implementation Thing
+- (int)take:(int)one other:(int)two { return one + two; }
+@end
+int add(int a, int b) { return a + b; }
+int main() {
+    Thing *thing;
+    [thing take:1 other:2];
+    return add(1, 2);
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints = parameter_hints(index.inlay_hints(&crate::cheader::CSignatures::default()));
+        // Multi-line document, so the line is computed, not assumed.
+        let pos_of = |needle: &str, inside: usize| -> LspPosition {
+            let offset = src.find(needle).expect("needle") + inside;
+            let before = &src[..offset];
+            let line = before.matches('\n').count() as u32;
+            let column = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
+            LspPosition { line, character: column }
+        };
+        assert_eq!(hints.len(), 2, "{hints:?}");
+        assert_eq!(hints[0].position, pos_of("add(1", 4));
+        assert_eq!(hints[0].label, "a: ");
+        assert_eq!(hints[1].position, pos_of("2);", 0));
+        assert_eq!(hints[1].label, "b: ");
+    }
+
+    #[test]
+    fn unknown_calls_and_unnamed_parameters_get_no_inlays() {
+        // A call no declaration describes gets no hint at all — the index
+        // would rather miss than label an argument with a guess. The named
+        // call in the same document proves the pipeline ran.
+        let src = "int known(int x) { return x; } int main() { return known(1) + mystery(3, 4); }";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints = parameter_hints(index.inlay_hints(&crate::cheader::CSignatures::default()));
+        assert_eq!(hints.len(), 1, "{hints:?}");
+        assert_eq!(hints[0].position, at(src, "known(1)", 6));
+        assert_eq!(hints[0].label, "x: ");
+
+        // An unnamed parameter has no name to show, so its argument stays
+        // bare (the named call proves the pipeline ran again).
+        let src = "int sub(int, int) { return 0; } int known(int x) { return x; } int main() { return sub(1, 2) + known(3); }";
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints = parameter_hints(index.inlay_hints(&crate::cheader::CSignatures::default()));
+        assert_eq!(hints.len(), 1, "{hints:?}");
+        assert_eq!(hints[0].position, at(src, "known(3)", 6));
+        assert_eq!(hints[0].label, "x: ");
+    }
+
+    #[test]
+    fn variadic_calls_hint_only_the_named_parameters() {
+        let src = "int logv(const char *fmt, ...) { return 0; } int main() { return logv(\"%d\", 1, 2); }";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints = parameter_hints(index.inlay_hints(&crate::cheader::CSignatures::default()));
+        assert_eq!(hints.len(), 1, "{hints:?}");
+        assert_eq!(hints[0].position, at(src, "logv(\"", 5));
+        assert_eq!(hints[0].label, "fmt: ");
+    }
+
+    #[test]
+    fn external_c_functions_hint_through_the_header_table() {
+        // Note: a string-literal argument gets no hint today — the AST gives
+        // it a synthetic span, so it is absent from the call's argument list.
+        // That is a miss, and misses are acceptable; int literals keep theirs.
+        let src = "int main() { return ext(1, 2); }";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let table = crate::cheader::CSignatures::with_function(
+            "ext",
+            vec!["int x".into(), "int y".into()],
+        );
+        let hints = parameter_hints(index.inlay_hints(&table));
+        assert_eq!(hints.len(), 2, "{hints:?}");
+        assert_eq!(hints[0].position, at(src, "ext(1", 4));
+        assert_eq!(hints[0].label, "x: ");
+        assert_eq!(hints[1].position, at(src, "2);", 0));
+        assert_eq!(hints[1].label, "y: ");
+    }
+
+    #[test]
+    fn an_attribute_tail_is_not_a_parameter_name() {
+        // `const char * __restrict` names no parameter: the attribute sits
+        // where a name could, and a type word is never an acceptable label.
+        let src = "int main() { return attr(1); }";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let table = crate::cheader::CSignatures::with_function(
+            "attr",
+            vec!["const char * __restrict".into(), "int".into()],
+        );
+        let hints = parameter_hints(index.inlay_hints(&table));
+        assert!(hints.is_empty(), "{hints:?}");
+    }
+
+    #[test]
+    fn a_declarator_that_hugs_the_star_keeps_its_name() {
+        // The runtime headers spell pointers with the star hugging the name
+        // (`NPObject *obj`), so the last whitespace-separated word is `*obj`.
+        // The star belongs to the type; the identifier after it is the name.
+        assert_eq!(parameter_name("int value").as_deref(), Some("value"));
+        assert_eq!(parameter_name("NPObject *obj").as_deref(), Some("obj"));
+        assert_eq!(parameter_name("char *fmt").as_deref(), Some("fmt"));
+        assert_eq!(parameter_name("const char *cstr").as_deref(), Some("cstr"));
+        assert_eq!(parameter_name("char **argv").as_deref(), Some("argv"));
+        // An unnamed pointer or a qualifier-only tail still yields nothing.
+        assert_eq!(parameter_name("char *"), None);
+        assert_eq!(parameter_name("const char *restrict"), None);
+        assert_eq!(parameter_name("char *const"), None);
+    }
+
+    #[test]
+    fn designators_and_compound_literals_contribute_no_inlays() {
+        // A compound literal and a designated initializer are not calls, so the
+        // only hint in the document labels the free call's argument — a
+        // designator field (`.location`) must never be read as a parameter.
+        let src = "\
+typedef struct NPRange { int location; int length; } NPRange;
+int known(int x) { return x; }
+int use(void) {
+    NPRange r = (NPRange){ .location = 3, .length = 9 };
+    return known(r.location);
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints = parameter_hints(index.inlay_hints(&crate::cheader::CSignatures::default()));
+        assert_eq!(hints.len(), 1, "{hints:?}");
+        assert_eq!(hints[0].label, "x: ");
     }
 
     fn at(text: &str, needle: &str, inside: usize) -> LspPosition {

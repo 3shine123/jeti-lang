@@ -212,8 +212,21 @@ fn declarator_name(chunk: &[Tok], names: &mut BTreeSet<String>) {
     }
     // Function-pointer / block declarator: the name sits inside `(*name)` /
     // `(^name)`, which the "last identifier" rule cannot see (the trailing
-    // parameter list is a deeper nesting level).
+    // parameter list is a deeper nesting level). Skipped inside `{...}`: a
+    // typedef'd struct body's fn-ptr FIELDS are not type names — runtime.h's
+    // `typedef struct jeti_kvc_entry { ...; id (*get)(id self); } ...` put the
+    // field name `get` into the table, and every later `(get != NULL)`
+    // expression misparsed as a cast ("expected ')'" — nullability.jeti:126).
+    let mut brace_depth = 0i32;
     for m in 0..chunk.len().saturating_sub(1) {
+        match &chunk[m] {
+            Tok::Punct('{') => brace_depth += 1,
+            Tok::Punct('}') => brace_depth -= 1,
+            _ => {}
+        }
+        if brace_depth > 0 {
+            continue;
+        }
         let is_declarer_open = matches!(chunk[m], Tok::Punct('('))
             && matches!(chunk[m + 1], Tok::Punct('*') | Tok::Punct('^'));
         if !is_declarer_open {
@@ -243,8 +256,8 @@ fn declarator_name(chunk: &[Tok], names: &mut BTreeSet<String>) {
     while k > 0 {
         k -= 1;
         match &chunk[k] {
-            Tok::Punct(')') | Tok::Punct(']') => depth += 1,
-            Tok::Punct('(') | Tok::Punct('[') => depth -= 1,
+            Tok::Punct(')') | Tok::Punct(']') | Tok::Punct('}') => depth += 1,
+            Tok::Punct('(') | Tok::Punct('[') | Tok::Punct('{') => depth -= 1,
             Tok::Ident(id) if depth == 0 => {
                 // `typedef int FOO __attribute__((x));` — `__attribute__` is
                 // followed by `(`, so it is not the declared name.

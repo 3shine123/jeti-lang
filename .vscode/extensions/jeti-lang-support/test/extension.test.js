@@ -42,6 +42,16 @@ const vscode = {
   // these; the mock only needs the constructors to exist.
   SemanticTokens: class { constructor(data) { this.data = data; } },
   SemanticTokensLegend: class { constructor(tokenTypes, tokenModifiers) { this.tokenTypes = tokenTypes; this.tokenModifiers = tokenModifiers; } },
+  // Inlay hints: the provider builds these from the server's hints. The enum
+  // matches VS Code (Type 1, Parameter 2).
+  InlayHint: class InlayHint {
+    constructor(position, label, kind) {
+      this.position = position;
+      this.label = label;
+      this.kind = kind;
+    }
+  },
+  InlayHintKind: { Type: 1, Parameter: 2 },
   EventEmitter: class {
     constructor() { this.handlers = []; }
     get event() { return (handler) => { this.handlers.push(handler); return { dispose: () => {} }; }; }
@@ -161,6 +171,7 @@ const vscode = {
     registerSignatureHelpProvider: (selector, provider) => registerProvider('signatureHelp', provider),
     registerDocumentSemanticTokensProvider: (selector, provider, legend) => registerProvider('semanticTokens', provider, legend),
     registerDocumentLinkProvider: (selector, provider) => registerProvider('documentLink', provider),
+    registerInlayHintsProvider: (selector, provider) => registerProvider('inlayHints', provider),
   },
   commands: {
     registerCommand: (id, _handler) => ({ id, dispose: () => {} }),
@@ -594,6 +605,51 @@ async function main() {
       `local variable must be variable: ${JSON.stringify(decodedTokens)}`,
     );
     console.log('ok  semantic tokens flow end-to-end (class + variable from the real server)');
+
+    // The inlay provider must bridge the server's hints to VS Code: without the
+    // registration VS Code never asks, which is the "no gray hints at all"
+    // failure mode. A free call with a known signature yields one hint per
+    // named parameter, at the argument's own position.
+    const inlayFile = path.join(dir, 'inlays.jeti');
+    const inlayText = [
+      'int add(int a, int b) { return a + b; }',
+      'int main(void) { return add(1, 2); }',
+      '',
+    ].join('\n');
+    const inlayUri = pathToFileURL(inlayFile).toString();
+    fire('open', documentFor(inlayFile, inlayText));
+    await waitUntil(
+      () => collections.get('jeti').get(inlayUri) !== undefined,
+      'the inlay probe document to publish once',
+    );
+    const inlayProvider = providers.get('inlayHints');
+    assert.ok(inlayProvider, 'inlay hints provider not registered');
+    let inlayHints = [];
+    for (let attempt = 0; attempt < 200 && inlayHints.length === 0; attempt += 1) {
+      const answer = await inlayProvider.provideInlayHints(
+        documentFor(inlayFile, inlayText),
+        { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } },
+      );
+      inlayHints = answer || [];
+      if (inlayHints.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    // The provider bridges both kinds: LSP Parameter (1) → VS Code Parameter
+    // (2), LSP Type (2) → VS Code Type (1). A free call yields one hint per
+    // named parameter, and the signature/use sites yield type hints.
+    const parameterHints = inlayHints.filter((h) => h.kind === 2);
+    assert.strictEqual(
+      parameterHints.length,
+      2,
+      `expected two parameter inlays: ${JSON.stringify(inlayHints)}`,
+    );
+    assert.strictEqual(parameterHints[0].label, 'a: ');
+    assert.strictEqual(parameterHints[1].label, 'b: ');
+    const typeHints = inlayHints.filter((h) => h.kind === 1);
+    assert.ok(
+      typeHints.some((h) => h.label === '-> int'),
+      `expected a return-type hint: ${JSON.stringify(inlayHints)}`,
+    );
+    console.log('ok  inlay hints flow end-to-end (parameter names + types from the real server)');
 
     // Build switches reach the server: `jeti.arc: false` must spawn with
     // `-fno-jeti-arc`, which is what makes an MRC project stop showing ARC

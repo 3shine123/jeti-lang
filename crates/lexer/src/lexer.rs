@@ -57,6 +57,11 @@ const KW_TABLE: &[(&str, KeywordKind)] = &[
     ("Class", KeywordKind::Class),
     ("SEL", KeywordKind::Sel),
     ("BOOL", KeywordKind::Bool),
+    // C99 `_Bool` (§6.2.5) — the spelling codegen emits for `_Bool` return
+    // types and `_Bool (*)(...)` function-pointer casts in vtables. Mapped to
+    // the same kind as `BOOL`, so it shares TypePrim::Bool (which codegen
+    // renders back as `_Bool`).
+    ("_Bool", KeywordKind::Bool),
     ("IMP", KeywordKind::Imp),
     ("NPZone", KeywordKind::NpZone),
     ("return", KeywordKind::Return),
@@ -331,7 +336,10 @@ impl<'a> Lexer<'a> {
         if c.is_ascii_alphabetic() || c == b'_' {
             while self.pos < self.source.len() {
                 let nc = self.source.as_bytes()[self.pos];
-                if nc.is_ascii_alphanumeric() || nc == b'_' {
+                // `$` is accepted mid-identifier (GNU C extension, and the
+                // compiler's own symbol convention — JETI_CLASS_$_X /
+                // JETI_VTABLE_$_X): generated C must re-parse cleanly.
+                if nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'$' {
                     self.advance();
                 } else {
                     break;

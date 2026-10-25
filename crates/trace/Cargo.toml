@@ -6,5 +6,6 @@ license = "Apache-2.0"
 
 [dependencies]
 jeti-ast = { path = "../ast" }
+jeti-cfg = { path = "../cfg" }
 jeti-ownership = { path = "../ownership" }
 jeti-cst = { path = "../cst" }

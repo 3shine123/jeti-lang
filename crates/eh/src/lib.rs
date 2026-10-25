@@ -530,6 +530,114 @@ fn desugar_decl(decl: &mut AstDecl, fx: &EffectTable) {
     }
 }
 
+// ─── Already-lowered detection (generated C re-entering the pipeline) ────────
+
+/// True when `name` is a compiler-reserved EH runtime identifier. The checker
+/// rejects the `__jeti_eh_` prefix in user source, so seeing one proves the
+/// body was produced by a PREVIOUS EH pass (generated C being re-transpiled).
+fn is_eh_ident(name: &str) -> bool {
+    name.starts_with("__jeti_eh_")
+}
+
+fn expr_has_eh_ident(e: &jeti_ast::AstExpr) -> bool {
+    use jeti_ast::AstExprData as E;
+    match &e.data {
+        E::VarRef { name, .. } => is_eh_ident(name),
+        E::FuncCall { name, callee, args, .. } => {
+            is_eh_ident(name)
+                || callee.as_deref().map(expr_has_eh_ident).unwrap_or(false)
+                || args.iter().any(expr_has_eh_ident)
+        }
+        E::IvarRef { obj, .. }
+        | E::PropRef { obj, .. }
+        | E::Boxed(obj)
+        | E::Await { inner: obj }
+        | E::Paren(obj) => expr_has_eh_ident(obj),
+        E::MsgSend { receiver, args, .. } => {
+            expr_has_eh_ident(receiver) || args.iter().any(expr_has_eh_ident)
+        }
+        E::Unary { operand, .. } => expr_has_eh_ident(operand),
+        E::Binary { left, right, .. } => expr_has_eh_ident(left) || expr_has_eh_ident(right),
+        E::Assign { target, value } => expr_has_eh_ident(target) || expr_has_eh_ident(value),
+        E::Cast { expr, .. } => expr_has_eh_ident(expr),
+        E::ArrayLit(v) | E::InitList(v) | E::Comma(v) => v.iter().any(expr_has_eh_ident),
+        E::DesignatedInit { expr, .. } => expr_has_eh_ident(expr),
+        E::DictLit { keys, values } => {
+            keys.iter().any(expr_has_eh_ident) || values.iter().any(expr_has_eh_ident)
+        }
+        E::Subscript { object, key } => expr_has_eh_ident(object) || expr_has_eh_ident(key),
+        E::Sizeof { expr, .. } => expr.as_deref().map(expr_has_eh_ident).unwrap_or(false),
+        E::Block { body, .. } => body.as_deref().map(stmt_has_eh_ident).unwrap_or(false),
+        E::Ternary { cond, then, else_ } => {
+            expr_has_eh_ident(cond) || expr_has_eh_ident(then) || expr_has_eh_ident(else_)
+        }
+        E::StmtExpr(stmts) => stmts.iter().any(stmt_has_eh_ident),
+        _ => false, // Int/Float/FloatRaw/Char/String/AtString/Bool/Selector/TypeLiteral/Alignof
+    }
+}
+
+fn var_chain_has_eh_ident(d: &jeti_ast::AstDecl) -> bool {
+    match &d.data {
+        jeti_ast::AstDeclData::Variable { init, next, .. } => {
+            init.as_deref().map(expr_has_eh_ident).unwrap_or(false)
+                || next.as_deref().map(var_chain_has_eh_ident).unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+fn stmt_has_eh_ident(s: &jeti_ast::AstStmt) -> bool {
+    use jeti_ast::AstStmtData as S;
+    match &s.data {
+        S::Expr(e) => expr_has_eh_ident(e),
+        S::Compound(v) => v.iter().any(stmt_has_eh_ident),
+        S::If { cond, then, else_ } => {
+            expr_has_eh_ident(cond)
+                || stmt_has_eh_ident(then)
+                || else_.as_deref().map(stmt_has_eh_ident).unwrap_or(false)
+        }
+        S::Switch { expr, body } => expr_has_eh_ident(expr) || stmt_has_eh_ident(body),
+        S::SwitchPat { expr, arms, .. } => {
+            expr_has_eh_ident(expr)
+                || arms.iter().any(|a| {
+                    a.guard.as_deref().map(expr_has_eh_ident).unwrap_or(false)
+                        || stmt_has_eh_ident(&a.body)
+                })
+        }
+        S::Case { value, body } => expr_has_eh_ident(value) || stmt_has_eh_ident(body),
+        S::Default(b) => stmt_has_eh_ident(b),
+        S::While { cond, body } | S::Do { body, cond } => {
+            expr_has_eh_ident(cond) || stmt_has_eh_ident(body)
+        }
+        S::For { init, cond, incr, body } => {
+            init.as_deref().map(stmt_has_eh_ident).unwrap_or(false)
+                || cond.as_ref().map(|c| expr_has_eh_ident(c)).unwrap_or(false)
+                || incr.as_deref().map(expr_has_eh_ident).unwrap_or(false)
+                || stmt_has_eh_ident(body)
+        }
+        S::ForIn { var, collection, body, .. } => {
+            expr_has_eh_ident(var) || expr_has_eh_ident(collection) || stmt_has_eh_ident(body)
+        }
+        S::Return(v) | S::Throw(v) => v.as_deref().map(expr_has_eh_ident).unwrap_or(false),
+        S::Try { try_block, catches, finally_block } => {
+            stmt_has_eh_ident(try_block)
+                || catches.iter().any(stmt_has_eh_ident)
+                || finally_block.as_deref().map(stmt_has_eh_ident).unwrap_or(false)
+        }
+        S::Catch { body, .. } => stmt_has_eh_ident(body),
+        S::Synchronized { lock, body } => expr_has_eh_ident(lock) || stmt_has_eh_ident(body),
+        S::Autoreleasepool(b) | S::NoArc(b) | S::Defer(b) | S::Finally(b) => stmt_has_eh_ident(b),
+        S::Asm { outputs, inputs, .. } => outputs
+            .iter()
+            .chain(inputs.iter())
+            .any(|o| expr_has_eh_ident(&o.expr)),
+        S::Decl(d) => {
+            d.name.as_deref().map(is_eh_ident).unwrap_or(false) || var_chain_has_eh_ident(d)
+        }
+        _ => false, // Goto/Label carry no identifiers
+    }
+}
+
 /// Rewrite a function body.
 ///
 /// NOTE: there is deliberately NO `__jeti_eh_flag = 0;` entry clear. The flag is
@@ -545,6 +653,17 @@ fn desugar_decl(decl: &mut AstDecl, fx: &EffectTable) {
 /// the flag right after the call). ARC's scope-end releases run *before* that
 /// return — the cross-frame cleanup this backend exists for.
 fn desugar_body(body: &mut AstStmt, ret: &AstType, is_main: bool, fx: &EffectTable) {
+    // Already-EH-lowered bodies (generated C re-entering the pipeline) must not
+    // be rewritten again: this pass would read `__jeti_eh_flag = 1` — a throw
+    // marker it emitted earlier — as a fresh throw site and wrap the remaining
+    // tail, including the catch dispatch, in a `flag == 0` guard. The catch
+    // then tests `flag == 1` inside a block entered only when `flag == 0`:
+    // every `@catch` became unreachable after one round-trip (probe:
+    // @throw subclass in @try, uncaught → abort). User source can never spell
+    // `__jeti_eh_*` (checker-reserved), so presence ⇒ already lowered.
+    if stmt_has_eh_ident(body) {
+        return;
+    }
     if let AstStmtData::Compound(stmts) = &mut body.data {
         let zero_ret = return_zero(ret);
         rewrite_stmts(stmts, &zero_ret, fx);

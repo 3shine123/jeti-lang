@@ -86,6 +86,17 @@ pub struct CstType {
     /// compile-time checker input — codegen never reads it, so the annotation
     /// costs zero at runtime (same contract as ObjC's).
     pub nulls: Nullability,
+    /// Anonymous inline struct/union body, as raw source text (`{ … }`), for a
+    /// type spelled `struct { … }` / `union { … }` directly in a declaration
+    /// (C99 6.7.2.1). `name` is `None` on this path. Codegen re-emits the text
+    /// verbatim so the layout survives the round trip.
+    pub anon_struct_body: Option<String>,
+    /// Function-pointer type whose parameter list ends in `...`
+    /// (`int (*fp)(int, ...)`). The ellipsis belongs to the *type* here, not to
+    /// a declaration, so it needs its own marker — dropping it made the cast
+    /// signature-inexact (AGENTS.md iron law 6) and the call "too many
+    /// arguments".
+    pub is_variadic: bool,
 }
 
 impl CstType {
@@ -104,6 +115,8 @@ impl CstType {
             protocols: Vec::new(), type_args: Vec::new(),
             array_size_name: None,
             nulls: Nullability::Unspecified,
+            anon_struct_body: None,
+            is_variadic: false,
         }
     }
 }
@@ -138,6 +151,10 @@ pub enum CstExprKind {
     /// `NPNumber` factory (it has no types), so the node is carried through
     /// to the checker, which rewrites it by the expression's static type.
     Boxed,
+    /// GNU C statement expression `({ stmts...; value; })` — the EH backend
+    /// emits one per caught evaluation. The value is the last expression
+    /// statement of the body.
+    StmtExpr,
 }
 
 // Statement kinds
@@ -290,6 +307,9 @@ pub enum CstExprData {
     },
     /// `@(expr)` — the boxed expression, before type-directed desugaring.
     Boxed(Box<CstExpr>),
+    /// `({ ... })` statement expression body: the statements exactly as
+    /// written, last expression statement included (it carries the value).
+    StmtExpr(Vec<CstStmt>),
 }
 
 // Statement node

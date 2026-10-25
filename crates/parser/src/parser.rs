@@ -33,6 +33,16 @@ pub struct Parser<'a> {
     /// rather than guessed, so a declaration whose *name* is `nullable` is
     /// never misread.
     annotating: bool,
+    /// True while `annotating` covers an `@interface` ivar type. Ivars accept
+    /// nullability only in the postfix spelling (`NPString * _Nullable x`):
+    /// clang rejects the prefix form there ("unknown type name" for the bare
+    /// spellings, "cannot be applied to non-pointer type" for the underscore
+    /// ones — probe-verified 2026-10-24), so the qualifier loop reports a
+    /// targeted error instead of silently recording it. C struct fields and
+    /// @implementation ivars parse through `parse_type_full` /
+    /// `parse_declaration` (never with `annotating` set), so they are
+    /// untouched by this flag.
+    ivar_position: bool,
     /// Inside an `NP_ASSUME_NONNULL_BEGIN` … `_END` region: an unannotated
     /// pointer type defaults to `Nonnull` (ObjC's audit-cost-O(1) trick).
     /// Toggled by the two marker identifiers in `parse_declaration`.
@@ -113,6 +123,7 @@ impl<'a> Parser<'a> {
             type_params: Vec::new(),
             generic_class_names: vec!["NPTask".into()],
             annotating: false,
+            ivar_position: false,
             nonnull_region: false,
             region_file: None,
             source_map: None,
@@ -342,7 +353,11 @@ impl<'a> Parser<'a> {
              // the builtin object type only wins where a TYPE is expected —
              // parse_type_* consumes it there first. C-superset iron law:
              // `struct User { int id; };` and `int id = 42;` must parse.
-             self.current.keyword == KeywordKind::Id)) ||
+             self.current.keyword == KeywordKind::Id ||
+             // `_cmd` degrades the same way: the generated-C method shape
+             // `(NPObject * self, SEL _cmd, ...)` must re-parse cleanly, and
+             // in plain C `_cmd` is an ordinary identifier.
+             self.current.keyword == KeywordKind::Cmd)) ||
         self.is_contextual_kw_ident()
     }
 
@@ -1053,6 +1068,18 @@ impl<'a> Parser<'a> {
                 // rule in AGENTS.md; the same reasoning retires ObjC's
                 // macro-based spelling without giving up its syntax.
                 if let Some(n) = self.nullability_prefix() {
+                    if self.ivar_position {
+                        // Consume + record anyway: one targeted error, the
+                        // declaration still parses (the annotation keeps its
+                        // meaning for the checker), and no cascade from a
+                        // dangling token. `error_at` on the current token —
+                        // plain `error()` would point at `previous` (the
+                        // section's `{`), not the annotation word.
+                        let tok = self.current.clone();
+                        self.error_at(
+                            &tok,
+                            "nullability annotations in ivar declarations must follow the pointer (NPString * _Nullable x) — the prefix form is only legal in method and property positions");
+                    }
                     self.advance();
                     t.nulls = n;
                     true
@@ -1103,15 +1130,15 @@ impl<'a> Parser<'a> {
             else if self.match_keyword(KeywordKind::Sel) { t.prim = TypePrim::Sel; }
             else if self.match_keyword(KeywordKind::Instancetype) { t.prim = TypePrim::Instancetype; }
             else if self.match_keyword(KeywordKind::Struct) || self.match_keyword(KeywordKind::Union) || self.match_keyword(KeywordKind::Enum) {
+                // match_keyword already consumed the tag keyword, so it is
+                // `self.previous` now (not `self.current`, which is the tag
+                // identifier). Read it before advancing over the name.
+                let tag = match self.previous.keyword {
+                    KeywordKind::Union => TagKind::Union,
+                    KeywordKind::Enum => TagKind::Enum,
+                    _ => TagKind::Struct,
+                };
                 if self.current.kind == TokenKind::Identifier {
-                    // match_keyword already consumed the tag keyword, so it is
-                    // `self.previous` now (not `self.current`, which is the tag
-                    // identifier). Read it before advancing over the name.
-                    let tag = match self.previous.keyword {
-                        KeywordKind::Union => TagKind::Union,
-                        KeywordKind::Enum => TagKind::Enum,
-                        _ => TagKind::Struct,
-                    };
                     self.advance();
                     t.prim = TypePrim::Named;
                     t.is_struct = true;
@@ -1119,6 +1146,23 @@ impl<'a> Parser<'a> {
                     // types, so codegen must echo back the keyword the source used.
                     t.tag = tag;
                     t.name = Some(self.previous_text().to_string());
+                } else if tag != TagKind::Enum && self.check(TokenKind::LBrace) {
+                    // Anonymous inline definition in type position:
+                    // `struct { … } name` / `union { … } name` (C99 6.7.2.1) —
+                    // the generated runtime emits this for its intern table.
+                    // Consume the body (so parsing stays in sync) and keep the
+                    // raw text so codegen can re-emit the layout verbatim.
+                    let body_start = self.current.start;
+                    if self.parse_struct_body(tag == TagKind::Union).is_some() {
+                        let body_end = self.previous.start + self.previous.length;
+                        if body_end >= body_start && body_end <= self.source.len() {
+                            t.prim = TypePrim::Named;
+                            t.is_struct = true;
+                            t.tag = tag;
+                            t.name = None;
+                            t.anon_struct_body = Some(self.source[body_start..body_end].to_string());
+                        }
+                    }
                 }
             }
 else if self.match_keyword(KeywordKind::Typeof) {
@@ -1346,7 +1390,10 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 while self.match_token(TokenKind::Star) {
                     bt.is_pointer = true;
                 }
-                if self.current.kind == TokenKind::Identifier {
+                // is_name_token, not a bare Identifier: generated-C vtable
+                // members are named `copy`/`retain` — contextual keywords that
+                // degrade to identifiers in every name position.
+                if self.is_name_token() {
                     bt.block_name = Some(self.current_text().to_string());
                     self.advance();
                 }
@@ -1354,20 +1401,17 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 if self.match_token(TokenKind::LParen) {
                     let mut params: Vec<CstType> = Vec::new();
                     while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
-                        if let Some(ptype) = self.parse_type_annotated() {
-                            if self.current.kind == TokenKind::Identifier
-                                || (self.current.kind == TokenKind::Keyword
-                                    && (self.current.keyword == KeywordKind::Self_
-                                        || self.is_contextual_kw_ident())) {
-                                self.advance();
-                            }
-                            params.push(ptype);
-                        } else {
-                            self.advance();
-                        }
-                        if !self.match_token(TokenKind::Comma) { break; }
+                if let Some(ptype) = self.parse_type_annotated() {
+                    if self.is_name_token() {
+                        self.advance();
                     }
-                    // Link params via next
+                    params.push(ptype);
+                } else {
+                    self.advance();
+                }
+                if !self.match_token(TokenKind::Comma) { break; }
+            }
+            // Link params via next
                     let mut head = None;
                     let mut tail: &mut Option<Box<CstType>> = &mut head;
                     for p in params {
@@ -1384,7 +1428,9 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 ft.is_fn_ptr = true;
                 ft.is_pointer = true;
                 ft.subtype = Some(Box::new(t));
-                if self.current.kind == TokenKind::Identifier {
+                // is_name_token: `NPObject * (*copy)(NPObject *, SEL);` — the
+                // vtable's fn-ptr members named after contextual keywords.
+                if self.is_name_token() {
                     ft.block_name = Some(self.current_text().to_string());
                     self.advance();
                     // Function pointer ARRAY: T (*name[N])(params) — a
@@ -1408,15 +1454,22 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 if self.match_token(TokenKind::LParen) {
                     let mut params: Vec<CstType> = Vec::new();
                     while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
+                        // `int (*fp)(int, ...)` — the trailing ellipsis belongs
+                        // to the TYPE: record it so the emitted cast stays
+                        // signature-exact (AGENTS.md iron law 6).
+                        if self.check(TokenKind::Ellipsis) {
+                            ft.is_variadic = true;
+                            self.advance();
+                            break;
+                        }
                         if let Some(ptype) = self.parse_type_full() {
                             // Optional parameter name. `self` is keyword-ized by
                             // the lexer, so a parameter named `self` used to be
                             // left unconsumed here, breaking the rest of the
                             // parameter list (and producing a misleading error).
-                            if self.current.kind == TokenKind::Identifier
-                                || (self.current.kind == TokenKind::Keyword
-                                    && (self.current.keyword == KeywordKind::Self_
-                                        || self.is_contextual_kw_ident())) {
+                            // is_name_token covers it plus the other keywords
+                            // that degrade to identifiers in name positions.
+                            if self.is_name_token() {
                                 self.advance();
                             }
                             params.push(ptype);
@@ -1438,6 +1491,28 @@ else if self.match_keyword(KeywordKind::Typeof) {
             } else {
                 self.consume(TokenKind::RParen, "expected ')'");
             }
+        }
+
+        // C99 6.7.2.1 array suffix in type position: `T[]`, `T[3]`, `T *[]`.
+        // The generated-C protocol metadata emits compound literals of array
+        // type — `(NPProtocolMethod[]){…}` and `(struct NPProtocol *[]){…}` —
+        // where the suffix sits AFTER the base type / pointer stars, so it is
+        // consumed here. Declarator-level arrays (`name[size]`) are handled by
+        // the declaration paths, which see a NAME (not `[`) after the type, so
+        // this never over-consumes a declaration.
+        while self.match_token(TokenKind::LBracket) {
+            let mut arr = CstType::new(TypePrim::Named);
+            arr.subtype = Some(Box::new(t));
+            arr.is_array = true;
+            if self.current.kind == TokenKind::Integer {
+                arr.array_size = self.current_text().parse().unwrap_or(0);
+                self.advance();
+            } else if self.current.kind == TokenKind::Identifier {
+                arr.array_size_name = Some(self.current_text().to_string());
+                self.advance();
+            }
+            self.consume(TokenKind::RBracket, "expected ']'");
+            t = arr;
         }
 
         Some(t)
@@ -2084,6 +2159,44 @@ line: pri_line,
 
         // ( expression ) or (type)cast
         if self.match_token(TokenKind::LParen) {
+            // GNU C statement expression: `({ stmts...; value; })` — the EH
+            // backend emits one per caught evaluation. `({` is neither a cast
+            // type nor an expression start, so it must be claimed here before
+            // either interpretation below. The body keeps every statement as
+            // written; the value is the last expression statement.
+            if self.check(TokenKind::LBrace) {
+                self.advance(); // consume `{`
+                let mut body = Vec::new();
+                while !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
+                    let start = self.current.start;
+                    match self.parse_statement() {
+                        Some(s) => {
+                            body.push(s);
+                            if self.panic_mode {
+                                self.panic_mode = false;
+                                if self.current.start == start && !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
+                                    self.advance();
+                                }
+                            }
+                        }
+                        None => {
+                            self.synchronize();
+                            if self.current.start == start && !self.check(TokenKind::RBrace) && !self.check(TokenKind::Eof) {
+                                self.advance();
+                            }
+                        }
+                    }
+                }
+                self.consume(TokenKind::RBrace, "expected '}' in statement expression");
+                self.consume(TokenKind::RParen, "expected ')' after statement expression");
+                return Some(CstExpr {
+                    kind: CstExprKind::StmtExpr, expr_type: None,
+                    line: pri_line, col: pri_col,
+                    data: CstExprData::StmtExpr(body),
+                    end_line: self.previous.end_line,
+                    end_col: self.previous.end_col,
+                });
+            }
             let is_cast = {
                 if self.current.kind == TokenKind::Keyword {
                     let kw = self.current.keyword;
@@ -2780,8 +2893,13 @@ line: pri_line,
             }
             // Dot access: expr.property
             if self.match_token(TokenKind::Dot) {
-                if self.current.kind == TokenKind::Identifier ||
-                   (self.current.kind == TokenKind::Keyword && matches!(self.current.keyword, KeywordKind::Id | KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype)) {
+                // The member name is any name token: a struct field may be
+                // spelled with a keyword that degrades to an identifier
+                // (`retain`, `copy`, `_cmd`, …) — the generated-C vtable
+                // dispatch does exactly `->retain`. Class/Sel/Instancetype are
+                // kept explicitly (is_name_token does not cover them).
+                if self.is_name_token() ||
+                   (self.current.kind == TokenKind::Keyword && matches!(self.current.keyword, KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype)) {
                     let prop = self.current_text().to_string();
                     self.advance();
                     expr = CstExpr {
@@ -2825,10 +2943,11 @@ line: pri_line,
                     end_col: self.previous.end_col,
 };
             }
-            // Arrow access: expr->property
+            // Arrow access: expr->property — member name is any name token,
+            // see the Dot branch above for why keyword-spelled fields matter.
             else if self.match_token(TokenKind::Arrow) {
-                if self.current.kind == TokenKind::Identifier ||
-                   (self.current.kind == TokenKind::Keyword && matches!(self.current.keyword, KeywordKind::Id | KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype)) {
+                if self.is_name_token() ||
+                   (self.current.kind == TokenKind::Keyword && matches!(self.current.keyword, KeywordKind::Class | KeywordKind::Sel | KeywordKind::Instancetype)) {
                     let prop = self.current_text().to_string();
                     self.advance();
                     expr = CstExpr {
@@ -3035,8 +3154,8 @@ line: pri_line,
                     TokenKind::Keyword => matches!(self.current_text(),
                         "struct" | "union" | "enum" | "void" | "char" | "short" |
                         "int" | "long" | "float" | "double" | "signed" | "unsigned" |
-                        "bool" | "const" | "volatile" | "id" | "Class" | "SEL" |
-                        "instancetype"),
+                        "bool" | "_Bool" | "const" | "volatile" | "id" | "Class" |
+                        "SEL" | "instancetype"),
                     _ => false,
                 };
                 if looks_like_type {
@@ -3588,11 +3707,15 @@ line: pri_line,
 
     fn parse_asm_clobbers(&mut self) -> Option<Vec<String>> {
         let mut cl = Vec::new();
+        // Empty clobber section: the caller consumed the section's `:`, and a
+        // well-formed asm may leave the list empty (`asm("…" : "+r"(x) : : );`).
+        // The next token is then `)` — not a string — so read nothing. (Only
+        // the LAST section is ever parsed by the caller, so a non-string here
+        // means "empty list", never a stray token from a later section.)
+        if !self.check(TokenKind::String) {
+            return Some(cl);
+        }
         loop {
-            if !self.check(TokenKind::String) {
-                self.error("expected clobber string literal in asm");
-                return None;
-            }
             self.advance();
             cl.push(self.previous_text().to_string());
             if !self.match_token(TokenKind::Comma) { break; }
@@ -4571,15 +4694,25 @@ line: pri_line,
     /// type arguments inside builtin calls like `__builtin_offsetof(struct Pt, y)`,
     /// `__builtin_types_compatible_p(int, long)`, and `va_arg(ap, int)`.
     fn is_builtin_type_arg_start(&self) -> bool {
-        if self.current.kind != TokenKind::Keyword { return false; }
-        matches!(self.current.keyword,
-            KeywordKind::Int | KeywordKind::Char | KeywordKind::Float |
-            KeywordKind::Double | KeywordKind::Long | KeywordKind::Short |
-            KeywordKind::Void | KeywordKind::Bool |
-            KeywordKind::Struct | KeywordKind::Union | KeywordKind::Enum |
-            KeywordKind::Signed | KeywordKind::Unsigned |
-            KeywordKind::Const | KeywordKind::Volatile |
-            KeywordKind::Typeof)
+        if self.current.kind == TokenKind::Keyword {
+            return matches!(self.current.keyword,
+                KeywordKind::Int | KeywordKind::Char | KeywordKind::Float |
+                KeywordKind::Double | KeywordKind::Long | KeywordKind::Short |
+                KeywordKind::Void | KeywordKind::Bool |
+                KeywordKind::Struct | KeywordKind::Union | KeywordKind::Enum |
+                KeywordKind::Signed | KeywordKind::Unsigned |
+                KeywordKind::Const | KeywordKind::Volatile |
+                KeywordKind::Typeof);
+        }
+        // A registered type name (identifier) also opens a type argument — the
+        // common `va_arg(ap, NPObject *)` case, where the type is a class/struct
+        // pointer rather than a builtin keyword. In valid C a type name cannot
+        // double as a value in the same scope, so this is unambiguous in
+        // argument position (the same decision the cast path makes in is_cast).
+        if self.current.kind == TokenKind::Identifier {
+            return self.is_type_name(&self.current_text());
+        }
+        false
     }
 
     // ─── Declaration parsing ────────────────────────────────────────────
@@ -4741,6 +4874,18 @@ line: pri_line,
                         pt = arr_type;
                     }
                     n
+                } else if let Some(bn) = pt.block_name.take() {
+                    // Block/fn-ptr declarator: `void (^blk)(…)` / `int (*cb)(…)` —
+                    // the type parser consumed the declarator name into
+                    // block_name, so no name token follows here. Adopt it as the
+                    // parameter name and strip it from the type: codegen's
+                    // format_param_decl re-inserts the param name into the
+                    // (^…)/(*…) position, so the emitted C keeps exactly one
+                    // name. Without this the param registered nameless and every
+                    // body reference failed with "use of undeclared identifier"
+                    // when generated C was re-parsed (vfs_manager
+                    // enumerateChildrenUsingBlock_, round-trip closed loop).
+                    bn
                 } else { String::new() };
                 // Parameter-level attributes: `int x __attribute__((unused))`
                 let param_attrs = self.parse_attributes();
@@ -5102,7 +5247,7 @@ line: pri_line,
                     is_block_qual: false, is_weak_qual: false, is_unsigned: false,
                     block_name: None, protocols: Vec::new(), type_args: Vec::new(),
                     array_size_name: None, is_fn_ptr: false, is_complex: false,
-                    nulls: Nullability::Unspecified,
+                    nulls: Nullability::Unspecified, anon_struct_body: None, is_variadic: false,
                 };
                 // `struct Name *p`, `struct Name **p`, `struct Name *arr[]` —
                 // consume the pointer suffix(es) so the declared variable gets
@@ -5475,6 +5620,44 @@ line: pri_line,
             // Consume the `enum` keyword so parse_enum sees the tag name or `{`
             // (parse_enum expects current to be IDENT or LBrace, NOT the enum kw).
             self.advance();
+            // `typedef enum Tag Alias;` — a tag reference with a trailing alias and
+            // NO body. parse_enum's tag-reference path expects `;` immediately after
+            // the tag, so it trips on the alias. Detect this two-identifier form and
+            // build the typedef directly; the tag itself is normally defined elsewhere
+            // (e.g. `enum Tag {…};` a few lines up), so only the alias needs a name.
+            if self.current.kind == TokenKind::Identifier {
+                let saved_lex = self.lexer.save_pos();
+                let saved_tok = self.current.clone();
+                let tag = self.current_text().to_string();
+                self.advance();
+                if self.current.kind == TokenKind::Identifier {
+                    let alias = self.current_text().to_string();
+                    self.advance();
+                    self.consume(TokenKind::Semicolon, "expected ';' after top level declarator");
+                    self.add_type_name(&tag);
+                    self.add_type_name(&alias);
+                    return Some(CstDecl {
+                        kind: CstDeclKind::Typedef,
+                        line: start.0, column: start.1,
+                        end_line: self.previous.end_line, end_column: self.previous.end_col,
+                        name: Some(alias.clone()),
+                        next: None,
+                        data: CstDeclData::Typedef {
+                            alias_type: Some(Box::new(CstType {
+                                prim: TypePrim::Named, is_struct: true,
+                                tag: TagKind::Enum,
+                                name: Some(tag),
+                                ..CstType::new(TypePrim::Named)
+                            })),
+                            struct_fields: Vec::new(),
+                        },
+                        attributes: Vec::new(),
+                    });
+                }
+                // Not the alias form (`enum Tag {` or `enum Tag;`) — rewind.
+                self.lexer.restore_pos(saved_lex);
+                self.current = saved_tok;
+            }
             let mut enum_decl = self.parse_enum()?;
             if self.current.kind == TokenKind::Identifier {
                 let alias = self.current_text().to_string();
@@ -5845,10 +6028,11 @@ if self.current.kind == TokenKind::Identifier {
             } else {
                 self.consume(TokenKind::Semicolon, "expected ';' after field");
             }
-            while self.match_keyword(KeywordKind::Static) || self.match_keyword(KeywordKind::Const) ||
-                  self.match_keyword(KeywordKind::Volatile) || self.match_keyword(KeywordKind::Inline) {
-                // skip
-            }
+            // NOTE: do not skip qualifiers here. A `const` / `volatile` right
+            // after the `;` belongs to the NEXT field (`const char *a; const
+            // char *b;`) — eating it silently dropped the second field's const,
+            // and the vtable's `const char *(*)(…)` members then mismatched
+            // their implementations.
         }
                 self.consume(TokenKind::RBrace, "expected '}'");
         Some(fields)
@@ -6142,7 +6326,11 @@ if self.current.kind == TokenKind::Identifier {
                 }
                 // IBOutlet qualifier
                 let iboutlet = false;
-                if let Some(ivar_type) = self.parse_type_annotated() {
+                let saved_ivar = self.ivar_position;
+                self.ivar_position = true;
+                let ivar_type = self.parse_type_annotated();
+                self.ivar_position = saved_ivar;
+                if let Some(ivar_type) = ivar_type {
                     while self.match_name() {
                         let ivar_name = self.previous_text().to_string();
                         let mut final_type = ivar_type.clone();

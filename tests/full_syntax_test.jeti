@@ -35,6 +35,7 @@ struct FsWidget {
     unsigned flags : 3;        // 位域
     int in;
 };
+
 typedef int FsRow4[4];                          // typedef 数组
 union FsMix { int i; float f; char bytes[4]; }; // union（tag 与 struct 区分）
 
@@ -755,7 +756,7 @@ NP_ASSUME_NONNULL_BEGIN
 @interface FsGuarded : NPObject {
 @public
     NPString *inRegion;                 // ivar 位：区域内默认 nonnull
-    nullable NPString *optIvar;         // ivar 位显式 nullable
+    NPString * _Nullable optIvar;         // ivar 位显式 nullable
 }
 - (void)take:(NPString *)s;             // 参数位：区域默认 nonnull
 - (void)optOut:(nullable NPString *)s;  // 区域内显式退出

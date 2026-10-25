@@ -60,6 +60,25 @@ impl CSignatures {
         self.decls.get(name).map(|(k, d)| (*k, d))
     }
 
+    /// A table with one named function declaration (the index's inlay tests).
+    #[cfg(test)]
+    pub fn with_function(name: &str, params: Vec<String>) -> CSignatures {
+        let mut table = CSignatures::default();
+        table.decls.insert(
+            name.to_string(),
+            (
+                DeclKind::Function,
+                CDecl {
+                    header: "test.h".to_string(),
+                    label: name.to_string(),
+                    type_spelling: "int".to_string(),
+                    params,
+                },
+            ),
+        );
+        table
+    }
+
     pub fn macro_name(&self, name: &str) -> Option<&str> {
         self.macros.get(name).map(|m| m.header.as_str())
     }
@@ -157,17 +176,23 @@ pub fn substitute_params(body: &str, params: &[String], args: &[String]) -> Stri
 /// do not belong here: this table is only the passthrough surface. The cache
 /// is a table, not a single slot: two documents with different header sets
 /// are edited alternately, and a single slot would re-run `cc` per keystroke.
-pub fn signatures_for(headers: &[String]) -> Arc<CSignatures> {
+pub fn signatures_for(headers: &[String], dirs: &[String]) -> Arc<CSignatures> {
     static CACHE: OnceLock<Mutex<HashMap<String, Arc<CSignatures>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut fingerprint = headers.to_vec();
     fingerprint.sort();
+    // The search path decides what `cc -E` can resolve (a quoted `jeti/runtime.h`
+    // is only reachable through the project's `-I` dirs), so it is part of the
+    // key — a header that resolves under one path must not answer under another.
+    let mut dir_key = dirs.to_vec();
+    dir_key.sort();
+    fingerprint.push(dir_key.join("\u{1}"));
     let fingerprint = fingerprint.join("\u{1}");
     let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(hit) = guard.get(&fingerprint) {
         return hit.clone();
     }
-    let table = Arc::new(extract(headers));
+    let table = Arc::new(extract(headers, dirs));
     guard.insert(fingerprint, table.clone());
     table
 }
@@ -206,27 +231,30 @@ fn parse_aka(stderr: &str) -> Option<String> {
 /// One run *per header* (not a merged one): line-marker attribution inside a
 /// merged run can misbind a transitively-included `sys/time.h` to a wanted
 /// `time.h`, while a solo run's first header marker is the header itself.
-fn extract(headers: &[String]) -> CSignatures {
+fn extract(headers: &[String], dirs: &[String]) -> CSignatures {
     let mut table = CSignatures::default();
     // Unique per process: the server and test binaries share /tmp, and a
     // fixed name would let one overwrite the file the other is compiling.
     let tmp = std::env::temp_dir().join(format!("jeti-lsp-sigscan-{}.c", std::process::id()));
+    // `-I` dirs precede the input file; a quoted include such as
+    // `jeti/runtime.h` is reachable only through them.
+    let include_args: Vec<String> = dirs.iter().map(|dir| format!("-I{dir}")).collect();
     for header in headers {
         let source = format!("#include <{header}>\n");
         if std::fs::write(&tmp, &source).is_err() {
             return table;
         }
-        if let Ok(output) = std::process::Command::new("cc")
-            .args(["-E", "-xc", &tmp.to_string_lossy()])
-            .output()
-        {
+        let mut decl_args: Vec<String> = vec!["-E".into(), "-xc".into()];
+        decl_args.extend(include_args.iter().cloned());
+        decl_args.push(tmp.to_string_lossy().to_string());
+        if let Ok(output) = std::process::Command::new("cc").args(&decl_args).output() {
             let preprocessed = String::from_utf8_lossy(&output.stdout);
             scan_declarations(&preprocessed, header, &mut table);
         }
-        if let Ok(output) = std::process::Command::new("cc")
-            .args(["-E", "-dM", "-xc", &tmp.to_string_lossy()])
-            .output()
-        {
+        let mut def_args: Vec<String> = vec!["-E".into(), "-dM".into(), "-xc".into()];
+        def_args.extend(include_args.iter().cloned());
+        def_args.push(tmp.to_string_lossy().to_string());
+        if let Ok(output) = std::process::Command::new("cc").args(&def_args).output() {
             let defines = String::from_utf8_lossy(&output.stdout);
             scan_defines(&defines, header, &mut table);
         }
@@ -433,7 +461,10 @@ fn is_type_word(word: &str) -> bool {
 /// Does a line-marker path name this header? Component match, so `/x/my` +
 /// `stdio.h` cannot pass for `/x/mystdio.h`.
 fn is_header_file(path: &str, header: &str) -> bool {
-    path.rsplit('/').next() == Some(header)
+    // The header may carry a path (`jeti/runtime.h`) while the line marker is
+    // absolute (`…/include/jeti/runtime.h`), so match the trailing path rather
+    // than only the basename.
+    path == header || path.ends_with(&format!("/{header}"))
 }
 
 /// Scan one header's `cc -E` output for prototypes, extern variables, and
@@ -911,5 +942,20 @@ extern char *fsc_dst, *fsc_src;
         assert_eq!(spell(&toks), "const char *restrict");
         let toks = tokenize("int fsc_max ( int a , int b )");
         assert_eq!(spell(&toks), "int fsc_max(int a, int b)");
+    }
+
+    #[test]
+    fn quoted_c_header_signatures_resolve_through_include_dirs() {
+        // `jeti/runtime.h` reaches generated code through a QUOTED include and is
+        // only resolvable via the project's `-I` dirs — the gap this closes.
+        // (`include/` sits at the workspace root, two levels above this crate.)
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../include");
+        let table = signatures_for(
+            &["jeti/runtime.h".to_string()],
+            &[root.to_string_lossy().to_string()],
+        );
+        let (kind, decl) = table.decl("jeti_release").expect("jeti_release in runtime.h");
+        assert!(matches!(kind, DeclKind::Function), "{kind:?}");
+        assert_eq!(decl.params, vec!["NPObject *obj".to_string()]);
     }
 }

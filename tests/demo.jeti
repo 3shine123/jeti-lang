@@ -1,19 +1,9 @@
 #import <Foundation/Foundation.hje>
-#include <stdio.h>
 
-int main(void) {
-    int i;
-    scanf("%d", &i);
-    switch (i) {
-        case < 3:
-            printf("123\n");
-            break;
-        case > 3:
-            printf("456\n");
-            break;
-        default:
-            printf("Other\n");
+int main(int argc, const char* argv[]) {
+    @autoreleasepool {
+        // Your code here
+        int a = 0;
     }
-
     return 0;
 }

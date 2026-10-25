@@ -304,6 +304,7 @@ name = "jeti-trace"
 version = "0.1.0"
 dependencies = [
  "jeti-ast",
+ "jeti-cfg",
  "jeti-cst",
  "jeti-ownership",
 ]

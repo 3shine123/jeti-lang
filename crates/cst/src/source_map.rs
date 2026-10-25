@@ -115,6 +115,40 @@ impl SourceFile {
         }
         if units == pos.character { Some(line_end) } else { None }
     }
+
+    /// The LSP range for `span` in this file's text, projected from the
+    /// precomputed line table: a binary-searched line plus a single line's
+    /// UTF-16 count, never a whole-file scan. Behavior matches
+    /// [`SourceSpan::to_lsp_range`] exactly; the table and `text` must agree
+    /// (the caller checks [`Self::len`]).
+    pub fn to_lsp_range(&self, span: &SourceSpan, text: &str) -> LspRange {
+        let to_pos = |line: u32, col: u32, byte: Option<usize>| {
+            // A byte offset is the precise identity. A line/byte-column pair
+            // (legacy spans) is clamped to the line's own '\n' — the last
+            // position the raw-text path would reach on that line.
+            let byte = match byte {
+                Some(b) => b,
+                None => {
+                    let base = self.line_to_offset(line).unwrap_or(0);
+                    let end = self
+                        .line_starts
+                        .get(line as usize)
+                        .map(|&next| next.saturating_sub(1))
+                        .unwrap_or(text.len());
+                    (base + col.saturating_sub(1) as usize).min(end)
+                }
+            };
+            let offset = byte.min(text.len());
+            let line = self.offset_to_line(offset);
+            let line_start = self.line_to_offset(line).unwrap_or(0);
+            let character = text[line_start..offset].encode_utf16().count() as u32;
+            LspPosition { line: line.saturating_sub(1), character }
+        };
+        LspRange {
+            start: to_pos(span.start_line, span.start_col, span.start_byte),
+            end: to_pos(span.end_line, span.end_col, span.end_byte),
+        }
+    }
 }
 
 /// Byte offset of the start of a **0-based** line, or `None` past the end.
@@ -273,7 +307,9 @@ impl SourceSpan {
     ///
     /// Prefers the recorded byte offsets (exact); otherwise converts the
     /// 1-based line/byte-column fields. This is the single place the internal
-    /// model is projected onto LSP's UTF-16 coordinates.
+    /// model is projected onto LSP's UTF-16 coordinates. Hot paths with a
+    /// [`SourceMap`] in hand prefer [`SourceMap::to_lsp_range`] (table-driven,
+    /// O(log n)); this raw-text form scans per call.
     pub fn to_lsp_range(&self, text: &str) -> LspRange {
         let to_pos = |line: u32, col: u32, byte: Option<usize>| match byte {
             Some(b) => SourceFile::offset_to_lsp(text, b),
@@ -494,6 +530,20 @@ impl SourceMap {
     /// Map one inline-buffer `(line, col)` to `(file, source line, source col,
     /// origin)`, applying the macro column correction. `None` when the inline
     /// line is not covered by any region.
+
+    /// The LSP range for `span`, projected through this map's line tables
+    /// where `span`'s file is registered (O(log n) per position — the hot
+    /// diagnostic/index paths); an unregistered file falls back to
+    /// [`SourceSpan::to_lsp_range`]'s raw-text scan. `text` is that file's
+    /// content; the length check guards against a table built from another
+    /// revision of it.
+    pub fn to_lsp_range(&self, span: &SourceSpan, text: &str) -> LspRange {
+        match self.registry.get(span.file) {
+            Some(file) if file.len == text.len() => file.to_lsp_range(span, text),
+            _ => span.to_lsp_range(text),
+        }
+    }
+
     /// Resolve a CST/AST node position pair to a [`SourceSpan`].
     ///
     /// Node positions follow the parser's convention: `line` is a line in the
@@ -791,6 +841,54 @@ mod tests {
         let r2 = sp2.to_lsp_range(text);
         assert_eq!(r2.start, LspPosition { line: 0, character: 6 });
         assert_eq!(r2.end, LspPosition { line: 0, character: 8 });
+    }
+
+    #[test]
+    fn table_projection_matches_raw_text_projection() {
+        // Multi-line, mixed UTF-8: the table-driven fast path must project
+        // every span exactly as the raw-text path does. Node positions always
+        // land on char boundaries (token starts/ends), so parity is asserted
+        // for boundary columns — both paths reject the rest identically.
+        let text = "l1\nhéllo 中文\nlast\n";
+        let mut reg = SourceRegistry::new();
+        let f = reg.add("u.jeti", text);
+        let regions = (1..=3)
+            .map(|l| LineRegion {
+                out_start: l, out_end: l, file: f, src_start: l, origin: SpanOrigin::Source,
+            })
+            .collect();
+        let sm = SourceMap::from_regions(regions, reg);
+        for (line_idx, line_text) in text.split_inclusive('\n').enumerate() {
+            let l = (line_idx + 1) as u32;
+            // 1-based byte columns at every char boundary, plus line end.
+            let cols: Vec<u32> = line_text
+                .char_indices()
+                .map(|(i, _)| i as u32 + 1)
+                .chain(std::iter::once(line_text.len() as u32))
+                .collect();
+            for &s in &cols {
+                for &e in cols.iter().filter(|&&c| c >= s) {
+                    let sp = sm.span_from_inline((l, s), (l, e));
+                    assert_eq!(
+                        sm.to_lsp_range(&sp, text),
+                        sp.to_lsp_range(text),
+                        "byte span {sp:?}"
+                    );
+                }
+            }
+        }
+        // A legacy byte-less span (line/col only) projects identically.
+        let legacy = SourceSpan {
+            file: f, start_line: 2, start_col: 2, end_line: 2, end_col: 8,
+            start_byte: None, end_byte: None, origin: SpanOrigin::Source,
+        };
+        assert_eq!(sm.to_lsp_range(&legacy, text), legacy.to_lsp_range(text));
+        // An unregistered file takes the raw fallback.
+        let other = SourceSpan {
+            file: 9, start_line: 2, start_col: 2, end_line: 2, end_col: 8,
+            start_byte: None, end_byte: None, origin: SpanOrigin::Source,
+        };
+        assert_eq!(sm.to_lsp_range(&other, text), other.to_lsp_range(text));
     }
 
     #[test]

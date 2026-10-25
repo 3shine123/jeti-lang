@@ -30,7 +30,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jeti_cst::diagnostic::{Diagnostic, Severity};
-use jeti_cst::source_map::{LspPosition, LspRange, SourceFile};
+use jeti_cst::source_map::{LspPosition, LspRange, SourceFile, SourceMap};
 use jetic::pipeline::Pipeline;
 use serde_json::{json, Value};
 
@@ -346,7 +346,7 @@ pub fn analyze_for_editor(
     let diagnostics = analysis
         .diagnostics
         .iter()
-        .map(|d| diagnostic_to_json(d, path, text, &resolve))
+        .map(|d| diagnostic_to_json(d, path, text, &analysis.source_map, &resolve))
         .collect();
     // The index is built from the same AST the diagnostics came from, so a
     // request never re-runs the front end; a document whose front end failed
@@ -427,6 +427,7 @@ pub fn diagnostic_to_json(
     diagnostic: &Diagnostic,
     main_path: &str,
     main_text: &str,
+    source_map: &SourceMap,
     resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Value {
     let ownership = if same_file(&diagnostic.file, main_path) {
@@ -436,8 +437,9 @@ pub fn diagnostic_to_json(
     };
     // LSP cannot express "no position": a diagnostic whose file text is not
     // available keeps the file-wide default instead of inventing a column.
+    let span = diagnostic.to_source_span();
     let range: LspRange = match ownership.as_deref() {
-        Some(text) => diagnostic.to_source_span().to_lsp_range(text),
+        Some(text) => source_map.to_lsp_range(&span, text),
         None => LspRange::default(),
     };
     json!({
@@ -621,6 +623,11 @@ impl Server {
                         // starts, so the popup appears exactly when it can say
                         // something.
                         "signatureHelpProvider": { "triggerCharacters": [":", "(", ",", "-"] },
+                        // Parameter names at call sites: gray, hover-less text
+                        // the editor draws over the source (clangd's parameter
+                        // hints). Message sends need none — their selectors
+                        // already name the arguments.
+                        "inlayHintProvider": { "resolveProvider": false },
                     },
                     "serverInfo": {
                         "name": "jeti-lsp",
@@ -955,6 +962,45 @@ impl Server {
                 }
                 vec![response(id, help)]
             }
+            // The parameter names each argument of a free call fills in.
+            // `resolveProvider` is off, so one request carries the whole
+            // document; every position is an argument's own start.
+            "textDocument/inlayHint" => {
+                let uri = request_uri(message);
+                // Clone path/text out first: `effective_options` borrows the
+                // server mutably, and the runtime surface (`"jeti/runtime.h"`)
+                // is reachable only through the document's own `-I` dirs.
+                let result = match self.docs.get(uri).map(|doc| (doc.path.clone(), doc.text.clone())) {
+                    Some((path, text)) => {
+                        let dirs = self.effective_options(&path).search_dirs;
+                        let c_table = crate::cheader::signatures_for(
+                            &SymbolIndex::c_headers_in(&text),
+                            &dirs,
+                        );
+                        let hints: Vec<Value> = match self.indexes.get(uri) {
+                            Some(index) => index
+                                .inlay_hints(&c_table)
+                                .into_iter()
+                                .map(|hint| {
+                                    json!({
+                                        "position": {
+                                            "line": hint.position.line,
+                                            "character": hint.position.character,
+                                        },
+                                        // LSP InlayHintKind: 1 = Parameter, 2 = Type.
+                                        "kind": hint.kind,
+                                        "label": hint.label,
+                                    })
+                                })
+                                .collect(),
+                            None => Vec::new(),
+                        };
+                        json!(hints)
+                    }
+                    None => json!([]),
+                };
+                vec![response(id, result)]
+            }
             "" => Vec::new(),
             other => match id {
                 Some(id) => vec![error_response(id, -32601, &format!("unhandled method: {other}"))],
@@ -1107,7 +1153,7 @@ impl Server {
         text: &str,
         position: LspPosition,
     ) -> Option<String> {
-        let table = cheader::signatures_for(&index::SymbolIndex::system_headers_in(text));
+        let table = cheader::signatures_for(&index::SymbolIndex::c_headers_in(text), &[]);
         // A real declaration beats a macro *spelling* (macOS fortify defines
         // `memset(...)` as a macro, but clangd's card shows the prototype);
         // macro-only names (`EOF`, `errno` on macOS) take the macro card.
@@ -1777,6 +1823,86 @@ mod tests {
     use crate::index::ReceiverInfo;
     use crate::index::selector_part_matches;
 
+    /// Timing probe for the large generated-C regression: times the three
+    /// LSP-path components (front end, per-diagnostic JSON, index build) on
+    /// a 22k-line file. Skips when the file is absent.
+    #[test]
+    fn timing_breakdown_large_c() {
+        // 22k lines of generated C drive deep recursive-descent parsing, and a
+        // debug build's frames are large enough that the harness's default 2 MB
+        // test-thread stack overflows. Run the probe on an explicit stack; the
+        // production path parses on the main thread, whose stack is comparable.
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(timing_breakdown_large_c_body)
+            .expect("spawn timing thread")
+            .join()
+            .expect("timing thread panicked");
+    }
+
+    /// A deterministic, self-contained stand-in for jeti-generated C: functions
+    /// whose bodies carry the vtable-dispatch statement expressions and cast
+    /// chains the LSP path must project. Sized by `functions` (≈5 lines each),
+    /// so the timing guard needs no /tmp fixture and runs in every checkout.
+    fn synthetic_generated_c(functions: usize) -> String {
+        let mut s = String::with_capacity(functions * 260);
+        s.push_str("typedef struct NPObject NPObject;\n");
+        s.push_str("struct NPObject { int tag; int flags; };\n");
+        // A struct plus a small function per step: the symbol index gets one node
+        // per declaration and per field, so the projection runs as often as it
+        // would on a real generated TU of the same size.
+        for i in 0..functions {
+            s.push_str(&format!(
+                "struct Synth{i} {{ int a; int b; }};\n\
+                 static int jeti_synth_{i}(NPObject * o, int a, int b) {{\n    \
+                 int t = o->tag + a * b + {i};\n    \
+                 if (t > {i}) {{ t = t - a; }}\n    \
+                 return t;\n}}\n"
+            ));
+        }
+        s
+    }
+
+    fn timing_breakdown_large_c_body() {
+        // ~14k lines (2000 × 7) — the size of a real generated translation unit,
+        // enough that an O(n²) projection would show up as seconds.
+        let text = synthetic_generated_c(2000);
+        let path = "/tmp/synth_generated.c";
+        let mut pipeline = Pipeline::new();
+        let t0 = std::time::Instant::now();
+        let analysis = pipeline.analyze_document(&text, path);
+        let t1 = std::time::Instant::now();
+        let resolve = |other: &str| -> Option<String> {
+            if other == path {
+                Some(text.clone())
+            } else {
+                std::fs::read_to_string(other).ok()
+            }
+        };
+        let _diags: Vec<_> = analysis
+            .diagnostics
+            .iter()
+            .map(|d| diagnostic_to_json(d, path, &text, &analysis.source_map, &resolve))
+            .collect();
+        let t2 = std::time::Instant::now();
+        let index = match &analysis.ast {
+            Some(ast) => SymbolIndex::build(ast, &analysis.source_map, &resolve, path),
+            None => SymbolIndex::default(),
+        };
+        let t3 = std::time::Instant::now();
+        let _ = index; // kept: build is the measured work, not the result
+        eprintln!(
+            "analyze={:?} (diags={}) diag_json={:?} index_build={:?}",
+            t1 - t0,
+            analysis.diagnostics.len(),
+            t2 - t1,
+            t3 - t2
+        );
+        // The editor must stay responsive: the whole LSP path for a 20k-line
+        // file stays well under the quiet-period feel of a stuck window.
+        assert!(t3 - t0 < std::time::Duration::from_secs(8), "LSP path too slow");
+    }
+
     fn no_open_files() -> impl Fn(&str) -> Option<String> {
         |_: &str| None
     }
@@ -1798,7 +1924,7 @@ mod tests {
         let text = "let a = \"héllo 中文\";";
         let mut d = Diagnostic::error("/x.jeti", 1, 23, "example");
         d.end_col = Some(24);
-        let json = diagnostic_to_json(&d, "/x.jeti", text, &no_open_files());
+        let json = diagnostic_to_json(&d, "/x.jeti", text, &SourceMap::default(), &no_open_files());
         assert_eq!(json["range"]["start"], json!({"line": 0, "character": 17}));
         assert_eq!(json["range"]["end"], json!({"line": 0, "character": 18}));
         assert_eq!(json["severity"], 1);
@@ -1812,7 +1938,7 @@ mod tests {
         // at the start of the document rather than a fabricated column.
         let d = Diagnostic::error("", 0, 0, "boom");
         assert!(d.to_source_span().is_synthetic());
-        let json = diagnostic_to_json(&d, "/x.jeti", "let x = 1;\n", &no_open_files());
+        let json = diagnostic_to_json(&d, "/x.jeti", "let x = 1;\n", &SourceMap::default(), &no_open_files());
         assert_eq!(json["range"]["start"], json!({"line": 0, "character": 0}));
         assert_eq!(json["range"]["end"], json!({"line": 0, "character": 0}));
     }
@@ -1910,6 +2036,94 @@ mod tests {
         });
         let out = server.handle(&close);
         assert_eq!(out[0]["params"]["diagnostics"], json!([]));
+    }
+
+    #[test]
+    fn inlay_hints_advertised_and_answered_for_free_calls() {
+        let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::ZERO;
+        let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}});
+        let out = server.handle(&init);
+        assert!(
+            out[0]["result"]["capabilities"]
+                .get("inlayHintProvider")
+                .is_some(),
+            "inlayHintProvider capability missing: {out:?}"
+        );
+
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/inlay.jeti");
+        let text = "int add(int a, int b) { return a + b; }\nint main(void) { return add(1, 2); }\n";
+        let open = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri,
+                "languageId": "jeti",
+                "version": 1,
+                "text": text,
+            }},
+        });
+        server.handle(&open);
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "textDocument/inlayHint",
+            "params": { "textDocument": { "uri": uri } },
+        });
+        let out = server.handle(&request);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["id"], 2);
+        // Parameter hints only — the use-site type hints (kind 2) have their
+        // own tests.
+        let hints_all = out[0]["result"].as_array().expect("inlay array");
+        let hints: Vec<_> = hints_all.iter().filter(|h| h["kind"] == 1).collect();
+        assert_eq!(hints.len(), 2, "{hints:?}");
+        // `kind` 1 is LSP's InlayHintKind::Parameter; the position is the
+        // argument's own start, in the document's LSP coordinates.
+        let line = "int main(void) { return add(1, 2); }";
+        assert_eq!(hints[0]["kind"], 1);
+        assert_eq!(hints[0]["label"], "a: ");
+        assert_eq!(
+            hints[0]["position"],
+            json!({"line": 1, "character": line.find('1').unwrap() as u32})
+        );
+        assert_eq!(hints[1]["label"], "b: ");
+        assert_eq!(
+            hints[1]["position"],
+            json!({"line": 1, "character": line.find('2').unwrap() as u32})
+        );
+    }
+
+    #[test]
+    fn runtime_inlays_reach_through_a_quoted_include() {
+        // The runtime header reaches generated code as `#include "jeti/runtime.h"`
+        // and resolves only through the project's `-I` dirs. Its parameter names
+        // must still come back as inlays for `jeti_release(o)`.
+        let include = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../include");
+        let mut server = Server::new(AnalysisOptions {
+            search_dirs: vec![include.to_string_lossy().to_string()],
+            ..AnalysisOptions::default()
+        });
+        server.quiet_period = Duration::ZERO;
+
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/gen_runtime.c");
+        let text = "#include \"jeti/runtime.h\"\nvoid f(void) { jeti_release(o); }\n";
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "c", "version": 1, "text": text,
+            }},
+        }));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 7, "method": "textDocument/inlayHint",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        let hints = out[0]["result"].as_array().expect("inlay array");
+        assert!(
+            hints.iter().any(|h| h["label"] == "obj: "),
+            "runtime parameter inlay missing: {hints:?}"
+        );
     }
 
     #[test]
@@ -3179,6 +3393,64 @@ int main(void) { return 0; }
         assert_eq!(at(&tokens, 12, 12), MACRO, "FSQ_MAX use");
         // sizeof stays grammar-colored: no token at its position.
         assert_ne!(at(&tokens, 7, 15), VARIABLE, "sizeof must not tokenize");
+    }
+
+    #[test]
+    /// The @property attribute list holds no symbols: clangd answers nothing
+    /// there and clang's grammar colors the words (keyword.other.property.
+    /// attribute). Jeti used to hover a bare `copy` as "method copy in
+    /// NPArray" — the member search matched any class's `- copy` — and sent
+    /// the same `method` semantic token.
+    fn property_attribute_list_is_symbol_free() {
+        // No #import: the test harness arms no include paths for it, and the
+        // guards under test need only this document's own declarations (the
+        // member match for `copy` comes from the `- (id)copy;` below).
+        let src = "\
+@interface FsAnnotated : NPObject
+@property (nonatomic, copy, nullable) NPString *label;
+@property (nonatomic, nonnull) NPString *tag;
+- (id)copy;
+@end
+";
+        let idx = analyze(src).index;
+        // No semantic token anywhere inside either attribute list: line 2
+        // columns 20–33 hold `nonatomic`, `copy`, `nullable`.
+        let data = idx.semantic_tokens(src);
+        let decoded = |data: &[u32]| -> Vec<(u32, u32, u32)> {
+            let mut out = Vec::new();
+            let (mut line, mut character) = (0u32, 0u32);
+            let mut i = 0;
+            while i + 4 < data.len() {
+                if data[i] > 0 {
+                    line += data[i];
+                    character = data[i + 1];
+                } else {
+                    character += data[i + 1];
+                }
+                out.push((line, character, data[i + 3]));
+                i += 5;
+            }
+            out
+        };
+        let tokens = decoded(&data);
+        for (character, word) in [(20usize, "nonatomic"), (31, "copy"), (37, "nullable")] {
+            assert!(
+                !tokens.iter().any(|(l, c, _)| *l == 1 && *c == character as u32),
+                "`{word}` must not tokenize inside @property(...)"
+            );
+        }
+        // The method declaration `- (id)copy;` still colors as a method
+        // (line 4, `copy` starts at column 6).
+        let at = |l: u32, c: u32| -> Option<u32> {
+            tokens.iter().find(|(tl, tc, _)| *tl == l && *tc == c).map(|(_, _, t)| *t)
+        };
+        assert_eq!(at(3, 6), Some(4), "- copy; is a real method");
+
+        // Hovering `copy` inside the attribute list answers nothing.
+        let hover_pos = LspPosition { line: 1, character: 33 };
+        assert!(idx.resolve_at(src, hover_pos).is_none(), "attribute-list copy must not resolve");
+        // Hovering the `- copy;` declaration still resolves.
+        assert!(idx.resolve_at(src, LspPosition { line: 3, character: 8 }).is_some());
     }
 
     #[test]

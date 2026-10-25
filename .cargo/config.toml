@@ -13,10 +13,10 @@ linker = "rust-lld"
 rustflags = ["-C", "link-self-contained=yes"]
 
 [target.x86_64-unknown-freebsd]
-linker = "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/zig-cc-x86_64-freebsd.sh"
+linker = "/Users/cactus/Desktop/01_CodeProjects/jeti-lang/zig-cc-x86_64-freebsd.sh"
 
 [target.i686-unknown-freebsd]
-linker = "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/zig-cc-i686-freebsd.sh"
+linker = "/Users/cactus/Desktop/01_CodeProjects/jeti-lang/zig-cc-i686-freebsd.sh"
 
 [target.x86_64-unknown-netbsd]
-linker = "/Users/cactus/Desktop/01_CodeProjects/ovic-lang/zig-cc-x86_64-netbsd.sh"
+linker = "/Users/cactus/Desktop/01_CodeProjects/jeti-lang/zig-cc-x86_64-netbsd.sh"

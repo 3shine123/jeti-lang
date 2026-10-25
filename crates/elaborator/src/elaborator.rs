@@ -207,6 +207,10 @@ impl Elaborator {
         // Nullability annotation, carried purely for the checker. Codegen
         // never reads it, so this costs nothing at runtime.
         at.nulls = ct.nulls;
+        // An anonymous inline struct/union body (`static struct { … } t[N];`)
+        // travels as raw text so codegen can re-emit the layout verbatim.
+        at.anon_struct_body = ct.anon_struct_body.clone();
+        at.is_variadic = ct.is_variadic;
         // Resolve class/protocol refs from symbol table (like C's convert_type_node)
         if let Some(ref st) = self.symtab {
             let raw_name = at.name.clone();
@@ -300,6 +304,14 @@ impl Elaborator {
             CstExprData::Boxed(inner) => AstExpr {
                 kind: AstExprKind::Boxed, expr_type: None, line, col,
                 data: AstExprData::Boxed(Box::new(self.convert_expr(inner).unwrap_or_else(make_int_expr))),
+                end_line: ce.end_line,
+                end_col: ce.end_col,
+            },
+            CstExprData::StmtExpr(body) => AstExpr {
+                kind: AstExprKind::StmtExpr, expr_type: None, line, col,
+                data: AstExprData::StmtExpr(
+                    body.iter().filter_map(|s| self.convert_stmt(s)).collect(),
+                ),
                 end_line: ce.end_line,
                 end_col: ce.end_col,
             },
@@ -491,7 +503,14 @@ impl Elaborator {
                     // itself (immediately-invoked block, `^{…}(args)` IIFE).
                     // Keep the callee so codegen emits the call instead of
                     // dropping it.
-                    if matches!(ce.data, AstExprData::IvarRef { .. } | AstExprData::PropRef { .. } | AstExprData::Block { .. }) {
+                    if matches!(ce.data,
+                        AstExprData::IvarRef { .. } | AstExprData::PropRef { .. } | AstExprData::Block { .. }
+                        // Computed call targets — a cast (`((T(*)(…))x->m)(args)`,
+                        // the generated vtable-dispatch shape), a parenthesized or
+                        // prefix-operator receiver, an indexed one. Dropping any of
+                        // these collapsed the call to a bare `(args)`.
+                        | AstExprData::Cast { .. } | AstExprData::Paren(_)
+                        | AstExprData::Unary { .. } | AstExprData::Subscript { .. }) {
                         // Block invocation on ivar — store callee expression
                         AstExpr { kind: AstExprKind::FuncCall, expr_type: None, line, col,
                             data: AstExprData::FuncCall { func: None, name, callee: Some(Box::new(ce.clone())), args: args_list },

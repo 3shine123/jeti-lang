@@ -1,49 +1,131 @@
 {
   "name": "Jeti",
   "scopeName": "source.jeti",
-  "fileTypes": ["np", "nh"],
+  "fileTypes": [
+    "np",
+    "nh"
+  ],
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#preprocessor" },
-    { "include": "#strings" },
-    { "include": "#character" },
-    { "include": "#numbers" },
-    { "include": "#objc-at-interface" },
-    { "include": "#objc-at-implementation" },
-    { "include": "#objc-at-end" },
-    { "include": "#objc-at-property" },
-    { "include": "#jeti-at-await" },
-    { "include": "#objc-at-selector" },
-    { "include": "#objc-at-class-protocol" },
-    { "include": "#objc-at-access-control" },
-    { "include": "#objc-at-exception" },
-    { "include": "#jeti-at-defer" },
-    { "include": "#jeti-soft-keywords" },
-    { "include": "#jeti-noarc" },
-    { "include": "#objc-at-synchronized" },
-    { "include": "#objc-at-autoreleasepool" },
-    { "include": "#objc-at-protocol-spec" },
-    { "include": "#objc-at-dynamic-synthesize" },
-    { "include": "#objc-at-defs-encode" },
-    { "include": "#namespace-decl" },
-    { "include": "#using-decl" },
-    { "include": "#objc-types" },
-    { "include": "#objc-constants" },
-    { "include": "#objc-special" },
-    { "include": "#objc-property-attrs" },
-    { "include": "#objc-protocol-qualifiers" },
-    { "include": "#memory-management" },
-    { "include": "#c-types" },
-    { "include": "#c-storage-struct-enum" },
-    { "include": "#c-typedef" },
-    { "include": "#c-storage-modifiers" },
-    { "include": "#c-gcc-keywords" },
-    { "include": "#c-control" },
-    { "include": "#c-operators" },
-    { "include": "#block-syntax" },
-    { "include": "#namespace-access" },
-    { "include": "#method-signature" },
-    { "include": "#punctuation" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#preprocessor"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#character"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#objc-at-interface"
+    },
+    {
+      "include": "#objc-at-implementation"
+    },
+    {
+      "include": "#objc-at-end"
+    },
+    {
+      "include": "#objc-at-property"
+    },
+    {
+      "include": "#jeti-at-await"
+    },
+    {
+      "include": "#objc-at-selector"
+    },
+    {
+      "include": "#objc-at-class-protocol"
+    },
+    {
+      "include": "#objc-at-access-control"
+    },
+    {
+      "include": "#objc-at-exception"
+    },
+    {
+      "include": "#jeti-at-defer"
+    },
+    {
+      "include": "#jeti-soft-keywords"
+    },
+    {
+      "include": "#jeti-noarc"
+    },
+    {
+      "include": "#objc-at-synchronized"
+    },
+    {
+      "include": "#objc-at-autoreleasepool"
+    },
+    {
+      "include": "#objc-at-protocol-spec"
+    },
+    {
+      "include": "#objc-at-dynamic-synthesize"
+    },
+    {
+      "include": "#objc-at-defs-encode"
+    },
+    {
+      "include": "#namespace-decl"
+    },
+    {
+      "include": "#using-decl"
+    },
+    {
+      "include": "#jeti-assume-markers"
+    },
+    {
+      "include": "#objc-types"
+    },
+    {
+      "include": "#objc-constants"
+    },
+    {
+      "include": "#objc-special"
+    },
+    {
+      "include": "#memory-management"
+    },
+    {
+      "include": "#c-types"
+    },
+    {
+      "include": "#c-storage-struct-enum"
+    },
+    {
+      "include": "#c-typedef"
+    },
+    {
+      "include": "#c-storage-modifiers"
+    },
+    {
+      "include": "#c-gcc-keywords"
+    },
+    {
+      "include": "#c-control"
+    },
+    {
+      "include": "#c-operators"
+    },
+    {
+      "include": "#block-syntax"
+    },
+    {
+      "include": "#namespace-access"
+    },
+    {
+      "include": "#method-signature"
+    },
+    {
+      "include": "#punctuation"
+    }
   ],
   "repository": {
     "comments": {
@@ -65,22 +147,55 @@
           "name": "meta.preprocessor.include.jeti",
           "match": "^\\s*(#\\s*(?:import|include))\\s+([<\"])([^>\"]*)([>\"])",
           "captures": {
-            "1": { "name": "keyword.control.import.include" },
-            "2": { "name": "string.quoted.other.lt-gt.include" },
-            "3": { "name": "string.quoted.other.lt-gt.include string.include.identifier" },
-            "4": { "name": "string.quoted.other.lt-gt.include" }
+            "1": {
+              "name": "keyword.control.directive.include"
+            },
+            "2": {
+              "name": "string.quoted.other.lt-gt.include"
+            },
+            "3": {
+              "name": "string.quoted.other.lt-gt.include string.include.identifier"
+            },
+            "4": {
+              "name": "string.quoted.other.lt-gt.include"
+            }
           }
         },
         {
-          "name": "meta.preprocessor.macro.jeti",
-          "match": "^\\s*(#\\s*define)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "comment": "Function-like #define: the macro name stays unscoped (clang-objc renders it plain) and the parameter list gets variable.parameter.preprocessor (italic in most themes). The replacement body falls through to the top-level patterns so operators/strings/numbers inside it still highlight.",
+          "name": "meta.preprocessor.macro.function-like.jeti",
+          "match": "^\\s*(#\\s*define)\\s+([A-Za-z_][A-Za-z0-9_]*)\\(([^)]*)\\)",
           "captures": {
-            "1": { "name": "keyword.control.define" },
-            "2": { "name": "entity.name.function.preprocessor" }
+            "1": {
+              "name": "keyword.control.directive.define"
+            },
+            "3": {
+              "name": "variable.parameter.preprocessor"
+            }
           }
         },
         {
-          "name": "keyword.control.import",
+          "comment": "Object-like #define: name unscoped, body falls through.",
+          "name": "meta.preprocessor.macro.jeti",
+          "match": "^\\s*(#\\s*define)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.directive.define"
+            }
+          }
+        },
+        {
+          "comment": "#pragma mark: only the directive colors; the description stays plain (clang-objc keeps it out of any keyword scope).",
+          "name": "meta.preprocessor.pragma.mark.jeti",
+          "match": "^\\s*(#\\s*pragma)\\s+(mark)\\b(.*)$",
+          "captures": {
+            "1": {
+              "name": "keyword.control.directive.pragma"
+            }
+          }
+        },
+        {
+          "name": "keyword.control.directive",
           "match": "^\\s*#\\s*(?:import|include|define|ifdef|ifndef|endif|pragma|if|else|elif|undef)\\b"
         }
       ]
@@ -146,33 +261,62 @@
         }
       ]
     },
-
     "objc-at-interface": {
       "patterns": [
         {
           "name": "meta.interface-or-protocol.jeti",
           "begin": "(@interface)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:\\s*([A-Za-z_][A-Za-z0-9_]*))?",
           "beginCaptures": {
-            "1": { "name": "storage.type" },
-            "2": { "name": "entity.name.type" },
-            "3": { "name": "punctuation.definition.entity.other.inherited-class" },
-            "4": { "name": "entity.other.inherited-class" }
+            "1": {
+              "name": "storage.type"
+            },
+            "2": {
+              "name": "entity.name.type"
+            },
+            "3": {
+              "name": "punctuation.definition.entity.other.inherited-class"
+            },
+            "4": {
+              "name": "entity.other.inherited-class"
+            }
           },
           "end": "(@end)\\b",
           "endCaptures": {
-            "1": { "name": "storage.type" }
+            "1": {
+              "name": "storage.type"
+            }
           },
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#objc-at-property" },
-            { "include": "#jeti-at-await" },
-            { "include": "#objc-at-selector" },
-            { "include": "#objc-at-access-control" },
-            { "include": "#method-signature" },
-            { "include": "#c-types" },
-            { "include": "#objc-types" },
-            { "include": "#namespace-access" },
-            { "include": "#punctuation" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#objc-at-property"
+            },
+            {
+              "include": "#jeti-at-await"
+            },
+            {
+              "include": "#objc-at-selector"
+            },
+            {
+              "include": "#objc-at-access-control"
+            },
+            {
+              "include": "#method-signature"
+            },
+            {
+              "include": "#c-types"
+            },
+            {
+              "include": "#objc-types"
+            },
+            {
+              "include": "#namespace-access"
+            },
+            {
+              "include": "#punctuation"
+            }
           ]
         }
       ]
@@ -183,45 +327,113 @@
           "name": "meta.implementation.jeti",
           "begin": "(@implementation)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:\\s*([A-Za-z_][A-Za-z0-9_]*))?",
           "beginCaptures": {
-            "1": { "name": "storage.type" },
-            "2": { "name": "entity.name.type" },
-            "3": { "name": "punctuation.definition.entity.other.inherited-class" },
-            "4": { "name": "entity.other.inherited-class" }
+            "1": {
+              "name": "storage.type"
+            },
+            "2": {
+              "name": "entity.name.type"
+            },
+            "3": {
+              "name": "punctuation.definition.entity.other.inherited-class"
+            },
+            "4": {
+              "name": "entity.other.inherited-class"
+            }
           },
           "end": "(@end)\\b",
           "endCaptures": {
-            "1": { "name": "storage.type" }
+            "1": {
+              "name": "storage.type"
+            }
           },
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#preprocessor" },
-            { "include": "#strings" },
-            { "include": "#character" },
-            { "include": "#numbers" },
-            { "include": "#objc-at-property" },
-            { "include": "#jeti-at-await" },
-            { "include": "#objc-at-selector" },
-            { "include": "#objc-at-access-control" },
-            { "include": "#objc-at-dynamic-synthesize" },
-            { "include": "#objc-at-exception" },
-            { "include": "#jeti-at-defer" },
-            { "include": "#jeti-soft-keywords" },
-            { "include": "#method-signature" },
-            { "include": "#objc-types" },
-            { "include": "#objc-constants" },
-            { "include": "#objc-special" },
-            { "include": "#memory-management" },
-            { "include": "#jeti-noarc" },
-            { "include": "#c-types" },
-            { "include": "#c-storage-struct-enum" },
-            { "include": "#c-typedef" },
-            { "include": "#c-storage-modifiers" },
-            { "include": "#c-gcc-keywords" },
-            { "include": "#c-control" },
-            { "include": "#c-operators" },
-            { "include": "#namespace-access" },
-            { "include": "#block-syntax" },
-            { "include": "#punctuation" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#preprocessor"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#character"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#objc-at-property"
+            },
+            {
+              "include": "#jeti-at-await"
+            },
+            {
+              "include": "#objc-at-selector"
+            },
+            {
+              "include": "#objc-at-access-control"
+            },
+            {
+              "include": "#objc-at-dynamic-synthesize"
+            },
+            {
+              "include": "#objc-at-exception"
+            },
+            {
+              "include": "#jeti-at-defer"
+            },
+            {
+              "include": "#jeti-soft-keywords"
+            },
+            {
+              "include": "#method-signature"
+            },
+            {
+              "include": "#objc-types"
+            },
+            {
+              "include": "#objc-constants"
+            },
+            {
+              "include": "#objc-special"
+            },
+            {
+              "include": "#memory-management"
+            },
+            {
+              "include": "#jeti-noarc"
+            },
+            {
+              "include": "#c-types"
+            },
+            {
+              "include": "#c-storage-struct-enum"
+            },
+            {
+              "include": "#c-typedef"
+            },
+            {
+              "include": "#c-storage-modifiers"
+            },
+            {
+              "include": "#c-gcc-keywords"
+            },
+            {
+              "include": "#c-control"
+            },
+            {
+              "include": "#c-operators"
+            },
+            {
+              "include": "#namespace-access"
+            },
+            {
+              "include": "#block-syntax"
+            },
+            {
+              "include": "#punctuation"
+            }
           ]
         }
       ]
@@ -242,17 +454,29 @@
       "patterns": [
         {
           "name": "meta.property-directive.jeti",
-          "begin": "(@property)\\s*(?:\\([^)]*\\))?\\s*",
+          "begin": "(@property)\\s*",
           "beginCaptures": {
-            "1": { "name": "storage.modifier" }
+            "1": {
+              "name": "storage.modifier"
+            }
           },
           "end": "(?=;|$)",
           "patterns": [
-            { "include": "#objc-property-attrs" },
-            { "include": "#c-types" },
-            { "include": "#objc-types" },
-            { "include": "#namespace-access" },
-            { "include": "#punctuation" }
+            {
+              "include": "#objc-property-attrs"
+            },
+            {
+              "include": "#punctuation"
+            },
+            {
+              "include": "#c-types"
+            },
+            {
+              "include": "#objc-types"
+            },
+            {
+              "include": "#namespace-access"
+            }
           ]
         }
       ]
@@ -271,12 +495,18 @@
           "name": "meta.selector.jeti",
           "begin": "(@selector)\\s*(\\()",
           "beginCaptures": {
-            "1": { "name": "storage.type" },
-            "2": { "name": "punctuation.definition.storage.type" }
+            "1": {
+              "name": "storage.type"
+            },
+            "2": {
+              "name": "punctuation.definition.storage.type"
+            }
           },
           "end": "(\\))",
           "endCaptures": {
-            "1": { "name": "punctuation.definition.storage.type" }
+            "1": {
+              "name": "punctuation.definition.storage.type"
+            }
           },
           "patterns": [
             {
@@ -375,23 +605,32 @@
         }
       ]
     },
-
     "namespace-decl": {
       "patterns": [
         {
           "name": "meta.namespace.jeti",
           "begin": "(@namespace)\\s+([A-Za-z_][A-Za-z0-9_]*(?:::\\s*[A-Za-z_][A-Za-z0-9_]*)*)",
           "beginCaptures": {
-            "1": { "name": "storage.type.namespace" },
-            "2": { "name": "entity.name.type.namespace" }
+            "1": {
+              "name": "storage.type.namespace"
+            },
+            "2": {
+              "name": "entity.name.type.namespace"
+            }
           },
           "end": "(@endnamespace)\\b",
           "endCaptures": {
-            "1": { "name": "storage.type.namespace" }
+            "1": {
+              "name": "storage.type.namespace"
+            }
           },
           "patterns": [
-            { "include": "$self" },
-            { "include": "#comments" }
+            {
+              "include": "$self"
+            },
+            {
+              "include": "#comments"
+            }
           ]
         }
       ]
@@ -404,7 +643,6 @@
         }
       ]
     },
-
     "objc-types": {
       "patterns": [
         {
@@ -430,20 +668,14 @@
       ]
     },
     "objc-property-attrs": {
-      "patterns": [
-        {
-          "name": "storage.modifier",
-          "match": "\\b(?:readwrite|readonly|weak|strong|assign|retain|copy|nonatomic|getter|setter)\\b"
-        }
-      ]
+      "comment": "clang objective-c.tmLanguage: keyword.other.property.attribute.objc covers the property attribute list AND the bare nullability words in property position (one rule, same scope).",
+      "name": "keyword.other.property.attribute.jeti",
+      "match": "\\b(getter|setter|readonly|readwrite|assign|retain|copy|nonatomic|atomic|strong|weak|nonnull|nullable|null_resettable|null_unspecified|class|direct)\\b"
     },
     "objc-protocol-qualifiers": {
-      "patterns": [
-        {
-          "name": "storage.modifier.protocol",
-          "match": "\\b(?:in|out|inout|oneway|bycopy|byref|nonnull|nullable|_Nonnull|_Nullable|_Null_unspecified)\\b"
-        }
-      ]
+      "comment": "clang objective-c.tmLanguage: storage.modifier.protocol.objc, included only by the 'method' rule (return type + parameter types). Jeti mirrors that: the include lives solely in method-signature's meta.return-type/meta.argument-type, so ivar nullability stays plain exactly as in clang. The __nullable/__nonnull spellings render the same and join the same class.",
+      "name": "storage.modifier.protocol.jeti",
+      "match": "\\b(in|out|inout|oneway|bycopy|byref|nonnull|nullable|_Nonnull|_Nullable|_Null_unspecified|__nullable|__nonnull|__unsafe_unretained)\\b"
     },
     "memory-management": {
       "patterns": [
@@ -453,7 +685,6 @@
         }
       ]
     },
-
     "c-types": {
       "patterns": [
         {
@@ -582,14 +813,15 @@
         }
       ]
     },
-
     "block-syntax": {
       "patterns": [
         {
           "name": "meta.block-literal.jeti",
           "match": "\\^(?:\\s*(?:void|int|char|float|double|long|short|unsigned|signed|id|BOOL)\\b)?\\s*\\(",
           "captures": {
-            "0": { "name": "keyword.operator.caret" }
+            "0": {
+              "name": "keyword.operator.caret"
+            }
           }
         }
       ]
@@ -603,22 +835,93 @@
       ]
     },
     "method-signature": {
+      "comment": "clang objective-c.tmLanguage 'method' rule: begin ^(-|+)\\s*, end (?=\\{|#)|;. meta.return-type and meta.argument-type each include the protocol-type-qualifier, so nullability words color only inside the signature (return + parameter types) and stay plain on ivars - exactly clang's context coverage.",
       "patterns": [
         {
           "name": "meta.function.objc",
-          "begin": "^\\s*([-+]\\s*\\()",
-          "beginCaptures": {
-            "1": { "name": "meta.function.objc" }
-          },
-          "end": "(\\))\\s*(\\w+\\b)",
-          "endCaptures": {
-            "1": { "name": "punctuation.definition.type.end.objc" },
-            "2": { "name": "entity.name.function.objc" }
-          },
+          "begin": "^\\s*[-+]\\s*(?=\\()",
+          "end": "(?=\\{|#)|;",
           "patterns": [
-            { "include": "#c-types" },
-            { "include": "#objc-types" },
-            { "include": "#namespace-access" }
+            {
+              "name": "meta.return-type.objc",
+              "begin": "(\\()",
+              "beginCaptures": {
+                "1": {
+                  "name": "punctuation.definition.type.begin.objc"
+                }
+              },
+              "end": "(\\))\\s*(\\w+\\b)",
+              "endCaptures": {
+                "1": {
+                  "name": "punctuation.definition.type.end.objc"
+                },
+                "2": {
+                  "name": "entity.name.function.objc"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#objc-protocol-qualifiers"
+                },
+                {
+                  "include": "#c-types"
+                },
+                {
+                  "include": "#objc-types"
+                },
+                {
+                  "include": "#namespace-access"
+                },
+                {
+                  "include": "#comments"
+                }
+              ]
+            },
+            {
+              "match": "\\b\\w+(?=:)",
+              "name": "entity.name.function.name-of-parameter.objc"
+            },
+            {
+              "name": "meta.argument-type.objc",
+              "begin": "(:)\\s*(\\()",
+              "beginCaptures": {
+                "1": {
+                  "name": "punctuation.separator.arguments.objc"
+                },
+                "2": {
+                  "name": "punctuation.definition.type.begin.objc"
+                }
+              },
+              "end": "(\\))\\s*(\\w+\\b)?",
+              "endCaptures": {
+                "1": {
+                  "name": "punctuation.definition.type.end.objc"
+                },
+                "2": {
+                  "name": "variable.parameter.function.objc"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#objc-protocol-qualifiers"
+                },
+                {
+                  "include": "#c-types"
+                },
+                {
+                  "include": "#objc-types"
+                },
+                {
+                  "include": "#namespace-access"
+                },
+                {
+                  "include": "#comments"
+                }
+              ]
+            },
+            {
+              "include": "#comments"
+            }
           ]
         }
       ]
@@ -638,6 +941,11 @@
           "match": "::"
         }
       ]
+    },
+    "jeti-assume-markers": {
+      "comment": "clangd colors NS_ASSUME_NONNULL_BEGIN/END uses via the `macro` semantic token (its TextMate grammar has zero ASSUME hits - verified). In Jeti the markers are true syntax (parser nonnull-region toggle, parser.rs parse_declaration), not macros, so the grammar carries the equivalent color with clang's functional-macro scope family.",
+      "name": "entity.name.function.preprocessor.jeti-foundation",
+      "match": "\\b(NP_ASSUME_NONNULL_BEGIN|NP_ASSUME_NONNULL_END|NS_ASSUME_NONNULL_BEGIN|NS_ASSUME_NONNULL_END)\\b"
     }
   }
 }

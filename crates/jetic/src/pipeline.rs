@@ -9,7 +9,7 @@ use jeti_preprocessor::Preprocessor;
 use jeti_symbol::SymbolTable;
 use jeti_ast::ast::*;
 use jeti_cfg::cfg_build;
-use jeti_arc::{arc_local_analyze, arc_global_analyze, arc_analyze_loops, arc_insert_actions, arc_optimize_pairs};
+use jeti_arc::{arc_local_analyze, arc_global_analyze, arc_analyze_loops, arc_insert_actions, arc_optimize_pairs, autorelease_owned_returns};
 use jeti_checker::Checker;
 use jeti_cst::diagnostic::{Diagnostic, Severity};
 use jeti_trace::{trace_refcounts, TraceOptions};
@@ -562,8 +562,17 @@ impl Pipeline {
                     }
                     AstDeclData::Class { methods, .. } => {
                         for m in methods {
-                            if let AstDeclData::Method { body: Some(ref mut b), .. } = &mut m.data {
+                            if let AstDeclData::Method { body: Some(ref mut b), async_marker, .. } = &mut m.data {
                                 let name = m.name.as_deref().unwrap_or("method");
+                                // ObjC ARC's "returned object" rule (see
+                                // autorelease_owned_returns): balance a +1
+                                // return from a non-alloc-family method at the
+                                // return site, before scope analysis runs.
+                                // async bodies are desugared later (Step 4.8)
+                                // and must not be touched yet.
+                                if !*async_marker {
+                                    autorelease_owned_returns(b, name);
+                                }
                                 let cfg = cfg_build(b);
                                 let mut arc_result = arc_local_analyze(b, &cfg, name);
                                 arc_global_analyze(&cfg, &mut arc_result, name);
@@ -592,7 +601,7 @@ impl Pipeline {
                 max_iters: self.trace_max_iters,
                 color: self.trace_color,
             };
-            return Ok(trace_refcounts(&ast, &opts));
+            return Ok(trace_refcounts(&ast, &opts, Some(&pre.source_map)));
         }
 
         // Step 4.8: Async pre-pass — validate await placement, then desugar

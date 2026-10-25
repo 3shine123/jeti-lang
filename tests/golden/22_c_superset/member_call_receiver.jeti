@@ -1,0 +1,28 @@
+#include <stdio.h>
+
+// A C-superset member call: a struct field holding a function pointer, called
+// through the field. The receiver may be parenthesized (`(c).add`) or an
+// address-of (`(&c)->add`) — both used to drop the callee and evaluate the
+// argument list instead (silent miscompile; the address-of form is exactly the
+// generated vtable-dispatch shape `((T (*)(…))x->vtable->m)(args)`).
+
+typedef struct Counter {
+    int base;
+    int (*add)(struct Counter *self, int x);
+} Counter;
+
+static int counter_add(struct Counter *self, int x) {
+    return self->base + x;
+}
+
+int main() {
+    Counter c;
+    c.base = 10;
+    c.add = counter_add;
+
+    int plain = c.add(&c, 1);
+    int paren = (c).add(&c, 5);
+    int arrow = (&c)->add(&c, 7);
+    printf("%d %d %d\n", plain, paren, arrow);
+    return 0;
+}

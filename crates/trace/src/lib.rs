@@ -19,8 +19,11 @@
 //! cyan, error (over-released / leak) → red, first print / unchanged → plain.
 
 use std::collections::HashMap;
-use jeti_ast::{AstUnit, AstDecl, AstDeclData, AstStmt, AstStmtData, AstExpr, AstExprData};
+use jeti_ast::{AstUnit, AstDecl, AstDeclData, AstStmt, AstStmtData, AstStmtKind, AstExpr, AstExprData};
 use jeti_cst::{CstParam, CstType, TypePrim};
+use jeti_cst::source_map::SourceMap;
+use jeti_cfg::cfg_build;
+use std::collections::{HashSet, VecDeque};
 
 const GREEN: &str = "\x1b[32m";
 const BLUE: &str = "\x1b[34m";
@@ -44,10 +47,16 @@ impl Default for TraceOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct TraceObj {
     label: String,
+    /// Alive-count ceiling across the paths joined so far (`count` IS the
+    /// ceiling after a join, and the exact value while tracing one path).
     count: i32,
+    /// Alive-count floor across the paths joined so far. `count > 0` with
+    /// `min_count <= 0` means "alive on some paths only" — the distinction
+    /// between a definite and a possible leak.
+    min_count: i32,
     last_count: Option<i32>,
     line: usize,
     col: usize,
@@ -55,7 +64,7 @@ struct TraceObj {
     escaped: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct SimState {
     objects: Vec<TraceObj>,
     class_counters: HashMap<String, usize>,
@@ -87,28 +96,60 @@ impl SimState {
     }
 }
 
-pub struct Tracer {
+pub struct Tracer<'a> {
     opts: TraceOptions,
     st: SimState,
     out: String,
     scope_line: usize,
     scope_col: usize,
+    /// The pipeline's shared SourceMap.
+    ///
+    /// Node positions in the AST are FLATTENED post-preprocessing line numbers
+    /// (`SourceMap::span_from_node` documents that convention), so printing
+    /// them raw produced positions the reader cannot find in their own source —
+    /// and that shifted by one for every line added to any imported header.
+    /// Resolving here is also what the project's source-location rule asks for:
+    /// one projection at the boundary, never a parallel line-number mechanism.
+    sm: Option<&'a SourceMap>,
+    /// Same-TU method ownership table (P2-1), keyed by colon-stripped
+    /// selector. Built once per unit in `trace_unit`.
+    own: HashMap<String, MethodOwn>,
+    /// Names captured by block literals in the body currently being traced
+    /// (P2-2), harvested per body in `trace_body_with_params`.
+    captured: Vec<String>,
+    /// True while a CFG revisit re-executes a block purely to refine its
+    /// state: bookkeeping continues, printing stops, so the fixpoint never
+    /// duplicates events (P2-3).
+    mute: bool,
+    /// Allocation-site abstraction (P2-3): one abstract object per
+    /// (line, col, class) creation site. The CFG fixpoint re-runs loop bodies
+    /// — without this memo every silent pass minted a fresh `Cat#N` phantom
+    /// and the state never converged. Object identity per SITE is also the
+    /// semantically right model: loop iterations share one abstract object,
+    /// so "released every iteration" comes out freed, not [0, N].
+    site_objects: HashMap<(usize, usize, String), usize>,
 }
 
-impl Tracer {
-    pub fn new(opts: TraceOptions) -> Self {
+impl<'a> Tracer<'a> {
+    pub fn new(opts: TraceOptions, sm: Option<&'a SourceMap>) -> Self {
         Tracer {
             opts,
             st: SimState::new(),
             out: String::new(),
             scope_line: 0,
             scope_col: 0,
+            sm,
+            own: HashMap::new(),
+            captured: Vec::new(),
+            mute: false,
+            site_objects: HashMap::new(),
         }
     }
 
     // ─── top-level entry ────────────────────────────────────────────────────
 
     pub fn trace_unit(&mut self, unit: &AstUnit) {
+        self.own = build_own_table(unit);
         self.header(&unit.filename);
         for d in &unit.decls {
             self.trace_decl(d);
@@ -155,12 +196,125 @@ impl Tracer {
     }
 
     fn trace_body_with_params(&mut self, params: Option<&CstParam>, body: Option<&AstStmt>) {
+        // P2-2: mirror the ARC pass's block-capture harvest so captured
+        // locals get the same lifetime treatment the compiler gave them.
+        let saved = std::mem::take(&mut self.captured);
+        if let Some(b) = body {
+            self.captured = harvest_captures(b);
+        }
         self.st.bindings.push(HashMap::new());
         self.bind_params(params);
         if let Some(b) = body {
-            self.trace_stmt(b);
+            self.trace_body_cfg(b);
         }
         self.st.bindings.pop();
+        self.captured = saved;
+    }
+
+    /// P2-3: abstract interpretation over the CFG the ARC pass already builds
+    /// (`cfg_build`) — a worklist over blocks, interval states joined at every
+    /// merge point. Events print on a block's FIRST visit only; revisits
+    /// re-run silently and only refine the verdict (the fixpoint).
+    ///
+    /// Bodies using `goto`/`switch` keep the structured walker: the builder
+    /// wires no edges for them, so interpreting that graph would silently
+    /// drop code and mint false leaks.
+    fn trace_body_cfg(&mut self, body: &AstStmt) {
+        if body_has_unwired_shape(body) {
+            self.trace_stmt(body);
+            return;
+        }
+        let cfg = cfg_build(body);
+        let Some(entry) = cfg.entry else {
+            self.trace_stmt(body);
+            return;
+        };
+        let saved = self.st.clone();
+        let mut in_state: HashMap<i32, SimState> = HashMap::new();
+        let mut out_state: HashMap<i32, SimState> = HashMap::new();
+        let mut processed_in: HashMap<i32, SimState> = HashMap::new();
+        let mut visited: HashSet<i32> = HashSet::new();
+        let mut queue: VecDeque<i32> = VecDeque::new();
+        in_state.insert(entry, saved.clone());
+        queue.push_back(entry);
+        // Safety valve: interval merges only widen, so the fixpoint
+        // terminates on its own; the budget just caps a pathological graph.
+        let mut budget = 4096_i32;
+        while let Some(bid) = queue.pop_front() {
+            budget -= 1;
+            if budget <= 0 {
+                break;
+            }
+            let Some(block) = cfg.blocks.get(bid as usize) else { continue };
+            // A block can sit in the queue several times (one enqueue per
+            // refining predecessor). The in-state entry must SURVIVE the first
+            // visit — removing it made every later pop run on an EMPTY state
+            // whose garbage output then overwrote the good one. Skip instead
+            // when nothing refined since the last run.
+            let Some(entry_st) = in_state.get(&bid).cloned() else { continue };
+            if processed_in.get(&bid) == Some(&entry_st) {
+                continue;
+            }
+            processed_in.insert(bid, entry_st.clone());
+            let first_visit = visited.insert(bid);
+            self.st = entry_st;
+            self.mute = !first_visit;
+            for s in &block.stmts {
+                self.cfg_exec_stmt(s);
+            }
+            self.mute = false;
+            let out = std::mem::replace(&mut self.st, SimState::new());
+            out_state.insert(bid, out.clone());
+            for succ in [block.true_succ, block.false_succ].into_iter().flatten() {
+                let merged = match in_state.get(&succ) {
+                    Some(prev) => {
+                        let mut m = out.clone();
+                        merge_states(&mut m, prev);
+                        m
+                    }
+                    None => out.clone(),
+                };
+                let refine = in_state.get(&succ) != Some(&merged);
+                in_state.insert(succ, merged);
+                if refine || !visited.contains(&succ) {
+                    queue.push_back(succ);
+                }
+            }
+        }
+        // Program end = every reachable terminal block (no successors): the
+        // exit block, `return`/`@throw` blocks, dead-end branches. Their
+        // out-states merge into the summary state — which is how early
+        // returns now stop later code from being counted on their path.
+        let mut final_st: Option<SimState> = None;
+        for b in &cfg.blocks {
+            if b.true_succ.is_none() && b.false_succ.is_none() {
+                if let Some(o) = out_state.get(&b.id) {
+                    match &mut final_st {
+                        None => final_st = Some(o.clone()),
+                        Some(f) => merge_states(f, o),
+                    }
+                }
+            }
+        }
+        self.st = final_st.unwrap_or(saved);
+    }
+
+    /// Execute one statement inside a CFG block. Statements the builder
+    /// unrolled into separate blocks (branches and loops) print as markers
+    /// only — walking them here would double-trace their bodies, which the
+    /// worklist reaches through the graph edges. Everything else (plain
+    /// statements, `return`/`@throw`, `@autoreleasepool`, `try`, `@noarc`) is
+    /// atomic in the graph and runs through the structured handlers.
+    fn cfg_exec_stmt(&mut self, s: &AstStmt) {
+        match s.kind {
+            AstStmtKind::If
+            | AstStmtKind::While
+            | AstStmtKind::Do
+            | AstStmtKind::For
+            | AstStmtKind::ForIn
+            | AstStmtKind::Switch => self.marker(s.line, s.col, "branch"),
+            _ => self.trace_stmt(s),
+        }
     }
 
     fn bind_params(&mut self, params: Option<&CstParam>) {
@@ -177,6 +331,7 @@ impl Tracer {
                     self.st.objects.push(TraceObj {
                         label: format!("{} (param)", class),
                         count: 1,
+                        min_count: 1,
                         last_count: None,
                         line: 0,
                         col: 0,
@@ -215,15 +370,22 @@ impl Tracer {
                 self.marker(s.line, s.col, "if");
                 let snap = self.st.clone();
                 self.trace_stmt_persist(then);
-                // keep the `then` path's state as the post-if state when there
-                // is no `else`, so releases and var bindings in the branch
-                // persist (matches real control flow for e.g. statics assigned
-                // inside a bare `if`).
-                if let Some(el) = else_ {
-                    self.st = snap.clone();
-                    self.marker(el.line, el.col, "else");
-                    self.trace_stmt_persist(el);
-                    // final state = else branch result (last traced path)
+                match else_ {
+                    Some(el) => {
+                        // Join both branch results; the old code reset to the
+                        // snapshot, traced `else`, and kept ONLY its state, so
+                        // a release in the `then` branch vanished from the
+                        // verdict.
+                        let then_state = std::mem::replace(&mut self.st, snap);
+                        self.marker(el.line, el.col, "else");
+                        self.trace_stmt_persist(el);
+                        self.merge_from(&then_state);
+                    }
+                    None => {
+                        // No `else`: the fall-through path leaves the entry
+                        // state untouched, so join with it.
+                        self.merge_from(&snap);
+                    }
                 }
             }
             AstStmtData::While { body, .. } => self.trace_loop(body, "while"),
@@ -334,6 +496,7 @@ impl Tracer {
                 self.st.objects.push(TraceObj {
                     label: format!("{} (catch)", class),
                     count: 1,
+                    min_count: 1,
                     last_count: None,
                     line: 0,
                     col: 0,
@@ -345,17 +508,23 @@ impl Tracer {
         }
     }
 
+    /// One pass of the loop body, joined with the entry state.
+    ///
+    /// The old model restored the snapshot after every iteration, discarding
+    /// the body's net effect — a release inside the loop looked like it never
+    /// happened, so the object stayed "possibly alive" at exit. A `while`/`for`
+    /// exit state is "ran zero or more times", i.e. entry ∪ one pass; a `do`
+    /// body always runs at least once, so it keeps the pass state unjoined.
+    /// (`max_iters` no longer multiplies passes: re-tracing from a restored
+    /// snapshot only duplicated events, it never changed the verdict.)
     fn trace_loop(&mut self, body: &AstStmt, kind: &str) {
-        let n = self.opts.max_iters.max(1);
-        for i in 0..n {
-            self.marker(0, 0, &format!("{} iter {}/{}", kind, i + 1, n));
+        self.marker(0, 0, kind);
+        if kind == "do" {
+            self.trace_stmt(body);
+        } else {
             let snap = self.st.clone();
             self.trace_stmt(body);
-            // Restore state, but keep the class counters monotonic so each
-            // iteration's allocations get fresh Cat#N identities.
-            let counters = self.st.class_counters.clone();
-            self.st = snap;
-            self.st.class_counters = counters;
+            self.merge_from(&snap);
         }
     }
 
@@ -373,23 +542,41 @@ impl Tracer {
                         }
                     }
                     if let Some(n) = &cd.name {
-                        self.st.bind(n, id);
+                        self.bind_var(n, id);
                     }
                 } else if let Some(id) = self.refop_if_any(cd, init) {
                     // e.g. `Cat *other = [cat retain];` — retain traced, new
                     // name aliases the same object.
                     if let Some(n) = &cd.name {
-                        self.st.bind(n, id);
+                        self.bind_var(n, id);
                     }
+                } else if self.bind_owned_result(cd, init) {
+                    // Cross-function ownership (P2-1): the call's +1/+0
+                    // convention is known, so the result is tracked instead
+                    // of degrading to "untracked" at scope end.
                 } else if let Some(v) = self.var_expr_id(init) {
                     if let Some(n) = &cd.name {
-                        self.st.bind(n, v);
+                        self.bind_var(n, v);
                     }
                 }
                 cur = next.as_deref();
                 continue;
             }
             break;
+        }
+    }
+
+    /// Bind a local and apply capture semantics (P2-2): a variable referenced
+    /// from a block literal is NOT released at scope exit — the ARC pass's
+    /// `insert_exit_cleanup` deliberately skips captured names (the block may
+    /// run after the scope dies), so the block owns the lifetime. The trace
+    /// mirrors that: a captured binding is escaped, not a leak candidate.
+    fn bind_var(&mut self, name: &str, id: usize) {
+        self.st.bind(name, id);
+        if self.captured.iter().any(|c| c == name) {
+            if let Some(o) = self.st.objects.get_mut(id) {
+                o.escaped = true;
+            }
         }
     }
 
@@ -403,6 +590,28 @@ impl Tracer {
             }
         }
         None
+    }
+
+    /// Cross-function ownership (P2-1): the selector's +1/+0 convention is
+    /// known from the unit's own method bodies, so the result is tracked.
+    /// +0 results are pool-owned (never a caller-leak candidate); +1 results
+    /// are caller-owned and MUST be released — tracked like creations.
+    fn bind_owned_result(&mut self, cd: &AstDecl, init: &AstExpr) -> bool {
+        let AstExprData::MsgSend { selector, .. } = &init.data else { return false };
+        let Some(mo) = self.lookup_own(selector) else { return false };
+        // Clone out of the table first: push_obj needs &mut self, and holding
+        // the table borrow across it is exactly the E0502 the naive form hits.
+        let (class, escaped) = (mo.class.clone(), !mo.plus1);
+        let id = self.push_obj(&class, init, escaped);
+        if let Some(n) = &cd.name {
+            self.bind_var(n, id);
+        }
+        true
+    }
+
+    fn lookup_own(&self, selector: &str) -> Option<&MethodOwn> {
+        let key: String = selector.chars().filter(|c| *c != ':').collect();
+        self.own.get(&key)
     }
 
     fn trace_expr_stmt(&mut self, e: &AstExpr) {
@@ -453,6 +662,10 @@ impl Tracer {
         } else {
             (line, col)
         };
+        // ARC wraps the target (`jeti_release((NPObject *)x)`); look through the
+        // wrappers so the release lands on the object ARC is actually talking
+        // about instead of degrading to "untracked ?".
+        let target = peel(target);
         let id = match &target.data {
             AstExprData::VarRef { name, .. } => self.st.resolve(name),
             // A ref-op whose receiver is a fresh creation (e.g.
@@ -466,15 +679,17 @@ impl Tracer {
             None => {
                 let yellow = if self.opts.color { YELLOW } else { "" };
                 let reset = if self.opts.color { RESET } else { "" };
-                self.out.push_str(&format!(
-                    "  {:>4}:{:<3}  ! {}{} on untracked {}{}\n",
-                    line,
-                    col,
-                    yellow,
-                    op,
-                    render_expr(target),
-                    reset
-                ));
+                let pos = self.pos(line, col);
+                if !self.mute {
+                    self.out.push_str(&format!(
+                        "  {:<26}  ! {}{} on untracked {}{}\n",
+                        pos,
+                        yellow,
+                        op,
+                        render_expr(target),
+                        reset
+                    ));
+                }
                 return None;
             }
         };
@@ -489,15 +704,19 @@ impl Tracer {
 
     fn apply_release(&mut self, line: usize, col: usize, id: usize, action: &str) {
         self.st.objects[id].count -= 1;
+        self.st.objects[id].min_count -= 1;
         if self.st.objects[id].count < 0 {
             // Every negative count is shown inline in red (double-release /
             // over-release), not just the final value in the summary.
             let red = if self.opts.color { RED } else { "" };
             let reset = if self.opts.color { RESET } else { "" };
-            self.out.push_str(&format!(
-                "  {:>4}:{:<3}  ! {}double-release / over-released {}: {}{}\n",
-                line, col, red, self.st.objects[id].label, self.st.objects[id].count, reset
-            ));
+            let pos = self.pos(line, col);
+            if !self.mute {
+                self.out.push_str(&format!(
+                    "  {:<26}  ! {}double-release / over-released {}: {}{}\n",
+                    pos, red, self.st.objects[id].label, self.st.objects[id].count, reset
+                ));
+            }
             return;
         }
         self.emit(line, col, id, action);
@@ -505,53 +724,116 @@ impl Tracer {
 
     fn apply_retain(&mut self, line: usize, col: usize, id: usize, action: &str) {
         self.st.objects[id].count += 1;
+        self.st.objects[id].min_count += 1;
         self.emit(line, col, id, action);
     }
 
     fn apply_autorelease(&mut self, line: usize, col: usize, id: usize, action: &str) {
-        if let Some(pool) = self.st.pools.last_mut() {
-            if !pool.contains(&id) {
-                pool.push(id);
+        match self.st.pools.last_mut() {
+            Some(pool) => {
+                if !pool.contains(&id) {
+                    pool.push(id);
+                }
+            }
+            None => {
+                // No active pool: the implicit main pool owns the value (the
+                // runtime drains it at exit). Mark escaped so the method's own
+                // trace doesn't flag its ARC-balanced return as a leak.
+                if let Some(o) = self.st.objects.get_mut(id) {
+                    o.escaped = true;
+                }
             }
         }
         self.emit(line, col, id, action);
     }
 
+    /// Join the current path's end state with `other` (a sibling path's):
+    /// each object's alive-interval becomes [min, max] across the two paths.
+    ///
+    /// This replaces the old "last traced path wins" join, which threw away
+    /// the `then` branch's releases whenever an `else` existed, and discarded
+    /// a loop body's net effect after every iteration — so a release on one
+    /// path looked like it never happened.
+    fn merge_from(&mut self, other: &SimState) {
+        merge_states(&mut self.st, other);
+    }
+
     // ─── creation ───────────────────────────────────────────────────────────
 
-    fn create(&mut self, e: &AstExpr, _is_temp: bool) -> usize {
-        let class = class_of(e);
-        let n = self.st.class_counters.entry(class.clone()).or_insert(0);
-        *n += 1;
+    fn push_obj(&mut self, class: &str, e: &AstExpr, escaped: bool) -> usize {
+        // Allocation-site memo (see the field doc): the same source creation
+        // site always denotes the same abstract object, so a fixpoint revisit
+        // of a loop body reuses it instead of minting a phantom.
+        let site = (e.line, e.col, class.to_string());
+        if let Some(&id) = self.site_objects.get(&site) {
+            return id;
+        }
+        let counter = self.st.class_counters.entry(class.to_string()).or_insert(0);
+        *counter += 1;
+        let n = *counter;
         let id = self.st.objects.len();
-        // `@"..."` and `@[...]` literals are immutable constants / autoreleased
-        // runtime objects in Foundation — they are never manually released, so
-        // they are not leak candidates (same as `escaped`).
-        let literal = matches!(e.data, AstExprData::AtString(_) | AstExprData::ArrayLit(_));
+        self.site_objects.insert(site, id);
         self.st.objects.push(TraceObj {
-            label: format!("{}#{}", class, *n),
+            label: format!("{}#{}", class, n),
             count: 1,
+            min_count: 1,
             last_count: None,
             line: e.line,
             col: e.col,
             is_param: false,
-            escaped: literal,
+            escaped,
         });
+        id
+    }
+
+    fn create(&mut self, e: &AstExpr, _is_temp: bool) -> usize {
+        let class = class_of(e);
+        // `@"..."` and `@[...]` literals are immutable constants / autoreleased
+        // runtime objects in Foundation — they are never manually released, so
+        // they are not leak candidates (same as `escaped`).
+        let literal = matches!(e.data, AstExprData::AtString(_) | AstExprData::ArrayLit(_));
+        let id = self.push_obj(&class, e, literal);
         self.emit(e.line, e.col, id, &render_expr(e));
         id
     }
 
     // ─── printing ───────────────────────────────────────────────────────────
 
+    /// Resolve a flattened post-preprocessing position to `file:line:col` in
+    /// the file the reader wrote. Falls back to the raw flattened position when
+    /// there is no map (unit tests) or the line sits outside every region.
+    ///
+    /// Node lines are FLATTENED post-preprocessing lines while `col` is already
+    /// the source column (see `SourceMap::span_from_node`); printing them raw
+    /// gave positions that cannot be found in the user's source and that
+    /// shifted by one for every line added to any imported header.
+    fn pos(&self, line: usize, col: usize) -> String {
+        if line == 0 {
+            return format!("{}:{}", line, col);
+        }
+        let Some(sm) = self.sm else {
+            return format!("{}:{}", line, col);
+        };
+        let (path, src_line) = sm.locate(line);
+        if path.is_empty() {
+            return format!("{}:{}", line, col);
+        }
+        let base = path.rsplit(['/', '\\']).next().unwrap_or(&path);
+        format!("{}:{}:{}", base, src_line, col)
+    }
+
     fn emit(&mut self, line: usize, col: usize, id: usize, action: &str) {
         let count = self.st.objects[id].count;
         let color = self.count_color(id);
         let reset = if self.opts.color { RESET } else { "" };
         let label = self.st.objects[id].label.clone();
-        self.out.push_str(&format!(
-            "  {:>4}:{:<3}  {:<30}  {}: {}{}{}\n",
-            line, col, action, label, color, count, reset
-        ));
+        let pos = self.pos(line, col);
+        if !self.mute {
+            self.out.push_str(&format!(
+                "  {:<26}  {:<30}  {}: {}{}{}\n",
+                pos, action, label, color, count, reset
+            ));
+        }
         self.st.objects[id].last_count = Some(count);
     }
 
@@ -570,14 +852,18 @@ impl Tracer {
     }
 
     fn marker(&mut self, line: usize, col: usize, text: &str) {
+        if self.mute {
+            return;
+        }
         if !self.opts.color {
             self.out.push_str(&format!("── {} ──\n", text));
             return;
         }
         if line > 0 {
+            let pos = self.pos(line, col);
             self.out.push_str(&format!(
-                "{}  ── {} ──{}  ({:>4}:{})\n",
-                DIM, text, RESET, line, col
+                "{}  ── {} ──{}  ({})\n",
+                DIM, text, RESET, pos
             ));
         } else {
             self.out.push_str(&format!("{}  ── {} ──{}\n", DIM, text, RESET));
@@ -598,22 +884,37 @@ impl Tracer {
             }
             let err = if self.opts.color { RED } else { "" };
             let reset_c = if self.opts.color { RESET } else { "" };
-            if o.count > 0 {
+            let val = if o.min_count == o.count {
+                format!("{}", o.count)
+            } else {
+                format!("[{}, {}]", o.min_count, o.count)
+            };
+            if o.count > 0 && o.min_count > 0 {
                 problems += 1;
+                let pos = self.pos(o.line, o.col);
                 self.out.push_str(&format!(
-                    "  {}{} (allocated {}:{}) — {} (still alive — possible leak){}\n",
-                    err, o.label, o.line, o.col, o.count, reset_c
+                    "  {}{} (allocated {}) — {} (leaked — alive on every path){}\n",
+                    err, o.label, pos, val, reset_c
+                ));
+            } else if o.count > 0 {
+                problems += 1;
+                let pos = self.pos(o.line, o.col);
+                self.out.push_str(&format!(
+                    "  {}{} (allocated {}) — {} (possibly leaked — alive on some path){}\n",
+                    err, o.label, pos, val, reset_c
                 ));
             } else if o.count < 0 {
                 problems += 1;
+                let pos = self.pos(o.line, o.col);
                 self.out.push_str(&format!(
-                    "  {}{} (allocated {}:{}) — {} (over-released — count negative){}\n",
-                    err, o.label, o.line, o.col, o.count, reset_c
+                    "  {}{} (allocated {}) — {} (over-released — count negative){}\n",
+                    err, o.label, pos, val, reset_c
                 ));
             } else {
+                let pos = self.pos(o.line, o.col);
                 self.out.push_str(&format!(
-                    "  {} (allocated {}:{}) — 0 (freed)\n",
-                    o.label, o.line, o.col
+                    "  {} (allocated {}) — {} (freed)\n",
+                    o.label, pos, val
                 ));
             }
         }
@@ -632,13 +933,123 @@ impl Tracer {
     }
 }
 
-pub fn trace_refcounts(unit: &AstUnit, opts: &TraceOptions) -> String {
-    let mut t = Tracer::new(opts.clone());
+pub fn trace_refcounts(unit: &AstUnit, opts: &TraceOptions, sm: Option<&SourceMap>) -> String {
+    let mut t = Tracer::new(opts.clone(), sm);
     t.trace_unit(unit);
     t.out
 }
 
 // ─── expression helpers ─────────────────────────────────────────────────────
+
+/// Join `cur` (the current path's end state) with `other` (a sibling path's):
+/// each object's alive-interval becomes [min, max] across the two paths.
+///
+/// A free function so the CFG worklist (P2-3) can merge states without a
+/// `Tracer` in hand; the structured walker reaches it via
+/// `Tracer::merge_from`.
+fn merge_states(cur: &mut SimState, other: &SimState) {
+    // Objects that exist only on the sibling path (created after the paths
+    // split): append them with a 0 floor — they were never alive here. The
+    // old in-place merge silently dropped them, so a leak that existed only
+    // on the first-traced branch vanished at the join.
+    while cur.objects.len() < other.objects.len() {
+        let mut o = other.objects[cur.objects.len()].clone();
+        o.min_count = o.min_count.min(0);
+        cur.objects.push(o);
+    }
+    for id in 0..cur.objects.len() {
+        match other.objects.get(id) {
+            Some(b) => {
+                let o = &mut cur.objects[id];
+                o.min_count = o.min_count.min(b.min_count);
+                o.count = o.count.max(b.count);
+                o.escaped |= b.escaped;
+            }
+            None => {
+                // Exists only on the current path (created inside the
+                // branch/loop body): on the sibling path it was never
+                // alive, so the interval floor is 0.
+                cur.objects[id].min_count = cur.objects[id].min_count.min(0);
+            }
+        }
+    }
+    // Rebind names only the sibling path bound, so a later release on the
+    // joined path still resolves instead of printing "untracked".
+    for scope in &other.bindings {
+        for (name, &id) in scope {
+            if cur.resolve(name).is_none() {
+                if let Some(top) = cur.bindings.last_mut() {
+                    top.insert(name.clone(), id);
+                }
+            }
+        }
+    }
+    // Union the innermost autorelease pools.
+    if let Some(b) = other.pools.last() {
+        if let Some(a) = cur.pools.last_mut() {
+            for &id in b {
+                if !a.contains(&id) {
+                    a.push(id);
+                }
+            }
+        }
+    }
+}
+
+/// True when the body uses a shape the CFG builder does not wire edges for:
+/// `goto` (sets no edge — the label block is unreachable) and `switch` (no
+/// successor from the dispatch block, so its arms AND everything after it are
+/// unreachable). Interpreting such a graph would silently drop code and mint
+/// false leaks, so those bodies keep the structured walker (missed
+/// path-sensitivity is acceptable; fabricated verdicts are not).
+fn body_has_unwired_shape(s: &AstStmt) -> bool {
+    if s.kind == AstStmtKind::Goto || s.kind == AstStmtKind::Switch {
+        return true;
+    }
+    match &s.data {
+        AstStmtData::Compound(v) => v.iter().any(body_has_unwired_shape),
+        AstStmtData::If { then, else_, .. } => {
+            body_has_unwired_shape(then)
+                || else_.as_deref().map_or(false, body_has_unwired_shape)
+        }
+        AstStmtData::While { body, .. }
+        | AstStmtData::Do { body, .. }
+        | AstStmtData::ForIn { body, .. }
+        | AstStmtData::Autoreleasepool(body)
+        | AstStmtData::NoArc(body)
+        | AstStmtData::Defer(body)
+        | AstStmtData::Synchronized { body, .. } => body_has_unwired_shape(body),
+        AstStmtData::For { init, body, .. } => {
+            init.as_deref().map_or(false, body_has_unwired_shape)
+                || body_has_unwired_shape(body)
+        }
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            body_has_unwired_shape(try_block)
+                || catches.iter().any(body_has_unwired_shape)
+                || finally_block.as_deref().map_or(false, body_has_unwired_shape)
+        }
+        AstStmtData::Catch { body, .. } => body_has_unwired_shape(body),
+        _ => false,
+    }
+}
+
+/// Peel the wrappers ARC (and the passes before it) leave around a ref-op
+/// target.
+///
+/// `make_release_stmt` spells the upcast in the AST so the emitted call is
+/// warning-clean on every backend (`jeti_release((NPObject *)x)`), and
+/// parentheses/boxing stack the same way. Without peeling, *every*
+/// ARC-inserted release resolved to nothing and printed as
+/// `! jeti_release on untracked ?` — the exact opposite of what this tool
+/// exists to show, since attributing ARC's own releases is its whole point.
+fn peel(e: &AstExpr) -> &AstExpr {
+    match &e.data {
+        AstExprData::Cast { expr, .. }
+        | AstExprData::Paren(expr)
+        | AstExprData::Boxed(expr) => peel(expr),
+        _ => e,
+    }
+}
 
 fn is_creation(e: &AstExpr) -> bool {
     match &e.data {
@@ -658,6 +1069,193 @@ fn is_creation(e: &AstExpr) -> bool {
     }
 }
 
+/// Ownership of a method's return value: `plus1` means the CALLER owns the
+/// result and must release it; `!plus1` (+0) means it is pool-owned and
+/// releasing it is the pool's job.
+struct MethodOwn {
+    class: String,
+    plus1: bool,
+}
+
+/// The alloc/new/copy/mutableCopy prefixes hand ownership to the caller by
+/// convention, with or without a visible body.
+fn selector_is_owning(sel: &str) -> bool {
+    sel.starts_with("alloc")
+        || sel.starts_with("new")
+        || sel.starts_with("copy")
+        || sel.starts_with("mutableCopy")
+}
+
+/// Does any `return` in this body hand back a freshly created (+1) value?
+fn body_returns_creation(body: &AstStmt) -> bool {
+    match &body.data {
+        AstStmtData::Return(Some(e)) => {
+            // A literal is a constant: returning one carries no ownership to
+            // balance, so `return @"x"` is +0 even though is_creation tracks
+            // literals for scope-release purposes. Counting them here made
+            // produce/maybeC-style methods look +1 and their call sites
+            // "leak" — a tracer false positive.
+            is_creation(e)
+                && !matches!(e.data, AstExprData::AtString(_) | AstExprData::ArrayLit(_))
+        }
+        AstStmtData::Compound(v) => v.iter().any(body_returns_creation),
+        AstStmtData::If { then, else_, .. } => {
+            body_returns_creation(then)
+                || else_.as_deref().map_or(false, body_returns_creation)
+        }
+        AstStmtData::While { body, .. }
+        | AstStmtData::Do { body, .. }
+        | AstStmtData::ForIn { body, .. }
+        | AstStmtData::Autoreleasepool(body)
+        | AstStmtData::NoArc(body)
+        | AstStmtData::Synchronized { body, .. } => body_returns_creation(body),
+        AstStmtData::For { init, body, .. } => {
+            init.as_deref().map_or(false, body_returns_creation)
+                || body_returns_creation(body)
+        }
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            body_returns_creation(try_block)
+                || catches.iter().any(body_returns_creation)
+                || finally_block.as_deref().map_or(false, body_returns_creation)
+        }
+        _ => false,
+    }
+}
+
+/// Build the selector → ownership table from the unit's own classes.
+///
+/// Keys are colon-stripped (selector identity is global; AGENTS.md). A
+/// selector whose implementations disagree on ownership is DROPPED: guessing
+/// either way mints false verdicts, and this tool's value is that its
+/// "leaked" lines can be trusted.
+fn build_own_table(unit: &AstUnit) -> HashMap<String, MethodOwn> {
+    let mut table: HashMap<String, MethodOwn> = HashMap::new();
+    for d in &unit.decls {
+        let AstDeclData::Class { cls_sym, methods, .. } = &d.data else { continue };
+        let Some(class) = cls_sym.as_deref() else { continue };
+        for m in methods {
+            let Some(sel) = m.name.as_deref() else { continue };
+            let AstDeclData::Method { body: Some(body), .. } = &m.data else { continue };
+            let key: String = sel.chars().filter(|c| *c != ':').collect();
+            let plus1 = selector_is_owning(sel) || body_returns_creation(body);
+            let conflict = table.get(&key).map_or(false, |p: &MethodOwn| p.plus1 != plus1);
+            if conflict {
+                table.remove(&key);
+            } else if !table.contains_key(&key) {
+                table.insert(key, MethodOwn { class: class.to_string(), plus1 });
+            }
+        }
+    }
+    table
+}
+
+/// Collect the names a function's block literals capture (P2-2): every
+/// variable referenced inside a block body.
+///
+/// Mirrors the ARC pass's own block-capture harvest (`collect_captures_*` in
+/// arc.rs): a block body may run after its enclosing scope dies, so captured
+/// locals get different lifetime treatment — the trace must mirror that
+/// treatment instead of demanding a release the compiler will never insert.
+fn harvest_captures(body: &AstStmt) -> Vec<String> {
+    let mut out = Vec::new();
+    walk_stmt(body, &mut out, false);
+    out
+}
+
+/// Depth-first walk collecting variable references made inside block bodies.
+/// `in_block` flips on when entering a block literal and never turns off —
+/// nested blocks capture too. Unknown shapes are skipped (misses are
+/// acceptable; false captures are not).
+fn walk_stmt(s: &AstStmt, out: &mut Vec<String>, in_block: bool) {
+    match &s.data {
+        AstStmtData::Compound(v) => v.iter().for_each(|x| walk_stmt(x, out, in_block)),
+        AstStmtData::Expr(e) => walk_expr(e, out, in_block),
+        AstStmtData::Decl(d) => {
+            let mut cur = Some(d);
+            while let Some(cd) = cur {
+                if let AstDeclData::Variable { init: Some(i), next, .. } = &cd.data {
+                    walk_expr(i, out, in_block);
+                    cur = next.as_deref();
+                } else {
+                    break;
+                }
+            }
+        }
+        AstStmtData::Return(Some(e)) | AstStmtData::Throw(Some(e)) => walk_expr(e, out, in_block),
+        AstStmtData::If { cond, then, else_, .. } => {
+            walk_expr(cond, out, in_block);
+            walk_stmt(then, out, in_block);
+            if let Some(el) = else_ {
+                walk_stmt(el, out, in_block);
+            }
+        }
+        AstStmtData::While { body, .. } | AstStmtData::Do { body, .. } => {
+            walk_stmt(body, out, in_block)
+        }
+        AstStmtData::For { init, body, .. } => {
+            if let Some(i) = init {
+                walk_stmt(i, out, in_block);
+            }
+            walk_stmt(body, out, in_block);
+        }
+        AstStmtData::ForIn { body, .. } => walk_stmt(body, out, in_block),
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            walk_stmt(try_block, out, in_block);
+            catches.iter().for_each(|c| walk_stmt(c, out, in_block));
+            if let Some(f) = finally_block {
+                walk_stmt(f, out, in_block);
+            }
+        }
+        AstStmtData::Catch { body, .. } => walk_stmt(body, out, in_block),
+        AstStmtData::Finally(b) => walk_stmt(b, out, in_block),
+        AstStmtData::Synchronized { body, .. } => walk_stmt(body, out, in_block),
+        AstStmtData::Autoreleasepool(b) | AstStmtData::NoArc(b) | AstStmtData::Defer(b) => {
+            walk_stmt(b, out, in_block)
+        }
+        AstStmtData::Switch { body, .. } => walk_stmt(body, out, in_block),
+        AstStmtData::Case { body, .. } => walk_stmt(body, out, in_block),
+        AstStmtData::Default(b) => walk_stmt(b, out, in_block),
+        _ => {}
+    }
+}
+
+fn walk_expr(e: &AstExpr, out: &mut Vec<String>, in_block: bool) {
+    match &e.data {
+        AstExprData::VarRef { name, .. } if in_block => {
+            if !out.contains(name) {
+                out.push(name.clone());
+            }
+        }
+        AstExprData::Block { body: Some(b), .. } => walk_stmt(b, out, true),
+        AstExprData::MsgSend { receiver, args, .. } => {
+            walk_expr(receiver, out, in_block);
+            args.iter().for_each(|a| walk_expr(a, out, in_block));
+        }
+        AstExprData::FuncCall { args, .. } => {
+            args.iter().for_each(|a| walk_expr(a, out, in_block));
+        }
+        AstExprData::Paren(i)
+        | AstExprData::Boxed(i)
+        | AstExprData::Await { inner: i, .. }
+        | AstExprData::Cast { expr: i, .. } => walk_expr(i, out, in_block),
+        AstExprData::Unary { operand, .. } => walk_expr(operand, out, in_block),
+        AstExprData::Binary { left, right, .. } => {
+            walk_expr(left, out, in_block);
+            walk_expr(right, out, in_block);
+        }
+        AstExprData::Assign { target, value } => {
+            walk_expr(target, out, in_block);
+            walk_expr(value, out, in_block);
+        }
+        AstExprData::Ternary { cond, then, else_ } => {
+            walk_expr(cond, out, in_block);
+            walk_expr(then, out, in_block);
+            walk_expr(else_, out, in_block);
+        }
+        _ => {}
+    }
+}
+
 fn class_of(e: &AstExpr) -> String {
     match &e.data {
         AstExprData::MsgSend { receiver, selector, .. } => {
@@ -671,8 +1269,12 @@ fn class_of(e: &AstExpr) -> String {
             }
         }
         AstExprData::VarRef { name, .. } => name.clone(),
-        AstExprData::AtString(_) => "NSString".to_string(),
-        AstExprData::ArrayLit(_) => "NSArray".to_string(),
+        // Jeti's own classes: `@"..."` is an NPString and an array literal an
+        // NPArray. These used to print the ObjC spellings (`NSString` /
+        // `NSArray`), which are not classes in this language at all — the NP-
+        // prefix is deliberately decoupled from ObjC (see AGENTS.md).
+        AstExprData::AtString(_) => "NPString".to_string(),
+        AstExprData::ArrayLit(_) => "NPArray".to_string(),
         _ => "obj".to_string(),
     }
 }
@@ -834,7 +1436,7 @@ mod tests {
 
     fn trace(stmts: Vec<AstStmt>) -> String {
         let unit = AstUnit { decls: vec![function(stmts)], filename: "test.jeti".to_string(), namespaces: Vec::new(), usings: Vec::new() };
-        trace_refcounts(&unit, &TraceOptions { max_iters: 2, color: false })
+        trace_refcounts(&unit, &TraceOptions { max_iters: 2, color: false }, None)
     }
 
     #[test]
@@ -936,7 +1538,11 @@ mod tests {
     }
 
     #[test]
-    fn loop_iterations_get_distinct_ids() {
+    fn loop_body_create_and_release_comes_out_freed() {
+        // One pass of the body is traced and joined with the entry state: an
+        // object created AND released inside the loop is freed, and no phantom
+        // second-iteration identity appears (the old snapshot-restore model
+        // re-created Cat#N every iteration while discarding the release).
         let out = trace(vec![AstStmt {
             kind: AstStmtKind::For,
             line: 1,
@@ -961,7 +1567,8 @@ mod tests {
             end_col: 0,
         }]);
         assert!(out.contains("Cat#1"), "out:\n{}", out);
-        assert!(out.contains("Cat#2"), "out:\n{}", out);
+        assert!(!out.contains("Cat#2"), "one pass is traced; no phantom iteration\nout:\n{}", out);
+        assert!(out.contains("freed"), "created+released in the body must be freed\nout:\n{}", out);
     }
 
     fn ret_stmt(e: AstExpr) -> AstStmt {
@@ -1111,5 +1718,49 @@ mod tests {
         let out = trace(vec![if_stmt, ret_stmt(var_ref("s"))]);
         assert!(!out.contains("possible leak"), "out:\n{}", out);
         assert!(out.contains("all freed"), "out:\n{}", out);
+    }
+
+    #[test]
+    fn cfg_branch_join_counts_both_paths() {
+        // The CFG worklist joins branch states at the merge point: an object
+        // released on BOTH branches is freed, one released on a single branch
+        // only is "possibly leaked [0, 1]". The old "last traced path wins"
+        // kept just one side's releases.
+        let rel = |name: &str| expr_stmt(func_call("jeti_release", vec![var_ref(name)]));
+        let branch = |then: AstStmt, else_: Option<AstStmt>| AstStmt {
+            kind: AstStmtKind::If,
+            line: 1,
+            col: 1,
+            data: AstStmtData::If {
+                cond: Box::new(var_ref("x")),
+                then: Box::new(AstStmt {
+                    kind: AstStmtKind::Compound,
+                    line: 1,
+                    col: 1,
+                    data: AstStmtData::Compound(vec![then]),
+                    end_line: 0,
+                    end_col: 0,
+                }),
+                else_: else_.map(Box::new),
+            },
+            end_line: 0,
+            end_col: 0,
+        };
+        // Distinct source positions for the two creation sites: the
+        // allocation-site memo keys on (line, col, class), and real code
+        // never puts two sites at one position.
+        let mut a_init = alloc_init();
+        a_init.line = 3;
+        let mut b_init = alloc_init();
+        b_init.line = 7;
+        let out = trace(vec![
+            decl_stmt(decl("a", a_init)),
+            branch(rel("a"), Some(rel("a"))),
+            decl_stmt(decl("b", b_init)),
+            branch(rel("b"), None),
+        ]);
+        assert!(out.contains("possibly leaked"), "out:\n{}", out);
+        assert!(!out.contains("alive on every path"), "out:\n{}", out);
+        assert!(out.contains("Cat#2"), "out:\n{}", out);
     }
 }

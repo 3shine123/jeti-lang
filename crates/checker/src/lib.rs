@@ -4063,6 +4063,22 @@ AstExprData::Subscript { object, key, .. } => {
                 }
                 Some(AstType::new(TypePrim::Id))
             }
+            // `({ ... })` statement expression: the body statements are
+            // checked in a fresh scope (its declarations are local to the
+            // expression); the value is the last expression statement's type.
+            AstExprData::StmtExpr(body) => {
+                self.scope_vars.push(Vec::new());
+                let mut last: Option<AstType> = None;
+                for s in body.iter_mut() {
+                    if let AstStmtData::Expr(e) = &mut s.data {
+                        last = self.check_expr(e);
+                    } else {
+                        self.check_stmt(s);
+                    }
+                }
+                self.scope_vars.pop();
+                last
+            }
             AstExprData::Sizeof { .. } => {
                 let mut t = AstType::new(TypePrim::Long);
                 t.is_pointer = false;

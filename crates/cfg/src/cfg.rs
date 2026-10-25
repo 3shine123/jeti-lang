@@ -72,7 +72,30 @@ impl CfgBuilder {
     fn new_block(&mut self) -> i32 {
         let bb = self.alloc_block();
         let id = bb.id;
+        // Fall-through: a block still being filled with no successor yet is
+        // continued by the new block. Without this edge, every loop header
+        // (and the blocks after it) was unreachable from anything before it —
+        // the graph only ever had branch/back edges, so a body like
+        // `decl a; while (…) {…} decl b;` lost `decl b` entirely. Explicit
+        // edges (branches, back edges, break/continue) are set by their arms
+        // and win; `flush()`ed blocks (post-branch merges, post-`return`)
+        // have `current == None` here and get their edges where they belong.
+        if let Some(cur) = self.current {
+            if let Some(prev) = self.blocks.iter_mut().find(|b| b.id == cur) {
+                if prev.true_succ.is_none() && prev.false_succ.is_none() {
+                    prev.true_succ = Some(id);
+                }
+            }
+        }
         self.blocks.push(bb);
+        // Take over `current`. Every caller does `let b = new_block()` and
+        // then builds statements meant to LAND in `b` — but with `current`
+        // left unset (a preceding `flush()` clears it), the first
+        // `ensure_block()` inside that build silently allocated ANOTHER
+        // block: the branch/loop body ended up in an orphan nobody points
+        // to, while the successor edge targeted the empty block. Both the
+        // refcount trace and the ARC pass walked a half-disconnected graph.
+        self.current = Some(id);
         id
     }
 
@@ -359,10 +382,11 @@ impl CfgBuilder {
     pub fn build(body: &AstStmt) -> Cfg {
         let mut builder = CfgBuilder::new();
 
-        // Create entry and exit blocks
+        // Create the entry block first and point `current` at it BEFORE any
+        // other block exists: with `new_block` now taking over `current` and
+        // wiring fall-through, creating the exit here would steal the entry's
+        // continuation edge (entry → exit, body unreachable).
         let entry_id = builder.new_block();
-        let exit_id = builder.new_block();
-
         builder.current = Some(entry_id);
 
         // Build CFG from body
@@ -375,10 +399,10 @@ impl CfgBuilder {
             }
         }
 
-        // Wire trailing block to exit
-        if let Some(current) = builder.current {
-            builder.set_succ(current, exit_id);
-        }
+        // Exit block last: the fall-through in `new_block` wires the trailing
+        // block to it. No extra `set_succ(current, exit)` here — `current` IS
+        // the exit now, and re-wiring it would give the exit a self-loop.
+        let exit_id = builder.new_block();
 
         // Build final CFG
         let mut cfg = Cfg::new();
