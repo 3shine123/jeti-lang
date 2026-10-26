@@ -2383,6 +2383,22 @@ line: pri_line,
             let saved_depth = self.expr_paren_depth;
             let saved_stack = self.msg_await_stack.clone();
             if self.current.kind == TokenKind::Identifier {
+                // Speculate ONLY on the generic/protocol/namespace-qualified
+                // receiver shapes (`[[VectorBuffer<T> alloc] init]`,
+                // `[NPObject<P> do]`, `[A::B::Type alloc]`):
+                // parse_type_full on `make_str("hi")` would wander into the
+                // fn-ptr/block paren branch and RECORD an error before the
+                // rewind — the rewind restores tokens, not diagnostics
+                // (probe-verified: `[f(x) sel]` died on "expected ')'").
+                // The confirmed shapes always follow the identifier with
+                // `<` or `::`, so gate the attempt on that.
+                let angle_ahead = {
+                    let saved = self.lexer.save_pos();
+                    let tok = self.lexer.next_token();
+                    self.lexer.restore_pos(saved);
+                    tok.kind == TokenKind::Less || tok.kind == TokenKind::ColonColon
+                };
+                if angle_ahead {
                 if let Some(t) = self.parse_type_full() {
                     if (!t.type_args.is_empty() || !t.protocols.is_empty())
                         && self.current.kind == TokenKind::Identifier {
@@ -2404,6 +2420,7 @@ line: pri_line,
 });
                     }
                 }
+                } // angle_ahead
                 if receiver.is_none() {
                     // Rewind lexer + current token to the saved position.
                     self.lexer.restore_pos(saved_lex);
@@ -7725,6 +7742,36 @@ mod tests {
         // without assuming the old tuple form `Await(`.
         let dbg = format!("{:?}", unit);
         dbg.contains("Await {") || dbg.contains("Await(")
+    }
+
+    #[test]
+    fn message_send_accepts_call_and_other_expression_receivers() {
+        // `[f(x) sel]` died with "expected ')'" before the fix: the speculative
+        // type-receiver parse (for `[[VectorBuffer<T> alloc] init]`) recorded
+        // an error on the call's `(`, and the rewind restored tokens but not
+        // diagnostics. The speculation is now gated on `<` following the name.
+        let parse = |src: &str| {
+            let mut p = Parser::new(src);
+            let unit = p.parse_translation_unit().unwrap();
+            (format!("{:?}", unit), p.last_error().is_empty())
+        };
+        let (text, ok) = parse(
+            "NPString *f(const char *s);\nint main(void) { return [f(\"hi\") length]; }\n",
+        );
+        assert!(ok, "a call as receiver must parse: {text}");
+        assert!(text.contains("MessageSend"), "the send must be a MessageSend");
+
+        // Chained send and parenthesized receivers keep working.
+        let (_, ok) = parse(
+            "NPString *f(void);\nint main(void) { return [[f() copy] length] + [(f()) length]; }\n",
+        );
+        assert!(ok, "chained/parenthesized receivers must parse");
+
+        // The generic-receiver speculation itself survives the gate.
+        let (_, ok) = parse(
+            "int main(void) { return [[[VectorBuffer<int *> alloc] init] capacity]; }\n",
+        );
+        assert!(ok, "generic type receiver must still parse");
     }
 
     #[test]
