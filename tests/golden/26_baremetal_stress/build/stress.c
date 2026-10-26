@@ -85,7 +85,7 @@ NPClass * JETI_GETCLASS_$_DebugToken(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_Bio__Animal(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_Bio__Human(NPClass * self, SEL _cmd);
 
-/* vtable layout signature: 5902b1d3eb188383 (methods: 14) */
+/* vtable layout signature: cbf29ce484222325 (shared methods: 0) */
 __attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, unsigned long long mine, const char *method_list) {
     if (winner != mine) {
         (void)winner; (void)mine; (void)method_list;
@@ -93,22 +93,338 @@ __attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, uns
     }
 }
 
+__attribute__((weak)) void jeti_verify_layout_sig(unsigned long long winner, unsigned long long mine, const char *winner_text, const char *mine_text) {
+    if (winner != mine) {
+        (void)winner; (void)mine; (void)winner_text; (void)mine_text;
+        __builtin_trap();
+    }
+}
+
 struct jeti_vtable {
     unsigned long long __sig;
-    int (*age)(NPObject *, SEL);
+    unsigned long long __layout_sig;
+    const char *__layout_text;
+    void (*UTF8String)(void);
+    void (*UUIDString)(void);
+    void (*_grow)(void);
+    void (*absoluteString)(void);
+    void (*addCharactersInRange_)(void);
+    void (*addCharactersInString_)(void);
+    void (*addEntriesFromDictionary_)(void);
+    void (*addIndex_)(void);
+    void (*addIndexesInRange_)(void);
+    void (*addObject_)(void);
+    void (*addObjectsFromArray_)(void);
+    void (*addObserver_forName_object_usingBlock_)(void);
+    void (*addOperationWithBlock_)(void);
+    void (*allKeys)(void);
+    void (*allObjects)(void);
+    void (*allValues)(void);
+    void (*anyObject)(void);
+    void (*appendBytes_length_)(void);
+    void (*appendData_)(void);
+    void (*appendString_)(void);
+    void (*appendUTF8String_)(void);
+    void (*arguments)(void);
+    void (*ascending)(void);
+    void (*attribute_atIndex_)(void);
+    void (*attributes)(void);
+    void (*attributesAtIndex_)(void);
+    void (*boolValue)(void);
+    void (*broadcast)(void);
+    void (*byteAtIndex_)(void);
+    void (*bytes)(void);
+    void (*canBeConvertedToEncoding_)(void);
+    void (*cancel)(void);
+    void (*cancelAllOperations)(void);
+    void (*changeCurrentDirectoryAtPath_)(void);
+    void (*charValue)(void);
+    void (*characterAtIndex_)(void);
+    void (*characterIsMember_)(void);
     int (*code)(NPObject *, SEL);
-    void (*dump)(NPObject *, SEL);
-    int (*energy)(NPObject *, SEL);
-    void (*grow)(NPObject *, SEL);
+    void (*compareObject_toObject_)(void);
+    void (*compare_)(void);
+    void (*componentsFromDate_)(void);
+    void (*constantValue)(void);
+    void (*containsIndex_)(void);
+    void (*containsObject_)(void);
+    void (*containsValueForKey_)(void);
+    void (*contentsAtPath_)(void);
+    void (*contentsOfDirectoryAtPath_)(void);
+    void (*copy)(void);
+    void (*copyItemAtPath_toPath_)(void);
+    void (*count)(void);
+    void (*countForObject_)(void);
+    void (*countLimit)(void);
+    void (*createDirectoryAtPath_)(void);
+    void (*createDirectoryAtPath_withIntermediateDirectories_)(void);
+    void (*createFileAtPath_contents_)(void);
+    void (*currentDirectoryPath)(void);
+    void (*dataUsingEncoding_)(void);
+    void (*dataWithContentsOfURL_)(void);
+    void (*dateByAddingDays_toDate_)(void);
+    void (*dateFromComponents_)(void);
+    void (*dateFromString_)(void);
+    void (*day)(void);
+    void (*dayOfWeekFromDate_)(void);
+    void (*daysInMonth_year_)(void);
+    void (*dealloc)(void);
+    void (*decimalNumberByAdding_)(void);
+    void (*decimalNumberByDividingBy_)(void);
+    void (*decimalNumberByMultiplyingBy_)(void);
+    void (*decimalNumberByNegating)(void);
+    void (*decimalNumberBySubtracting_)(void);
+    void (*decodeBoolForKey_)(void);
+    void (*decodeDoubleForKey_)(void);
+    void (*decodeIntForKey_)(void);
+    void (*decodeObjectForKey_)(void);
+    void (*deleteBytesInRange_)(void);
+    void (*deleteCharactersInRange_)(void);
+    void (*description)(void);
+    void (*domain)(void);
+    void (*doubleValue)(void);
+    void (*effectiveRangeLengthAtIndex_)(void);
+    void (*encodeBool_forKey_)(void);
+    void (*encodeDouble_forKey_)(void);
+    void (*encodeInt_forKey_)(void);
+    void (*encodeObject_forKey_)(void);
+    void (*enumerateUsingBlock_)(void);
+    void (*environment)(void);
+    void (*environmentVariable_)(void);
+    void (*evaluateWithObject_)(void);
+    void (*exchangeObjectAtIndex_withObjectAtIndex_)(void);
+    void (*exchangeObjectsAtIndexes_and_)(void);
+    void (*expressionType)(void);
+    void (*expressionValueWithObject_context_)(void);
+    void (*fileExistsAtPath_)(void);
+    void (*filterUsingPredicate_)(void);
+    void (*filteredArrayUsingPredicate_)(void);
+    void (*finishEncoding)(void);
+    void (*fire)(void);
+    void (*firstIndex)(void);
+    void (*firstMatchLengthInString_)(void);
+    void (*firstMatchLocationInString_)(void);
+    void (*firstObject)(void);
+    void (*fragment)(void);
+    void (*globallyUniqueString)(void);
+    void (*hasDay)(void);
+    void (*hasHour)(void);
+    void (*hasMinute)(void);
+    void (*hasMonth)(void);
+    void (*hasPrefix_)(void);
+    void (*hasSecond)(void);
+    void (*hasSuffix_)(void);
+    void (*hasWeekday)(void);
+    void (*hasYear)(void);
+    void (*hash)(void);
+    void (*host)(void);
+    void (*hostName)(void);
+    void (*hour)(void);
+    void (*indexOfObjectMatchingPredicate_)(void);
+    void (*indexOfObject_)(void);
     NPObject * (*init)(NPObject *, SEL);
+    void (*initForReadingWithData_)(void);
+    void (*initWithArray_)(void);
+    void (*initWithBlock_)(void);
+    void (*initWithBool_)(void);
+    void (*initWithBytes_length_)(void);
+    void (*initWithBytes_length_encoding_)(void);
+    void (*initWithCapacity_)(void);
+    void (*initWithCode_domain_userInfo_)(void);
+    void (*initWithCountLimit_)(void);
+    void (*initWithData_encoding_)(void);
+    void (*initWithDictionary_)(void);
+    void (*initWithDouble_)(void);
+    void (*initWithFormat_args_count_)(void);
+    void (*initWithKey_ascending_comparator_)(void);
+    void (*initWithLongLong_)(void);
+    void (*initWithName_object_userInfo_)(void);
+    void (*initWithObjects_count_)(void);
+    void (*initWithSet_)(void);
+    void (*initWithString_)(void);
+    void (*initWithString_attributes_)(void);
+    void (*initWithTimeIntervalSince1970_)(void);
+    void (*initWithUTF8String_)(void);
+    void (*initWithUUIDString_)(void);
+    void (*insertObject_atIndex_)(void);
+    void (*insertString_atIndex_)(void);
+    void (*intValue)(void);
+    void (*intersectsIndexesInRange_)(void);
+    void (*invalidate)(void);
+    void (*invert)(void);
+    void (*isAtEnd)(void);
+    void (*isCancelled)(void);
+    void (*isDirectoryAtPath_)(void);
+    void (*isEqualToDate_)(void);
+    void (*isEqualToNumber_)(void);
+    void (*isEqualToString_)(void);
+    void (*isEqual_)(void);
+    void (*isExecuting)(void);
+    void (*isFinished)(void);
+    void (*isKindOfClass_)(void);
+    void (*isKindOf_)(void);
+    void (*isLocked)(void);
+    void (*isMatchInString_)(void);
+    void (*isNotANumber)(void);
+    void (*isOperatingSystemAtLeastVersion_)(void);
+    void (*isPaused)(void);
+    void (*isReadableAtPath_)(void);
+    void (*isStarted)(void);
+    void (*isSuspended)(void);
+    void (*isValid)(void);
+    void (*isValidIndex_)(void);
+    void (*isWritableAtPath_)(void);
+    void (*join)(void);
+    void (*key)(void);
+    void (*keyPath)(void);
+    void (*lastIndex)(void);
+    void (*lastObject)(void);
+    void (*length)(void);
+    void (*lengthOfBytesUsingEncoding_)(void);
+    void (*lock)(void);
+    void (*longLongValue)(void);
+    void (*lowercaseString)(void);
+    void (*machine)(void);
+    void (*maxConcurrentOperationCount)(void);
+    void (*minute)(void);
+    void (*month)(void);
+    void (*moveItemAtPath_toPath_)(void);
+    void (*mutableBytes)(void);
+    void (*name)(void);
+    void (*nextObject)(void);
+    void (*np_addRange_)(void);
+    void (*np_removeRange_)(void);
+    void (*np_scanNumber_dbl_)(void);
+    void (*np_skip)(void);
+    void (*numberOfCaptureGroups)(void);
+    void (*numberOfMatchesInString_)(void);
+    void (*object)(void);
+    void (*objectAtIndex_)(void);
+    void (*objectForKey_)(void);
+    void (*observerCount)(void);
+    void (*operatingSystem)(void);
+    void (*operatingSystemVersion)(void);
+    void (*operatingSystemVersionString)(void);
+    void (*operationCount)(void);
+    void (*path)(void);
+    void (*pendingCount)(void);
+    void (*performBlock_)(void);
+    void (*pointerValue)(void);
+    void (*poll)(void);
+    void (*port)(void);
+    void (*postNotificationName_object_)(void);
+    void (*postNotificationName_object_userInfo_)(void);
+    void (*postNotification_)(void);
+    void (*predicateFormat)(void);
+    void (*processIdentifier)(void);
+    void (*query)(void);
+    void (*rangeOfString_)(void);
+    void (*rangeValue)(void);
+    void (*release)(void);
+    void (*removeAllIndexes)(void);
+    void (*removeAllObjects)(void);
+    void (*removeCharactersInRange_)(void);
+    void (*removeCharactersInString_)(void);
+    void (*removeIndex_)(void);
+    void (*removeIndexesInRange_)(void);
+    void (*removeItemAtPath_)(void);
+    void (*removeLastObject)(void);
+    void (*removeObjectAtIndex_)(void);
+    void (*removeObjectForKey_)(void);
+    void (*removeObject_)(void);
+    void (*removeObserver_)(void);
+    void (*removeObserver_forName_)(void);
+    void (*replaceBytesInRange_withBytes_length_)(void);
+    void (*replaceCharactersInRange_withString_)(void);
+    void (*replaceObjectAtIndex_withObject_)(void);
+    void (*retain)(void);
+    void (*reversedSortDescriptor)(void);
+    void (*run)(void);
+    void (*scanCharactersFromSet_intoString_)(void);
+    void (*scanDouble_)(void);
+    void (*scanInt_)(void);
+    void (*scanLocation)(void);
+    void (*scanLongLong_)(void);
+    void (*scanString_intoString_)(void);
+    void (*scanUpToCharactersFromSet_intoString_)(void);
+    void (*scanUpToString_intoString_)(void);
+    void (*scheme)(void);
+    void (*second)(void);
+    void (*setCharactersToBeSkipped_)(void);
+    void (*setCountLimit_)(void);
+    void (*setData_)(void);
+    void (*setDay_)(void);
+    void (*setEnvironmentVariable_value_)(void);
+    void (*setHour_)(void);
+    void (*setLength_)(void);
+    void (*setMaxConcurrentOperationCount_)(void);
+    void (*setMinute_)(void);
+    void (*setMonth_)(void);
+    void (*setObject_atIndex_)(void);
+    void (*setObject_forKey_)(void);
+    void (*setObject_forKey_cost_)(void);
+    void (*setScanLocation_)(void);
+    void (*setSecond_)(void);
+    void (*setString_)(void);
+    void (*setSuspended_)(void);
+    void (*setTimeoutSeconds_)(void);
+    void (*setTotalCostLimit_)(void);
+    void (*setUTCOffsetMinutes_)(void);
+    void (*setWeekday_)(void);
+    void (*setYear_)(void);
+    void (*signal)(void);
+    void (*sortUsingComparator_)(void);
+    void (*sortUsingDescriptors_)(void);
+    void (*sortedArrayUsingComparator_)(void);
+    void (*sortedArrayUsingDescriptors_)(void);
+    void (*start)(void);
+    void (*startDetached)(void);
+    void (*string)(void);
+    void (*stringByAppendingString_)(void);
+    void (*stringByAppendingUTF8String_)(void);
+    void (*stringFromDate_)(void);
+    void (*stringValue)(void);
+    void (*stringWithContentsOfURL_)(void);
+    void (*subdataWithRange_)(void);
+    void (*substringFromIndex_)(void);
+    void (*substringToIndex_)(void);
+    void (*substringWithRange_)(void);
+    void (*timeInterval)(void);
+    void (*timeIntervalSince1970)(void);
+    void (*timeIntervalSinceDate_)(void);
+    void (*timeoutSeconds)(void);
+    void (*totalCostLimit)(void);
+    void (*tryLock)(void);
+    void (*unlock)(void);
+    void (*unsetEnvironmentVariable_)(void);
+    void (*uppercaseString)(void);
+    void (*userInfo)(void);
+    void (*userName)(void);
+    void (*utcOffsetMinutes)(void);
+    void (*variable)(void);
+    void (*wait)(void);
+    void (*waitUntilAllOperationsAreFinished)(void);
+    void (*weekday)(void);
+    void (*writeToFile_atomically_)(void);
+    void (*year)(void);
+    void (*localizedDescription)(void);
+    void (*initWithType_)(void);
+    void (*npc_reserve)(void);
+    void (*_expandFormat_args_count_)(void);
+    void (*valueForKey_)(void);
+    void (*re_searchFrom_len_pos_length_)(void);
+    int (*age)(NPObject *, SEL);
+    void (*grow)(NPObject *, SEL);
     int (*legs)(NPObject *, SEL);
+    int (*energy)(NPObject *, SEL);
     void (*setEnergy_)(NPObject *, SEL, int);
-    void (*setStrength_)(NPObject *, SEL, int);
-    void (*setWisdom_)(NPObject *, SEL, int);
+    void (*dump)(NPObject *, SEL);
+    int (*work_)(NPObject *, SEL, int);
     int (*strength)(NPObject *, SEL);
+    void (*setStrength_)(NPObject *, SEL, int);
     int (*think_)(NPObject *, SEL, int);
     int (*wisdom)(NPObject *, SEL);
-    int (*work_)(NPObject *, SEL, int);
+    void (*setWisdom_)(NPObject *, SEL, int);
 };
 
 struct JETI_META_VTABLE_$_Bio__Organism {
@@ -182,141 +498,1450 @@ void jeti_metaInit(void);
 
 /* --------- Section 10 · Vtable & metadata instances ---------- */
 /* VTable instance: Bio::Organism */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
-    .__sig = 0x5902b1d3eb188383ULL,
-    .age = (int (*)(NPObject *, SEL))Bio__Organism_age,
+struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0x2494435ec6da076bULL,
+    .__layout_text = "Bio__Organism < jeti_root | int age | int vitality | int _energy",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
     .code = NULL,
-    .dump = NULL,
-    .energy = (int (*)(NPObject *, SEL))Bio__Organism_energy,
-    .grow = (void (*)(NPObject *, SEL))Bio__Organism_grow,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))Bio__Organism_init,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .age = (int (*)(NPObject *, SEL))Bio__Organism_age,
+    .grow = (void (*)(NPObject *, SEL))Bio__Organism_grow,
     .legs = (int (*)(NPObject *, SEL))Bio__Organism_legs,
+    .energy = (int (*)(NPObject *, SEL))Bio__Organism_energy,
     .setEnergy_ = (void (*)(NPObject *, SEL, int))Bio__Organism_setEnergy_,
-    .setStrength_ = NULL,
-    .setWisdom_ = NULL,
+    .dump = NULL,
+    .work_ = NULL,
     .strength = NULL,
+    .setStrength_ = NULL,
     .think_ = NULL,
     .wisdom = NULL,
-    .work_ = NULL,
+    .setWisdom_ = NULL,
 };
 
 /* VTable instance: DebugToken */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_DebugToken = {
-    .__sig = 0x5902b1d3eb188383ULL,
-    .age = NULL,
+struct jeti_vtable JETI_VTABLE_$_DebugToken = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0x533cafd4fc1418ecULL,
+    .__layout_text = "DebugToken < jeti_root | int code",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
     .code = (int (*)(NPObject *, SEL))DebugToken_code,
-    .dump = (void (*)(NPObject *, SEL))DebugToken_dump,
-    .energy = NULL,
-    .grow = NULL,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = NULL,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .age = NULL,
+    .grow = NULL,
     .legs = NULL,
+    .energy = NULL,
     .setEnergy_ = NULL,
-    .setStrength_ = NULL,
-    .setWisdom_ = NULL,
+    .dump = (void (*)(NPObject *, SEL))DebugToken_dump,
+    .work_ = NULL,
     .strength = NULL,
+    .setStrength_ = NULL,
     .think_ = NULL,
     .wisdom = NULL,
-    .work_ = NULL,
+    .setWisdom_ = NULL,
 };
 
 /* VTable instance: Bio::Animal */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
-    .__sig = 0x5902b1d3eb188383ULL,
-    .age = (int (*)(NPObject *, SEL))Bio__Organism_age,
+struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0xbd12c80a24873b48ULL,
+    .__layout_text = "Bio__Animal < Bio__Organism | int speed | int _strength",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
     .code = NULL,
-    .dump = NULL,
-    .energy = (int (*)(NPObject *, SEL))Bio__Organism_energy,
-    .grow = (void (*)(NPObject *, SEL))Bio__Organism_grow,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))Bio__Animal_init,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .age = (int (*)(NPObject *, SEL))Bio__Organism_age,
+    .grow = (void (*)(NPObject *, SEL))Bio__Organism_grow,
     .legs = (int (*)(NPObject *, SEL))Bio__Animal_legs,
+    .energy = (int (*)(NPObject *, SEL))Bio__Organism_energy,
     .setEnergy_ = (void (*)(NPObject *, SEL, int))Bio__Organism_setEnergy_,
-    .setStrength_ = (void (*)(NPObject *, SEL, int))Bio__Animal_setStrength_,
-    .setWisdom_ = NULL,
+    .dump = NULL,
+    .work_ = (int (*)(NPObject *, SEL, int))Bio__Animal_work_,
     .strength = (int (*)(NPObject *, SEL))Bio__Animal_strength,
+    .setStrength_ = (void (*)(NPObject *, SEL, int))Bio__Animal_setStrength_,
     .think_ = NULL,
     .wisdom = NULL,
-    .work_ = (int (*)(NPObject *, SEL, int))Bio__Animal_work_,
+    .setWisdom_ = NULL,
 };
 
 /* VTable instance: Bio::Human */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
-    .__sig = 0x5902b1d3eb188383ULL,
-    .age = (int (*)(NPObject *, SEL))Bio__Organism_age,
+struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0xca24b76152c68a42ULL,
+    .__layout_text = "Bio__Human < Bio__Animal | int iq | int _wisdom",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
     .code = NULL,
-    .dump = NULL,
-    .energy = (int (*)(NPObject *, SEL))Bio__Organism_energy,
-    .grow = (void (*)(NPObject *, SEL))Bio__Organism_grow,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))Bio__Human_init,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .age = (int (*)(NPObject *, SEL))Bio__Organism_age,
+    .grow = (void (*)(NPObject *, SEL))Bio__Organism_grow,
     .legs = (int (*)(NPObject *, SEL))Bio__Human_legs,
+    .energy = (int (*)(NPObject *, SEL))Bio__Organism_energy,
     .setEnergy_ = (void (*)(NPObject *, SEL, int))Bio__Organism_setEnergy_,
-    .setStrength_ = (void (*)(NPObject *, SEL, int))Bio__Animal_setStrength_,
-    .setWisdom_ = (void (*)(NPObject *, SEL, int))Bio__Human_setWisdom_,
+    .dump = NULL,
+    .work_ = (int (*)(NPObject *, SEL, int))Bio__Human_work_,
     .strength = (int (*)(NPObject *, SEL))Bio__Animal_strength,
+    .setStrength_ = (void (*)(NPObject *, SEL, int))Bio__Animal_setStrength_,
     .think_ = (int (*)(NPObject *, SEL, int))Bio__Human_think_,
     .wisdom = (int (*)(NPObject *, SEL))Bio__Human_wisdom,
-    .work_ = (int (*)(NPObject *, SEL, int))Bio__Human_work_,
+    .setWisdom_ = (void (*)(NPObject *, SEL, int))Bio__Human_setWisdom_,
 };
 
 /* Meta vtable instance: Bio::Organism */
-__attribute__((weak)) struct JETI_META_VTABLE_$_Bio__Organism JETI_META_VTABLE_$_Bio__Organism_inst = {
+struct JETI_META_VTABLE_$_Bio__Organism JETI_META_VTABLE_$_Bio__Organism_inst = {
     .create = Bio__Organism_create,
     .class = JETI_GETCLASS_$_Bio__Organism,
 };
 
 /* Meta vtable instance: DebugToken */
-__attribute__((weak)) struct JETI_META_VTABLE_$_DebugToken JETI_META_VTABLE_$_DebugToken_inst = {
+struct JETI_META_VTABLE_$_DebugToken JETI_META_VTABLE_$_DebugToken_inst = {
     .alloc = DebugToken_alloc,
     .token_ = DebugToken_token_,
     .class = JETI_GETCLASS_$_DebugToken,
 };
 
 /* Meta vtable instance: Bio::Animal */
-__attribute__((weak)) struct JETI_META_VTABLE_$_Bio__Animal JETI_META_VTABLE_$_Bio__Animal_inst = {
+struct JETI_META_VTABLE_$_Bio__Animal JETI_META_VTABLE_$_Bio__Animal_inst = {
     .create = Bio__Organism_create,
     .class = JETI_GETCLASS_$_Bio__Animal,
 };
 
 /* Meta vtable instance: Bio::Human */
-__attribute__((weak)) struct JETI_META_VTABLE_$_Bio__Human JETI_META_VTABLE_$_Bio__Human_inst = {
+struct JETI_META_VTABLE_$_Bio__Human JETI_META_VTABLE_$_Bio__Human_inst = {
     .create = Bio__Organism_create,
     .class = JETI_GETCLASS_$_Bio__Human,
 };
 
 /* +getClass for Bio::Organism */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_Bio__Organism(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_Bio__Organism(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* +getClass for DebugToken */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_DebugToken(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_DebugToken(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* +getClass for Bio::Animal */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_Bio__Animal(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_Bio__Animal(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* +getClass for Bio::Human */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_Bio__Human(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_Bio__Human(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* -------- Section 11 · Class metadata initialization --------- */
-NPClass JETI_CLASS_$_Bio__Organism;
-NPClass JETI_CLASS_$_DebugToken;
-NPClass JETI_CLASS_$_Bio__Animal;
-NPClass JETI_CLASS_$_Bio__Human;
+__attribute__((used, weak)) struct NPProtocol JETI_PROTO_$_ILifeform = {
+    .name = "ILifeform",
+    .parents = NULL,
+    .parent_count = 0,
+    .required_methods = (NPProtocolMethod[]){{ .name = "age", .encoding = "" }, { .name = "grow", .encoding = "" }, { .name = "legs", .encoding = "" }},
+    .required_count = 3,
+    .optional_methods = NULL,
+    .optional_count = 0,
+};
+
+__attribute__((used, weak)) struct NPProtocol JETI_PROTO_$_IWorker = {
+    .name = "IWorker",
+    .parents = NULL,
+    .parent_count = 0,
+    .required_methods = (NPProtocolMethod[]){{ .name = "work", .encoding = "" }},
+    .required_count = 1,
+    .optional_methods = NULL,
+    .optional_count = 0,
+};
+
+__attribute__((used, weak)) struct NPProtocol JETI_PROTO_$_IDebug = {
+    .name = "IDebug",
+    .parents = NULL,
+    .parent_count = 0,
+    .required_methods = (NPProtocolMethod[]){{ .name = "dump", .encoding = "" }},
+    .required_count = 1,
+    .optional_methods = NULL,
+    .optional_count = 0,
+};
+
+__attribute__((used)) static struct NPProtocol *JETI_PROTOS_$_Bio__Organism[] = {&JETI_PROTO_$_ILifeform};
+__attribute__((used)) static struct NPProtocol *JETI_PROTOS_$_DebugToken[] = {&JETI_PROTO_$_IDebug};
+__attribute__((used)) static struct NPProtocol *JETI_PROTOS_$_Bio__Animal[] = {&JETI_PROTO_$_IWorker};
+NPClass JETI_CLASS_$_Bio__Organism = {
+        .name = "Bio::Organism",
+        .superclass = &JETI_CLASS_$_jeti_root,
+        .instance_size = sizeof(struct Bio__Organism),
+        .vtable = &JETI_VTABLE_$_Bio__Organism,
+        .class_vtable = &JETI_META_VTABLE_$_Bio__Organism_inst,
+        .protocols = JETI_PROTOS_$_Bio__Organism,
+        .protocol_count = 1,
+        .dealloc = NULL,
+    };
+NPClass JETI_CLASS_$_DebugToken = {
+        .name = "DebugToken",
+        .superclass = &JETI_CLASS_$_jeti_root,
+        .instance_size = sizeof(struct DebugToken),
+        .vtable = &JETI_VTABLE_$_DebugToken,
+        .class_vtable = &JETI_META_VTABLE_$_DebugToken_inst,
+        .protocols = JETI_PROTOS_$_DebugToken,
+        .protocol_count = 1,
+        .dealloc = NULL,
+    };
+NPClass JETI_CLASS_$_Bio__Animal = {
+        .name = "Bio::Animal",
+        .superclass = &JETI_CLASS_$_Bio__Organism,
+        .instance_size = sizeof(struct Bio__Animal),
+        .vtable = &JETI_VTABLE_$_Bio__Animal,
+        .class_vtable = &JETI_META_VTABLE_$_Bio__Animal_inst,
+        .protocols = JETI_PROTOS_$_Bio__Animal,
+        .protocol_count = 1,
+        .dealloc = NULL,
+    };
+NPClass JETI_CLASS_$_Bio__Human = {
+        .name = "Bio::Human",
+        .superclass = &JETI_CLASS_$_Bio__Animal,
+        .instance_size = sizeof(struct Bio__Human),
+        .vtable = &JETI_VTABLE_$_Bio__Human,
+        .class_vtable = &JETI_META_VTABLE_$_Bio__Human_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = NULL,
+    };
 
 __attribute__((constructor)) static void __jeti_vtable_layout_check(void) {
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Organism)->__sig, 0x5902b1d3eb188383ULL, "age code dump energy grow init legs setEnergy_ setStrength_ setWisdom_ strength think_ wisdom work_ | class Bio::Organism | tu stress.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_DebugToken)->__sig, 0x5902b1d3eb188383ULL, "age code dump energy grow init legs setEnergy_ setStrength_ setWisdom_ strength think_ wisdom work_ | class DebugToken | tu stress.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Animal)->__sig, 0x5902b1d3eb188383ULL, "age code dump energy grow init legs setEnergy_ setStrength_ setWisdom_ strength think_ wisdom work_ | class Bio::Animal | tu stress.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Human)->__sig, 0x5902b1d3eb188383ULL, "age code dump energy grow init legs setEnergy_ setStrength_ setWisdom_ strength think_ wisdom work_ | class Bio::Human | tu stress.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Organism)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class Bio::Organism | tu stress.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_Bio__Organism)->__layout_sig, 0x2494435ec6da076bULL, (&JETI_VTABLE_$_Bio__Organism)->__layout_text, "Bio__Organism < jeti_root | int age | int vitality | int _energy");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_DebugToken)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class DebugToken | tu stress.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_DebugToken)->__layout_sig, 0x533cafd4fc1418ecULL, (&JETI_VTABLE_$_DebugToken)->__layout_text, "DebugToken < jeti_root | int code");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Animal)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class Bio::Animal | tu stress.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_Bio__Animal)->__layout_sig, 0xbd12c80a24873b48ULL, (&JETI_VTABLE_$_Bio__Animal)->__layout_text, "Bio__Animal < Bio__Organism | int speed | int _strength");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Human)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class Bio::Human | tu stress.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_Bio__Human)->__layout_sig, 0xca24b76152c68a42ULL, (&JETI_VTABLE_$_Bio__Human)->__layout_text, "Bio__Human < Bio__Animal | int iq | int _wisdom");
 }
 
 __attribute__((weak)) void jeti_metaInit(void) {
@@ -326,7 +1951,8 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct Bio__Organism),
         .vtable = &JETI_VTABLE_$_Bio__Organism,
         .class_vtable = &JETI_META_VTABLE_$_Bio__Organism_inst,
-        .protocol_count = 0,
+        .protocols = JETI_PROTOS_$_Bio__Organism,
+        .protocol_count = 1,
         .dealloc = NULL,
     };
     JETI_CLASS_$_DebugToken = (NPClass){
@@ -335,7 +1961,8 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct DebugToken),
         .vtable = &JETI_VTABLE_$_DebugToken,
         .class_vtable = &JETI_META_VTABLE_$_DebugToken_inst,
-        .protocol_count = 0,
+        .protocols = JETI_PROTOS_$_DebugToken,
+        .protocol_count = 1,
         .dealloc = NULL,
     };
     JETI_CLASS_$_Bio__Animal = (NPClass){
@@ -344,7 +1971,8 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct Bio__Animal),
         .vtable = &JETI_VTABLE_$_Bio__Animal,
         .class_vtable = &JETI_META_VTABLE_$_Bio__Animal_inst,
-        .protocol_count = 0,
+        .protocols = JETI_PROTOS_$_Bio__Animal,
+        .protocol_count = 1,
         .dealloc = NULL,
     };
     JETI_CLASS_$_Bio__Human = (NPClass){
@@ -353,6 +1981,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct Bio__Human),
         .vtable = &JETI_VTABLE_$_Bio__Human,
         .class_vtable = &JETI_META_VTABLE_$_Bio__Human_inst,
+        .protocols = NULL,
         .protocol_count = 0,
         .dealloc = NULL,
     };
@@ -363,34 +1992,45 @@ __attribute__((weak)) void jeti_meta_init(void) { jeti_metaInit(); }
 /* --------------- Section 12 · Runtime support ---------------- */
 /* --------------- Section 13 · Function bodies ---------------- */
 /* +[Organism create] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * Bio__Organism_create(NPClass * self, SEL _cmd) {
+#line 41 "stress.jeti"
     return jeti_alloc(self);
 }
 
 /* -[Organism init] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * Bio__Organism_init(NPObject * self, SEL _cmd) {
+#line 42 "stress.jeti"
     ((struct Bio__Organism *)self)->age = 0;
     ((struct Bio__Organism *)self)->vitality = 100;
     return self;
 }
 
 /* -[Organism age] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Organism_age(NPObject * self, SEL _cmd) {
+#line 43 "stress.jeti"
     return ((struct Bio__Organism *)self)->age;
 }
 
 /* -[Organism grow] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void Bio__Organism_grow(NPObject * self, SEL _cmd) {
+#line 44 "stress.jeti"
     (((struct Bio__Organism *)self)->age)++;
     (((struct Bio__Organism *)self)->vitality += 10);
 }
 
 /* -[Organism legs] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Organism_legs(NPObject * self, SEL _cmd) {
+#line 45 "stress.jeti"
     return 0;
 }
 
 /* -[Organism energy] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Organism_energy(NPObject * self, SEL _cmd) {
     return ((struct Bio__Organism *)self)->_energy;
 }
@@ -402,21 +2042,27 @@ __attribute__((weak)) void Bio__Organism_setEnergy_(NPObject * self, SEL _cmd, i
 
 /* -[Animal setStrength:] */
 __attribute__((weak)) int Bio__Animal_legs(NPObject * self, SEL _cmd) {
+#line 64 "stress.jeti"
     return 4;
 }
 
 /* -[Animal work_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Animal_work_(NPObject * self, SEL _cmd, int hours) {
+#line 66 "stress.jeti"
     (((struct Bio__Animal *)self)->vitality -= (hours * 5));
+#line 67 "stress.jeti"
     kputs("       worked ");
     kputdec(hours);
     kputs("h, vitality=");
     kputdec(((struct Bio__Animal *)self)->vitality);
     kputs("\n");
+#line 68 "stress.jeti"
     return (hours * 10);
 }
 
 /* -[Animal strength] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Animal_strength(NPObject * self, SEL _cmd) {
     return ((struct Bio__Animal *)self)->_strength;
 }
@@ -428,38 +2074,54 @@ __attribute__((weak)) void Bio__Animal_setStrength_(NPObject * self, SEL _cmd, i
 
 /* -[Animal work:] */
 __attribute__((weak)) NPObject * Bio__Animal_init(NPObject * self, SEL _cmd) {
+#line 60 "stress.jeti"
     self = (&JETI_VTABLE_$_Bio__Organism)->init(self, __jeti_sel_init);
+#line 61 "stress.jeti"
     ((struct Bio__Animal *)self)->speed = 10;
+#line 62 "stress.jeti"
     return self;
 }
 
 /* -[Human wisdom] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Human_legs(NPObject * self, SEL _cmd) {
+#line 90 "stress.jeti"
     return 2;
 }
 
 /* -[Human work_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Human_work_(NPObject * self, SEL _cmd, int hours) {
+#line 92 "stress.jeti"
     int result = (&JETI_VTABLE_$_Bio__Animal)->work_(self, __jeti_sel_work_, hours);
+#line 93 "stress.jeti"
     kputs("       human worked smarter: ");
     kputdec((result + 5));
     kputs("\n");
+#line 94 "stress.jeti"
     return (result + 5);
 }
 
 /* -[Human think_] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Human_think_(NPObject * self, SEL _cmd, int problem) {
+#line 97 "stress.jeti"
     int solution = ((problem * ((struct Bio__Human *)self)->iq) / 50);
-    ({ NPObject *__jeti_tmp_0 = ((NPObject *)(self)); __jeti_tmp_0 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->setWisdom_)(__jeti_tmp_0, __jeti_sel_setWisdom_, (({ NPObject *__jeti_tmp_1 = ((NPObject *)(self)); __jeti_tmp_1 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->wisdom)(__jeti_tmp_1, __jeti_sel_wisdom) : (int){0}; }) + 1)) : 0; });
+#line 98 "stress.jeti"
+    __auto_type __jeti_eh_tmp_0 = ({ NPObject *__jeti_tmp_0 = ((NPObject *)(self)); __jeti_tmp_0 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->wisdom)(__jeti_tmp_0, __jeti_sel_wisdom) : (int){0}; });
+    ({ NPObject *__jeti_tmp_1 = ((NPObject *)(self)); __jeti_tmp_1 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->setWisdom_)(__jeti_tmp_1, __jeti_sel_setWisdom_, (__jeti_eh_tmp_0 + 1)) : 0; });
+#line 99 "stress.jeti"
     kputs("       thought about ");
     kputdec(problem);
     kputs(" -> ");
     kputdec(solution);
     kputs("\n");
+#line 100 "stress.jeti"
     return solution;
 }
 
 /* -[Human wisdom] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int Bio__Human_wisdom(NPObject * self, SEL _cmd) {
     return ((struct Bio__Human *)self)->_wisdom;
 }
@@ -471,31 +2133,45 @@ __attribute__((weak)) void Bio__Human_setWisdom_(NPObject * self, SEL _cmd, int 
 
 /* -[Human work:] */
 __attribute__((weak)) NPObject * Bio__Human_init(NPObject * self, SEL _cmd) {
+#line 85 "stress.jeti"
     self = (&JETI_VTABLE_$_Bio__Animal)->init(self, __jeti_sel_init);
+#line 86 "stress.jeti"
     ((struct Bio__Human *)self)->iq = 100;
+#line 87 "stress.jeti"
     ((struct Bio__Human *)self)->speed = 12;
+#line 88 "stress.jeti"
     return self;
 }
 
 /* +[DebugToken alloc] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * DebugToken_alloc(NPClass * self, SEL _cmd) {
+#line 127 "stress.jeti"
     return jeti_alloc(self);
 }
 
 /* +[DebugToken token:] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * DebugToken_token_(NPClass * self, SEL _cmd, int c) {
-    DebugToken * t = (DebugToken *)(DebugToken_alloc(&JETI_CLASS_$_DebugToken, __jeti_sel_alloc));
+#line 123 "stress.jeti"
+    DebugToken * t = (DebugToken *)DebugToken_alloc(&JETI_CLASS_$_DebugToken, __jeti_sel_alloc);
+#line 124 "stress.jeti"
     t->code = c;
+#line 125 "stress.jeti"
     return t;
 }
 
 /* -[DebugToken code] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int DebugToken_code(NPObject * self, SEL _cmd) {
+#line 128 "stress.jeti"
     return ((struct DebugToken *)self)->code;
 }
 
 /* -[DebugToken dump] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void DebugToken_dump(NPObject * self, SEL _cmd) {
+#line 130 "stress.jeti"
     kputs("       DebugToken(code=");
     kputdec(((struct DebugToken *)self)->code);
     kputs(")\n");
@@ -509,272 +2185,474 @@ void kputhex(unsigned v);
 
 void kputc(char c);
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int fib(int n) {
-    if ((n <= 1)) {
+#line 135 "stress.jeti"
+    if (n <= 1) {
         return n;
     }
+#line 136 "stress.jeti"
     return (fib((n - 1)) + fib((n - 2)));
 }
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) unsigned rotl(unsigned x, unsigned n) {
+#line 140 "stress.jeti"
     return (((x << n)) | ((x >> ((32 - n)))));
 }
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) void rethrow_token(DebugToken * t) {
+#line 146 "stress.jeti"
     {
-        __jeti_exception_value = t;
-        longjmp(__jeti_exception_buf, 1);
+        NPObject * __jeti_eh_thrown_1 = (NPObject *)t;
+#line 1 "<jeti-generated>"
+        __jeti_eh_val = __jeti_eh_thrown_1;
+        jeti_retain(__jeti_eh_val);
+        jeti_autorelease(__jeti_eh_val);
+        __jeti_eh_flag = 1;
+    }
+    if (__jeti_eh_flag == 1) {
+        return;
     }
 }
 
 __attribute__((weak)) void bare_rethrow_token(DebugToken * t) {
+#line 150 "stress.jeti"
     {
-        __jeti_exception_value = t;
-        longjmp(__jeti_exception_buf, 1);
+        NPObject * __jeti_eh_thrown_2 = (NPObject *)t;
+#line 1 "<jeti-generated>"
+        __jeti_eh_val = __jeti_eh_thrown_2;
+        jeti_retain(__jeti_eh_val);
+        jeti_autorelease(__jeti_eh_val);
+        __jeti_eh_flag = 1;
+    }
+    if (__jeti_eh_flag == 1) {
+        return;
     }
 }
 
 __attribute__((weak)) int local_catch_token(int n, DebugToken * t) {
+#line 155 "stress.jeti"
     {
-        jmp_buf __jeti_saved;
-        memcpy(__jeti_saved, __jeti_exception_buf, sizeof(jmp_buf));
-        volatile int __jeti_state = 0;
-        if ((setjmp(__jeti_exception_buf) != 0))         __jeti_state = 1;
-        if ((__jeti_state == 0)) {
-            if ((n < 0)) {
+        int __jeti_eh_saved_3 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+        __jeti_eh_flag = 0;
+#line 155 "stress.jeti"
+        int __jeti_eh_done_3 = 0;
+        {
+#line 156 "stress.jeti"
+            if (n < 0) {
+#line 157 "stress.jeti"
                 {
-                    __jeti_exception_value = t;
-                    longjmp(__jeti_exception_buf, 1);
+                    NPObject * __jeti_eh_thrown_4 = (NPObject *)t;
+#line 1 "<jeti-generated>"
+                    __jeti_eh_val = __jeti_eh_thrown_4;
+                    jeti_retain(__jeti_eh_val);
+                    jeti_autorelease(__jeti_eh_val);
+                    __jeti_eh_flag = 1;
                 }
             }
-            return (n * 3);
-        }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         if (__jeti_eh_isa((NPObject *)__jeti_exception_value, &JETI_CLASS_$_DebugToken)) {
-            __jeti_state = 2;
-            DebugToken * caught;
-            (void)caught;
-            {
-                return -1;
+            if (__jeti_eh_flag == 0) {
+                {
+#line 159 "stress.jeti"
+                    return (n * 3);
+                }
             }
         }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         longjmp(__jeti_exception_buf, 1);
+#line 155 "stress.jeti"
+        if ((__jeti_eh_flag == 1) && (__jeti_eh_done_3 == 0)) {
+            if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_DebugToken)) {
+#line 1 "<jeti-generated>"
+                __jeti_eh_done_3 = 1;
+                __jeti_eh_flag = 0;
+#line 155 "stress.jeti"
+                DebugToken * caught;
+#line 160 "stress.jeti"
+                {
+#line 161 "stress.jeti"
+                    return -1;
+                }
+            }
+        }
+#line 1 "<jeti-generated>"
+        __jeti_eh_flag = (__jeti_eh_saved_3 || __jeti_eh_flag);
     }
+    if (__jeti_eh_flag == 1) {
+        return 0;
+    }
+    return 0;
 }
 
 __attribute__((weak)) int main(void) {
     jeti_metaInit();
+#line 166 "stress.jeti"
     jeti_meta_init();
+#line 168 "stress.jeti"
     kputs("========== BARE-METAL STRESS TEST ==========\n");
+#line 169 "stress.jeti"
     int passed = 0;
+#line 170 "stress.jeti"
     int total = 0;
+#line 173 "stress.jeti"
     (total)++;
-    NPObject *__jeti_tmp_2 = (DebugToken_alloc(&JETI_CLASS_$_Bio__Human, __jeti_sel_alloc));
-    Bio__Human * h = (Bio__Human *)(__jeti_tmp_2 ? ((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->init(__jeti_tmp_2, __jeti_sel_init) : 0);
+#line 174 "stress.jeti"
+    Bio__Human * h = (Bio__Human *)({ NPObject *__jeti_tmp_2 = ((NPObject *)(DebugToken_alloc(&JETI_CLASS_$_Bio__Human, __jeti_sel_alloc))); __jeti_tmp_2 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->init)(__jeti_tmp_2, __jeti_sel_init) : 0; });
+#line 175 "stress.jeti"
     int legs = ({ NPObject *__jeti_tmp_3 = ((NPObject *)(h)); __jeti_tmp_3 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->legs)(__jeti_tmp_3, __jeti_sel_legs) : (int){0}; });
+#line 176 "stress.jeti"
     kputs("[1] Human legs=");
     kputdec(legs);
     kputs(" (expect 2)\n");
-    if ((legs == 2)) {
+#line 177 "stress.jeti"
+    if (legs == 2) {
         (passed)++;
     }
+#line 180 "stress.jeti"
     (total)++;
+#line 181 "stress.jeti"
     int age = ({ NPObject *__jeti_tmp_4 = ((NPObject *)(h)); __jeti_tmp_4 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->age)(__jeti_tmp_4, __jeti_sel_age) : (int){0}; });
+#line 182 "stress.jeti"
     kputs("[2] Human age=");
     kputdec(age);
     kputs(" (expect 0)\n");
-    if ((age == 0)) {
+#line 183 "stress.jeti"
+    if (age == 0) {
         (passed)++;
     }
+#line 186 "stress.jeti"
     (total)++;
+#line 187 "stress.jeti"
     ({ NPObject *__jeti_tmp_5 = ((NPObject *)(h)); __jeti_tmp_5 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->setStrength_)(__jeti_tmp_5, __jeti_sel_setStrength_, 50) : 0; });
+#line 188 "stress.jeti"
     int s = ({ NPObject *__jeti_tmp_6 = ((NPObject *)(h)); __jeti_tmp_6 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_6->isa->vtable)->strength)(__jeti_tmp_6, __jeti_sel_strength) : (int){0}; });
+#line 189 "stress.jeti"
     kputs("[3] Human strength=");
     kputdec(s);
     kputs(" (expect 50)\n");
-    if ((s == 50)) {
+#line 190 "stress.jeti"
+    if (s == 50) {
         (passed)++;
     }
+#line 193 "stress.jeti"
     (total)++;
+#line 194 "stress.jeti"
     int iq = h->iq;
+#line 195 "stress.jeti"
     kputs("[4] Human iq=");
     kputdec(iq);
     kputs(" (expect 100)\n");
-    if ((iq == 100)) {
+#line 196 "stress.jeti"
+    if (iq == 100) {
         (passed)++;
     }
+#line 199 "stress.jeti"
     (total)++;
+#line 200 "stress.jeti"
     ({ NPObject *__jeti_tmp_7 = ((NPObject *)(h)); __jeti_tmp_7 ? ((void (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_7->isa->vtable)->grow)(__jeti_tmp_7, __jeti_sel_grow) : 0; });
+#line 201 "stress.jeti"
     int v = h->vitality;
+#line 202 "stress.jeti"
     kputs("[5] vitality after grow=");
     kputdec(v);
     kputs(" (expect 110)\n");
-    if ((v == 110)) {
+#line 203 "stress.jeti"
+    if (v == 110) {
         (passed)++;
     }
+#line 206 "stress.jeti"
     (total)++;
+#line 207 "stress.jeti"
     ({ NPObject *__jeti_tmp_8 = ((NPObject *)(h)); __jeti_tmp_8 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_8->isa->vtable)->work_)(__jeti_tmp_8, __jeti_sel_work_, 5) : (int){0}; });
+#line 208 "stress.jeti"
     kputs("[6] work done (check vitality deduction)\n");
-    if ((v > 0)) {
+#line 209 "stress.jeti"
+    if (v > 0) {
         (passed)++;
     }
+#line 212 "stress.jeti"
     (total)++;
-    Bio__Organism * o = (Bio__Organism *)(Bio__Organism_create(&JETI_CLASS_$_Bio__Organism, __jeti_sel_create));
+#line 213 "stress.jeti"
+    Bio__Organism * o = (Bio__Organism *)Bio__Organism_create(&JETI_CLASS_$_Bio__Organism, __jeti_sel_create);
+#line 214 "stress.jeti"
     ({ NPObject *__jeti_tmp_9 = ((NPObject *)(o)); __jeti_tmp_9 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_9->isa->vtable)->init)(__jeti_tmp_9, __jeti_sel_init) : 0; });
+#line 215 "stress.jeti"
     kputs("[7] Organism created via class method\n");
-    if ((o != 0)) {
+#line 216 "stress.jeti"
+    if (o != 0) {
         (passed)++;
     }
+#line 219 "stress.jeti"
     (total)++;
-    DebugToken * tok = (DebugToken *)(DebugToken_token_(&JETI_CLASS_$_DebugToken, __jeti_sel_token_, 42));
+#line 220 "stress.jeti"
+    DebugToken * tok = (DebugToken *)DebugToken_token_(&JETI_CLASS_$_DebugToken, __jeti_sel_token_, 42);
+#line 221 "stress.jeti"
     int catch_idx = 0;
+#line 222 "stress.jeti"
     {
-        jmp_buf __jeti_saved;
-        memcpy(__jeti_saved, __jeti_exception_buf, sizeof(jmp_buf));
-        volatile int __jeti_state = 0;
-        if ((setjmp(__jeti_exception_buf) != 0))         __jeti_state = 1;
-        if ((__jeti_state == 0)) {
+        int __jeti_eh_saved_5 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+        __jeti_eh_flag = 0;
+#line 222 "stress.jeti"
+        int __jeti_eh_done_5 = 0;
+        {
+#line 223 "stress.jeti"
             kputs("[8] try body, throwing...\n");
-            jeti_release(h);
+#line 224 "stress.jeti"
             {
-                __jeti_exception_value = tok;
-                longjmp(__jeti_exception_buf, 1);
+                NPObject * __jeti_eh_thrown_6 = (NPObject *)tok;
+#line 1 "<jeti-generated>"
+                __jeti_eh_val = __jeti_eh_thrown_6;
+                jeti_retain(__jeti_eh_val);
+                jeti_autorelease(__jeti_eh_val);
+                __jeti_eh_flag = 1;
             }
-            kputs("    unreachable\n");
-        }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         if (__jeti_eh_isa((NPObject *)__jeti_exception_value, &JETI_CLASS_$_Bio__Organism)) {
-            __jeti_state = 2;
-            Bio__Organism * e1;
-            (void)e1;
-            {
-                catch_idx = 1;
-                kputs("    first catch matched (expected)\n");
+            if (__jeti_eh_flag == 0) {
+                {
+#line 225 "stress.jeti"
+                    kputs("    unreachable\n");
+                }
             }
         }
-        if ((__jeti_state == 1)) {
-            __jeti_state = 2;
+#line 222 "stress.jeti"
+        if ((__jeti_eh_flag == 1) && (__jeti_eh_done_5 == 0)) {
+            if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_Bio__Organism)) {
+#line 1 "<jeti-generated>"
+                __jeti_eh_done_5 = 1;
+                __jeti_eh_flag = 0;
+#line 222 "stress.jeti"
+                Bio__Organism * e1;
+#line 226 "stress.jeti"
+                {
+#line 227 "stress.jeti"
+                    catch_idx = 1;
+#line 228 "stress.jeti"
+                    kputs("    first catch matched (expected)\n");
+                }
+            }
+        }
+#line 222 "stress.jeti"
+        if ((__jeti_eh_flag == 1) && (__jeti_eh_done_5 == 0)) {
+#line 1 "<jeti-generated>"
+            __jeti_eh_done_5 = 1;
+            __jeti_eh_flag = 0;
+#line 222 "stress.jeti"
             NPObject * e2;
-            (void)e2;
+#line 229 "stress.jeti"
             {
+#line 230 "stress.jeti"
                 catch_idx = 2;
+#line 231 "stress.jeti"
                 kputs("    second catch matched (id)\n");
             }
         }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
+#line 222 "stress.jeti"
         {
-            kputs("    finally runs\n");
-        }
-        if ((__jeti_state == 1))         longjmp(__jeti_exception_buf, 1);
-    }
-    kputs("    catch_idx=");
-    kputdec(catch_idx);
-    kputs(" (expect 2, DebugToken != Organism)\n");
-    if ((catch_idx == 2)) {
-        (passed)++;
-    }
-    (total)++;
-    SEL sel = __jeti_sel_work_;
-    kputs("[9] @selector name=");
-    kputs(sel.name);
-    kputs(" (expect work:)\n");
-    if ((sel.name[0] == 'w')) {
-        (passed)++;
-    }
-    (total)++;
-    unsigned r = rotl(305419896, 8);
-    kputs("[10] rotl(0x12345678,8)=0x");
-    kputhex(r);
-    kputs(" (expect 0x34567812)\n");
-    if ((r == 878082066)) {
-        (passed)++;
-    }
-    (total)++;
-    int f10 = fib(10);
-    kputs("[11] fib(10)=");
-    kputdec(f10);
-    kputs(" (expect 55)\n");
-    if ((f10 == 55)) {
-        (passed)++;
-    }
-    (total)++;
-    ({ NPObject *__jeti_tmp_10 = ((NPObject *)(h)); __jeti_tmp_10 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_10->isa->vtable)->setEnergy_)(__jeti_tmp_10, __jeti_sel_setEnergy_, 30) : 0; });
-    ({ NPObject *__jeti_tmp_11 = ((NPObject *)(h)); __jeti_tmp_11 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_11->isa->vtable)->setWisdom_)(__jeti_tmp_11, __jeti_sel_setWisdom_, 70) : 0; });
-    int t12 = ({ NPObject *__jeti_tmp_12 = ((NPObject *)(h)); __jeti_tmp_12 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_12->isa->vtable)->think_)(__jeti_tmp_12, __jeti_sel_think_, 20) : (int){0}; });
-    kputs("[12] think(20)=");
-    kputdec(t12);
-    kputs(" (expect 40)\n");
-    if ((t12 == 40)) {
-        (passed)++;
-    }
-    (total)++;
-    Bio__Animal * a = (Bio__Animal *)h;
-    int al = ({ NPObject *__jeti_tmp_13 = ((NPObject *)(a)); __jeti_tmp_13 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_13->isa->vtable)->legs)(__jeti_tmp_13, __jeti_sel_legs) : (int){0}; });
-    kputs("[13] Animal-polymorphic legs=");
-    kputdec(al);
-    kputs(" (expect 2 via vtable)\n");
-    if ((al == 2)) {
-        (passed)++;
-    }
-    (total)++;
-    kputs("[14] ARC auto-release (check runtime)\n");
-    (passed)++;
-    (total)++;
-    int lc15 = local_catch_token(7, tok);
-    int hit15 = 0;
-    {
-        jmp_buf __jeti_saved;
-        memcpy(__jeti_saved, __jeti_exception_buf, sizeof(jmp_buf));
-        volatile int __jeti_state = 0;
-        if ((setjmp(__jeti_exception_buf) != 0))         __jeti_state = 1;
-        if ((__jeti_state == 0)) {
-            rethrow_token(tok);
-        }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         if (__jeti_eh_isa((NPObject *)__jeti_exception_value, &JETI_CLASS_$_DebugToken)) {
-            __jeti_state = 2;
-            DebugToken * c15 = (DebugToken *)__jeti_exception_value;
+            int __jeti_eh_saved_7 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+            __jeti_eh_flag = 0;
+#line 232 "stress.jeti"
             {
-                hit15 = (hit15 + ({ NPObject *__jeti_tmp_14 = ((NPObject *)(c15)); __jeti_tmp_14 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_14->isa->vtable)->code)(__jeti_tmp_14, __jeti_sel_code) : (int){0}; }));
+#line 233 "stress.jeti"
+                kputs("    finally runs\n");
+            }
+#line 1 "<jeti-generated>"
+            __jeti_eh_flag = (__jeti_eh_saved_7 || __jeti_eh_flag);
+        }
+        __jeti_eh_flag = (__jeti_eh_saved_5 || __jeti_eh_flag);
+    }
+    if (__jeti_eh_flag == 0) {
+        {
+#line 235 "stress.jeti"
+            kputs("    catch_idx=");
+            kputdec(catch_idx);
+#line 236 "stress.jeti"
+            kputs(" (expect 2, DebugToken != Organism)\n");
+#line 237 "stress.jeti"
+            if (catch_idx == 2) {
+                (passed)++;
+            }
+#line 240 "stress.jeti"
+            (total)++;
+#line 241 "stress.jeti"
+            SEL sel = __jeti_sel_work_;
+#line 242 "stress.jeti"
+            kputs("[9] @selector name=");
+            kputs(sel.name);
+            kputs(" (expect work:)\n");
+#line 243 "stress.jeti"
+            if (sel.name[0] == 'w') {
+                (passed)++;
+            }
+#line 246 "stress.jeti"
+            (total)++;
+#line 247 "stress.jeti"
+            unsigned r = rotl(305419896, 8);
+#line 248 "stress.jeti"
+            kputs("[10] rotl(0x12345678,8)=0x");
+            kputhex(r);
+            kputs(" (expect 0x34567812)\n");
+#line 249 "stress.jeti"
+            if (r == 878082066) {
+                (passed)++;
+            }
+#line 252 "stress.jeti"
+            (total)++;
+#line 253 "stress.jeti"
+            int f10 = fib(10);
+#line 254 "stress.jeti"
+            kputs("[11] fib(10)=");
+            kputdec(f10);
+            kputs(" (expect 55)\n");
+#line 255 "stress.jeti"
+            if (f10 == 55) {
+                (passed)++;
+            }
+#line 258 "stress.jeti"
+            (total)++;
+#line 259 "stress.jeti"
+            ({ NPObject *__jeti_tmp_10 = ((NPObject *)(h)); __jeti_tmp_10 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_10->isa->vtable)->setEnergy_)(__jeti_tmp_10, __jeti_sel_setEnergy_, 30) : 0; });
+#line 260 "stress.jeti"
+            ({ NPObject *__jeti_tmp_11 = ((NPObject *)(h)); __jeti_tmp_11 ? ((void (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_11->isa->vtable)->setWisdom_)(__jeti_tmp_11, __jeti_sel_setWisdom_, 70) : 0; });
+#line 261 "stress.jeti"
+            int t12 = ({ NPObject *__jeti_tmp_12 = ((NPObject *)(h)); __jeti_tmp_12 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_12->isa->vtable)->think_)(__jeti_tmp_12, __jeti_sel_think_, 20) : (int){0}; });
+#line 262 "stress.jeti"
+            kputs("[12] think(20)=");
+            kputdec(t12);
+            kputs(" (expect 40)\n");
+#line 263 "stress.jeti"
+            if (t12 == 40) {
+                (passed)++;
+            }
+#line 266 "stress.jeti"
+            (total)++;
+#line 267 "stress.jeti"
+            Bio__Animal * a = (Bio__Animal *)h;
+#line 268 "stress.jeti"
+            int al = ({ NPObject *__jeti_tmp_13 = ((NPObject *)(a)); __jeti_tmp_13 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_13->isa->vtable)->legs)(__jeti_tmp_13, __jeti_sel_legs) : (int){0}; });
+#line 269 "stress.jeti"
+            kputs("[13] Animal-polymorphic legs=");
+            kputdec(al);
+            kputs(" (expect 2 via vtable)\n");
+#line 270 "stress.jeti"
+            if (al == 2) {
+                (passed)++;
+            }
+#line 273 "stress.jeti"
+            (total)++;
+#line 276 "stress.jeti"
+            kputs("[14] ARC auto-release (check runtime)\n");
+#line 277 "stress.jeti"
+            (passed)++;
+#line 280 "stress.jeti"
+            (total)++;
+#line 281 "stress.jeti"
+            int lc15 = local_catch_token(7, tok);
+#line 1 "<jeti-generated>"
+            if (__jeti_eh_flag == 0) {
+                {
+#line 282 "stress.jeti"
+                    int hit15 = 0;
+#line 283 "stress.jeti"
+                    {
+                        int __jeti_eh_saved_8 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+                        __jeti_eh_flag = 0;
+#line 283 "stress.jeti"
+                        int __jeti_eh_done_8 = 0;
+                        {
+#line 284 "stress.jeti"
+                            rethrow_token(tok);
+                        }
+#line 283 "stress.jeti"
+                        if ((__jeti_eh_flag == 1) && (__jeti_eh_done_8 == 0)) {
+                            if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_DebugToken)) {
+#line 1 "<jeti-generated>"
+                                __jeti_eh_done_8 = 1;
+                                __jeti_eh_flag = 0;
+#line 283 "stress.jeti"
+                                DebugToken * c15 = (DebugToken *)__jeti_eh_val;
+#line 285 "stress.jeti"
+                                {
+#line 286 "stress.jeti"
+                                    __auto_type __jeti_eh_tmp_9 = ({ NPObject *__jeti_tmp_14 = ((NPObject *)(c15)); __jeti_tmp_14 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_14->isa->vtable)->code)(__jeti_tmp_14, __jeti_sel_code) : (int){0}; });
+                                    hit15 = (hit15 + __jeti_eh_tmp_9);
+                                }
+                            }
+                        }
+#line 1 "<jeti-generated>"
+                        __jeti_eh_flag = (__jeti_eh_saved_8 || __jeti_eh_flag);
+                    }
+                    if (__jeti_eh_flag == 0) {
+                        {
+#line 288 "stress.jeti"
+                            {
+                                int __jeti_eh_saved_10 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+                                __jeti_eh_flag = 0;
+#line 288 "stress.jeti"
+                                int __jeti_eh_done_10 = 0;
+                                {
+#line 289 "stress.jeti"
+                                    bare_rethrow_token(tok);
+                                }
+#line 288 "stress.jeti"
+                                if ((__jeti_eh_flag == 1) && (__jeti_eh_done_10 == 0)) {
+                                    if (__jeti_eh_isa((NPObject *)__jeti_eh_val, &JETI_CLASS_$_DebugToken)) {
+#line 1 "<jeti-generated>"
+                                        __jeti_eh_done_10 = 1;
+                                        __jeti_eh_flag = 0;
+#line 288 "stress.jeti"
+                                        DebugToken * c15b = (DebugToken *)__jeti_eh_val;
+#line 290 "stress.jeti"
+                                        {
+#line 291 "stress.jeti"
+                                            __auto_type __jeti_eh_tmp_11 = ({ NPObject *__jeti_tmp_15 = ((NPObject *)(c15b)); __jeti_tmp_15 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_15->isa->vtable)->code)(__jeti_tmp_15, __jeti_sel_code) : (int){0}; });
+                                            hit15 = (hit15 + __jeti_eh_tmp_11);
+                                        }
+                                    }
+                                }
+#line 1 "<jeti-generated>"
+                                __jeti_eh_flag = (__jeti_eh_saved_10 || __jeti_eh_flag);
+                            }
+                            if (__jeti_eh_flag == 0) {
+                                {
+#line 293 "stress.jeti"
+                                    kputs("[15] throws local=");
+                                    kputdec(lc15);
+#line 294 "stress.jeti"
+                                    kputs(" caught=");
+                                    kputdec(hit15);
+#line 295 "stress.jeti"
+                                    kputs(" (expect 21/84)\n");
+#line 296 "stress.jeti"
+                                    if ((lc15 == 21) && (hit15 == 84)) {
+                                        (passed)++;
+                                    }
+#line 299 "stress.jeti"
+                                    kputs("==========================================\n");
+#line 300 "stress.jeti"
+                                    kputs("PASSED: ");
+                                    kputdec(passed);
+                                    kputs(" / ");
+                                    kputdec(total);
+                                    kputs("\n");
+#line 1 "<jeti-generated>"
+                                    jeti_release((struct NPObject *)h);
+#line 301 "stress.jeti"
+                                    return (passed == total) ? 0 : 1;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         longjmp(__jeti_exception_buf, 1);
     }
-    {
-        jmp_buf __jeti_saved;
-        memcpy(__jeti_saved, __jeti_exception_buf, sizeof(jmp_buf));
-        volatile int __jeti_state = 0;
-        if ((setjmp(__jeti_exception_buf) != 0))         __jeti_state = 1;
-        if ((__jeti_state == 0)) {
-            bare_rethrow_token(tok);
-        }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         if (__jeti_eh_isa((NPObject *)__jeti_exception_value, &JETI_CLASS_$_DebugToken)) {
-            __jeti_state = 2;
-            DebugToken * c15b = (DebugToken *)__jeti_exception_value;
-            {
-                hit15 = (hit15 + ({ NPObject *__jeti_tmp_15 = ((NPObject *)(c15b)); __jeti_tmp_15 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_15->isa->vtable)->code)(__jeti_tmp_15, __jeti_sel_code) : (int){0}; }));
-            }
-        }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1))         longjmp(__jeti_exception_buf, 1);
+#line 1 "<jeti-generated>"
+    if (__jeti_eh_flag == 1) {
+        jeti_eh_uncaught();
     }
-    kputs("[15] throws local=");
-    kputdec(lc15);
-    kputs(" caught=");
-    kputdec(hit15);
-    kputs(" (expect 21/84)\n");
-    if (((lc15 == 21) && (hit15 == 84))) {
-        (passed)++;
-    }
-    kputs("==========================================\n");
-    kputs("PASSED: ");
-    kputdec(passed);
-    kputs(" / ");
-    kputdec(total);
-    kputs("\n");
-    return (passed == total) ? 0 : 1;
+    jeti_release((struct NPObject *)h);
 }
 

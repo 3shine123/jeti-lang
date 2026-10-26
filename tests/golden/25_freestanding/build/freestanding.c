@@ -52,7 +52,7 @@ NPClass * JETI_GETCLASS_$_BareMetal__Calculator(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_BareMetal__Counter(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_BareMetal__NPIoError(NPClass * self, SEL _cmd);
 
-/* vtable layout signature: 6885d9edd6606f27 (methods: 4) */
+/* vtable layout signature: cbf29ce484222325 (shared methods: 0) */
 __attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, unsigned long long mine, const char *method_list) {
     if (winner != mine) {
         (void)winner; (void)mine; (void)method_list;
@@ -60,12 +60,329 @@ __attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, uns
     }
 }
 
+__attribute__((weak)) void jeti_verify_layout_sig(unsigned long long winner, unsigned long long mine, const char *winner_text, const char *mine_text) {
+    if (winner != mine) {
+        (void)winner; (void)mine; (void)winner_text; (void)mine_text;
+        __builtin_trap();
+    }
+}
+
 struct jeti_vtable {
     unsigned long long __sig;
-    int (*add_)(NPObject *, SEL, int);
-    int (*errorCode)(NPObject *, SEL);
+    unsigned long long __layout_sig;
+    const char *__layout_text;
+    void (*UTF8String)(void);
+    void (*UUIDString)(void);
+    void (*_grow)(void);
+    void (*absoluteString)(void);
+    void (*addCharactersInRange_)(void);
+    void (*addCharactersInString_)(void);
+    void (*addEntriesFromDictionary_)(void);
+    void (*addIndex_)(void);
+    void (*addIndexesInRange_)(void);
+    void (*addObject_)(void);
+    void (*addObjectsFromArray_)(void);
+    void (*addObserver_forName_object_usingBlock_)(void);
+    void (*addOperationWithBlock_)(void);
+    void (*allKeys)(void);
+    void (*allObjects)(void);
+    void (*allValues)(void);
+    void (*anyObject)(void);
+    void (*appendBytes_length_)(void);
+    void (*appendData_)(void);
+    void (*appendString_)(void);
+    void (*appendUTF8String_)(void);
+    void (*arguments)(void);
+    void (*ascending)(void);
+    void (*attribute_atIndex_)(void);
+    void (*attributes)(void);
+    void (*attributesAtIndex_)(void);
+    void (*boolValue)(void);
+    void (*broadcast)(void);
+    void (*byteAtIndex_)(void);
+    void (*bytes)(void);
+    void (*canBeConvertedToEncoding_)(void);
+    void (*cancel)(void);
+    void (*cancelAllOperations)(void);
+    void (*changeCurrentDirectoryAtPath_)(void);
+    void (*charValue)(void);
+    void (*characterAtIndex_)(void);
+    void (*characterIsMember_)(void);
+    void (*code)(void);
+    void (*compareObject_toObject_)(void);
+    void (*compare_)(void);
+    void (*componentsFromDate_)(void);
+    void (*constantValue)(void);
+    void (*containsIndex_)(void);
+    void (*containsObject_)(void);
+    void (*containsValueForKey_)(void);
+    void (*contentsAtPath_)(void);
+    void (*contentsOfDirectoryAtPath_)(void);
+    void (*copy)(void);
+    void (*copyItemAtPath_toPath_)(void);
+    void (*count)(void);
+    void (*countForObject_)(void);
+    void (*countLimit)(void);
+    void (*createDirectoryAtPath_)(void);
+    void (*createDirectoryAtPath_withIntermediateDirectories_)(void);
+    void (*createFileAtPath_contents_)(void);
+    void (*currentDirectoryPath)(void);
+    void (*dataUsingEncoding_)(void);
+    void (*dataWithContentsOfURL_)(void);
+    void (*dateByAddingDays_toDate_)(void);
+    void (*dateFromComponents_)(void);
+    void (*dateFromString_)(void);
+    void (*day)(void);
+    void (*dayOfWeekFromDate_)(void);
+    void (*daysInMonth_year_)(void);
+    void (*dealloc)(void);
+    void (*decimalNumberByAdding_)(void);
+    void (*decimalNumberByDividingBy_)(void);
+    void (*decimalNumberByMultiplyingBy_)(void);
+    void (*decimalNumberByNegating)(void);
+    void (*decimalNumberBySubtracting_)(void);
+    void (*decodeBoolForKey_)(void);
+    void (*decodeDoubleForKey_)(void);
+    void (*decodeIntForKey_)(void);
+    void (*decodeObjectForKey_)(void);
+    void (*deleteBytesInRange_)(void);
+    void (*deleteCharactersInRange_)(void);
+    void (*description)(void);
+    void (*domain)(void);
+    void (*doubleValue)(void);
+    void (*effectiveRangeLengthAtIndex_)(void);
+    void (*encodeBool_forKey_)(void);
+    void (*encodeDouble_forKey_)(void);
+    void (*encodeInt_forKey_)(void);
+    void (*encodeObject_forKey_)(void);
+    void (*enumerateUsingBlock_)(void);
+    void (*environment)(void);
+    void (*environmentVariable_)(void);
+    void (*evaluateWithObject_)(void);
+    void (*exchangeObjectAtIndex_withObjectAtIndex_)(void);
+    void (*exchangeObjectsAtIndexes_and_)(void);
+    void (*expressionType)(void);
+    void (*expressionValueWithObject_context_)(void);
+    void (*fileExistsAtPath_)(void);
+    void (*filterUsingPredicate_)(void);
+    void (*filteredArrayUsingPredicate_)(void);
+    void (*finishEncoding)(void);
+    void (*fire)(void);
+    void (*firstIndex)(void);
+    void (*firstMatchLengthInString_)(void);
+    void (*firstMatchLocationInString_)(void);
+    void (*firstObject)(void);
+    void (*fragment)(void);
+    void (*globallyUniqueString)(void);
+    void (*hasDay)(void);
+    void (*hasHour)(void);
+    void (*hasMinute)(void);
+    void (*hasMonth)(void);
+    void (*hasPrefix_)(void);
+    void (*hasSecond)(void);
+    void (*hasSuffix_)(void);
+    void (*hasWeekday)(void);
+    void (*hasYear)(void);
+    void (*hash)(void);
+    void (*host)(void);
+    void (*hostName)(void);
+    void (*hour)(void);
+    void (*indexOfObjectMatchingPredicate_)(void);
+    void (*indexOfObject_)(void);
     NPObject * (*init)(NPObject *, SEL);
+    void (*initForReadingWithData_)(void);
+    void (*initWithArray_)(void);
+    void (*initWithBlock_)(void);
+    void (*initWithBool_)(void);
+    void (*initWithBytes_length_)(void);
+    void (*initWithBytes_length_encoding_)(void);
+    void (*initWithCapacity_)(void);
+    void (*initWithCode_domain_userInfo_)(void);
+    void (*initWithCountLimit_)(void);
+    void (*initWithData_encoding_)(void);
+    void (*initWithDictionary_)(void);
+    void (*initWithDouble_)(void);
+    void (*initWithFormat_args_count_)(void);
+    void (*initWithKey_ascending_comparator_)(void);
+    void (*initWithLongLong_)(void);
+    void (*initWithName_object_userInfo_)(void);
+    void (*initWithObjects_count_)(void);
+    void (*initWithSet_)(void);
+    void (*initWithString_)(void);
+    void (*initWithString_attributes_)(void);
+    void (*initWithTimeIntervalSince1970_)(void);
+    void (*initWithUTF8String_)(void);
+    void (*initWithUUIDString_)(void);
+    void (*insertObject_atIndex_)(void);
+    void (*insertString_atIndex_)(void);
+    void (*intValue)(void);
+    void (*intersectsIndexesInRange_)(void);
+    void (*invalidate)(void);
+    void (*invert)(void);
+    void (*isAtEnd)(void);
+    void (*isCancelled)(void);
+    void (*isDirectoryAtPath_)(void);
+    void (*isEqualToDate_)(void);
+    void (*isEqualToNumber_)(void);
+    void (*isEqualToString_)(void);
+    void (*isEqual_)(void);
+    void (*isExecuting)(void);
+    void (*isFinished)(void);
+    void (*isKindOfClass_)(void);
+    void (*isKindOf_)(void);
+    void (*isLocked)(void);
+    void (*isMatchInString_)(void);
+    void (*isNotANumber)(void);
+    void (*isOperatingSystemAtLeastVersion_)(void);
+    void (*isPaused)(void);
+    void (*isReadableAtPath_)(void);
+    void (*isStarted)(void);
+    void (*isSuspended)(void);
+    void (*isValid)(void);
+    void (*isValidIndex_)(void);
+    void (*isWritableAtPath_)(void);
+    void (*join)(void);
+    void (*key)(void);
+    void (*keyPath)(void);
+    void (*lastIndex)(void);
+    void (*lastObject)(void);
+    void (*length)(void);
+    void (*lengthOfBytesUsingEncoding_)(void);
+    void (*lock)(void);
+    void (*longLongValue)(void);
+    void (*lowercaseString)(void);
+    void (*machine)(void);
+    void (*maxConcurrentOperationCount)(void);
+    void (*minute)(void);
+    void (*month)(void);
+    void (*moveItemAtPath_toPath_)(void);
+    void (*mutableBytes)(void);
+    void (*name)(void);
+    void (*nextObject)(void);
+    void (*np_addRange_)(void);
+    void (*np_removeRange_)(void);
+    void (*np_scanNumber_dbl_)(void);
+    void (*np_skip)(void);
+    void (*numberOfCaptureGroups)(void);
+    void (*numberOfMatchesInString_)(void);
+    void (*object)(void);
+    void (*objectAtIndex_)(void);
+    void (*objectForKey_)(void);
+    void (*observerCount)(void);
+    void (*operatingSystem)(void);
+    void (*operatingSystemVersion)(void);
+    void (*operatingSystemVersionString)(void);
+    void (*operationCount)(void);
+    void (*path)(void);
+    void (*pendingCount)(void);
+    void (*performBlock_)(void);
+    void (*pointerValue)(void);
+    void (*poll)(void);
+    void (*port)(void);
+    void (*postNotificationName_object_)(void);
+    void (*postNotificationName_object_userInfo_)(void);
+    void (*postNotification_)(void);
+    void (*predicateFormat)(void);
+    void (*processIdentifier)(void);
+    void (*query)(void);
+    void (*rangeOfString_)(void);
+    void (*rangeValue)(void);
+    void (*release)(void);
+    void (*removeAllIndexes)(void);
+    void (*removeAllObjects)(void);
+    void (*removeCharactersInRange_)(void);
+    void (*removeCharactersInString_)(void);
+    void (*removeIndex_)(void);
+    void (*removeIndexesInRange_)(void);
+    void (*removeItemAtPath_)(void);
+    void (*removeLastObject)(void);
+    void (*removeObjectAtIndex_)(void);
+    void (*removeObjectForKey_)(void);
+    void (*removeObject_)(void);
+    void (*removeObserver_)(void);
+    void (*removeObserver_forName_)(void);
+    void (*replaceBytesInRange_withBytes_length_)(void);
+    void (*replaceCharactersInRange_withString_)(void);
+    void (*replaceObjectAtIndex_withObject_)(void);
+    void (*retain)(void);
+    void (*reversedSortDescriptor)(void);
+    void (*run)(void);
+    void (*scanCharactersFromSet_intoString_)(void);
+    void (*scanDouble_)(void);
+    void (*scanInt_)(void);
+    void (*scanLocation)(void);
+    void (*scanLongLong_)(void);
+    void (*scanString_intoString_)(void);
+    void (*scanUpToCharactersFromSet_intoString_)(void);
+    void (*scanUpToString_intoString_)(void);
+    void (*scheme)(void);
+    void (*second)(void);
+    void (*setCharactersToBeSkipped_)(void);
+    void (*setCountLimit_)(void);
+    void (*setData_)(void);
+    void (*setDay_)(void);
+    void (*setEnvironmentVariable_value_)(void);
+    void (*setHour_)(void);
+    void (*setLength_)(void);
+    void (*setMaxConcurrentOperationCount_)(void);
+    void (*setMinute_)(void);
+    void (*setMonth_)(void);
+    void (*setObject_atIndex_)(void);
+    void (*setObject_forKey_)(void);
+    void (*setObject_forKey_cost_)(void);
+    void (*setScanLocation_)(void);
+    void (*setSecond_)(void);
+    void (*setString_)(void);
+    void (*setSuspended_)(void);
+    void (*setTimeoutSeconds_)(void);
+    void (*setTotalCostLimit_)(void);
+    void (*setUTCOffsetMinutes_)(void);
+    void (*setWeekday_)(void);
+    void (*setYear_)(void);
+    void (*signal)(void);
+    void (*sortUsingComparator_)(void);
+    void (*sortUsingDescriptors_)(void);
+    void (*sortedArrayUsingComparator_)(void);
+    void (*sortedArrayUsingDescriptors_)(void);
+    void (*start)(void);
+    void (*startDetached)(void);
+    void (*string)(void);
+    void (*stringByAppendingString_)(void);
+    void (*stringByAppendingUTF8String_)(void);
+    void (*stringFromDate_)(void);
+    void (*stringValue)(void);
+    void (*stringWithContentsOfURL_)(void);
+    void (*subdataWithRange_)(void);
+    void (*substringFromIndex_)(void);
+    void (*substringToIndex_)(void);
+    void (*substringWithRange_)(void);
+    void (*timeInterval)(void);
+    void (*timeIntervalSince1970)(void);
+    void (*timeIntervalSinceDate_)(void);
+    void (*timeoutSeconds)(void);
+    void (*totalCostLimit)(void);
+    void (*tryLock)(void);
+    void (*unlock)(void);
+    void (*unsetEnvironmentVariable_)(void);
+    void (*uppercaseString)(void);
+    void (*userInfo)(void);
+    void (*userName)(void);
+    void (*utcOffsetMinutes)(void);
+    void (*variable)(void);
+    void (*wait)(void);
+    void (*waitUntilAllOperationsAreFinished)(void);
+    void (*weekday)(void);
+    void (*writeToFile_atomically_)(void);
+    void (*year)(void);
+    void (*localizedDescription)(void);
+    void (*initWithType_)(void);
+    void (*npc_reserve)(void);
+    void (*_expandFormat_args_count_)(void);
+    void (*valueForKey_)(void);
+    void (*re_searchFrom_len_pos_length_)(void);
+    int (*add_)(NPObject *, SEL, int);
     int (*value)(NPObject *, SEL);
+    int (*errorCode)(NPObject *, SEL);
 };
 
 struct JETI_META_VTABLE_$_BareMetal__Calculator {
@@ -112,76 +429,1036 @@ void jeti_metaInit(void);
 
 /* --------- Section 10 · Vtable & metadata instances ---------- */
 /* VTable instance: BareMetal::Calculator */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_BareMetal__Calculator = {
-    .__sig = 0x6885d9edd6606f27ULL,
-    .add_ = (int (*)(NPObject *, SEL, int))BareMetal__Calculator_add_,
-    .errorCode = NULL,
+struct jeti_vtable JETI_VTABLE_$_BareMetal__Calculator = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0xfd9bf6483c96313eULL,
+    .__layout_text = "BareMetal__Calculator < jeti_root | int total",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
+    .code = NULL,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = NULL,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .add_ = (int (*)(NPObject *, SEL, int))BareMetal__Calculator_add_,
     .value = (int (*)(NPObject *, SEL))BareMetal__Calculator_value,
+    .errorCode = NULL,
 };
 
 /* VTable instance: BareMetal::Counter */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_BareMetal__Counter = {
-    .__sig = 0x6885d9edd6606f27ULL,
-    .add_ = (int (*)(NPObject *, SEL, int))BareMetal__Counter_add_,
-    .errorCode = NULL,
+struct jeti_vtable JETI_VTABLE_$_BareMetal__Counter = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0xc1ca0147b6f5aa06ULL,
+    .__layout_text = "BareMetal__Counter < jeti_root | int total",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
+    .code = NULL,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = (NPObject * (*)(NPObject *, SEL))BareMetal__Counter_init,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .add_ = (int (*)(NPObject *, SEL, int))BareMetal__Counter_add_,
     .value = (int (*)(NPObject *, SEL))BareMetal__Counter_value,
+    .errorCode = NULL,
 };
 
 /* VTable instance: BareMetal::NPIoError */
-__attribute__((weak)) struct jeti_vtable JETI_VTABLE_$_BareMetal__NPIoError = {
-    .__sig = 0x6885d9edd6606f27ULL,
-    .add_ = NULL,
-    .errorCode = (int (*)(NPObject *, SEL))BareMetal__NPIoError_errorCode,
+struct jeti_vtable JETI_VTABLE_$_BareMetal__NPIoError = {
+    .__sig = 0xcbf29ce484222325ULL,
+    .__layout_sig = 0x0df3ea5cd0386c65ULL,
+    .__layout_text = "BareMetal__NPIoError < jeti_root | int code",
+    .UTF8String = NULL,
+    .UUIDString = NULL,
+    ._grow = NULL,
+    .absoluteString = NULL,
+    .addCharactersInRange_ = NULL,
+    .addCharactersInString_ = NULL,
+    .addEntriesFromDictionary_ = NULL,
+    .addIndex_ = NULL,
+    .addIndexesInRange_ = NULL,
+    .addObject_ = NULL,
+    .addObjectsFromArray_ = NULL,
+    .addObserver_forName_object_usingBlock_ = NULL,
+    .addOperationWithBlock_ = NULL,
+    .allKeys = NULL,
+    .allObjects = NULL,
+    .allValues = NULL,
+    .anyObject = NULL,
+    .appendBytes_length_ = NULL,
+    .appendData_ = NULL,
+    .appendString_ = NULL,
+    .appendUTF8String_ = NULL,
+    .arguments = NULL,
+    .ascending = NULL,
+    .attribute_atIndex_ = NULL,
+    .attributes = NULL,
+    .attributesAtIndex_ = NULL,
+    .boolValue = NULL,
+    .broadcast = NULL,
+    .byteAtIndex_ = NULL,
+    .bytes = NULL,
+    .canBeConvertedToEncoding_ = NULL,
+    .cancel = NULL,
+    .cancelAllOperations = NULL,
+    .changeCurrentDirectoryAtPath_ = NULL,
+    .charValue = NULL,
+    .characterAtIndex_ = NULL,
+    .characterIsMember_ = NULL,
+    .code = NULL,
+    .compareObject_toObject_ = NULL,
+    .compare_ = NULL,
+    .componentsFromDate_ = NULL,
+    .constantValue = NULL,
+    .containsIndex_ = NULL,
+    .containsObject_ = NULL,
+    .containsValueForKey_ = NULL,
+    .contentsAtPath_ = NULL,
+    .contentsOfDirectoryAtPath_ = NULL,
+    .copy = NULL,
+    .copyItemAtPath_toPath_ = NULL,
+    .count = NULL,
+    .countForObject_ = NULL,
+    .countLimit = NULL,
+    .createDirectoryAtPath_ = NULL,
+    .createDirectoryAtPath_withIntermediateDirectories_ = NULL,
+    .createFileAtPath_contents_ = NULL,
+    .currentDirectoryPath = NULL,
+    .dataUsingEncoding_ = NULL,
+    .dataWithContentsOfURL_ = NULL,
+    .dateByAddingDays_toDate_ = NULL,
+    .dateFromComponents_ = NULL,
+    .dateFromString_ = NULL,
+    .day = NULL,
+    .dayOfWeekFromDate_ = NULL,
+    .daysInMonth_year_ = NULL,
+    .dealloc = NULL,
+    .decimalNumberByAdding_ = NULL,
+    .decimalNumberByDividingBy_ = NULL,
+    .decimalNumberByMultiplyingBy_ = NULL,
+    .decimalNumberByNegating = NULL,
+    .decimalNumberBySubtracting_ = NULL,
+    .decodeBoolForKey_ = NULL,
+    .decodeDoubleForKey_ = NULL,
+    .decodeIntForKey_ = NULL,
+    .decodeObjectForKey_ = NULL,
+    .deleteBytesInRange_ = NULL,
+    .deleteCharactersInRange_ = NULL,
+    .description = NULL,
+    .domain = NULL,
+    .doubleValue = NULL,
+    .effectiveRangeLengthAtIndex_ = NULL,
+    .encodeBool_forKey_ = NULL,
+    .encodeDouble_forKey_ = NULL,
+    .encodeInt_forKey_ = NULL,
+    .encodeObject_forKey_ = NULL,
+    .enumerateUsingBlock_ = NULL,
+    .environment = NULL,
+    .environmentVariable_ = NULL,
+    .evaluateWithObject_ = NULL,
+    .exchangeObjectAtIndex_withObjectAtIndex_ = NULL,
+    .exchangeObjectsAtIndexes_and_ = NULL,
+    .expressionType = NULL,
+    .expressionValueWithObject_context_ = NULL,
+    .fileExistsAtPath_ = NULL,
+    .filterUsingPredicate_ = NULL,
+    .filteredArrayUsingPredicate_ = NULL,
+    .finishEncoding = NULL,
+    .fire = NULL,
+    .firstIndex = NULL,
+    .firstMatchLengthInString_ = NULL,
+    .firstMatchLocationInString_ = NULL,
+    .firstObject = NULL,
+    .fragment = NULL,
+    .globallyUniqueString = NULL,
+    .hasDay = NULL,
+    .hasHour = NULL,
+    .hasMinute = NULL,
+    .hasMonth = NULL,
+    .hasPrefix_ = NULL,
+    .hasSecond = NULL,
+    .hasSuffix_ = NULL,
+    .hasWeekday = NULL,
+    .hasYear = NULL,
+    .hash = NULL,
+    .host = NULL,
+    .hostName = NULL,
+    .hour = NULL,
+    .indexOfObjectMatchingPredicate_ = NULL,
+    .indexOfObject_ = NULL,
     .init = NULL,
+    .initForReadingWithData_ = NULL,
+    .initWithArray_ = NULL,
+    .initWithBlock_ = NULL,
+    .initWithBool_ = NULL,
+    .initWithBytes_length_ = NULL,
+    .initWithBytes_length_encoding_ = NULL,
+    .initWithCapacity_ = NULL,
+    .initWithCode_domain_userInfo_ = NULL,
+    .initWithCountLimit_ = NULL,
+    .initWithData_encoding_ = NULL,
+    .initWithDictionary_ = NULL,
+    .initWithDouble_ = NULL,
+    .initWithFormat_args_count_ = NULL,
+    .initWithKey_ascending_comparator_ = NULL,
+    .initWithLongLong_ = NULL,
+    .initWithName_object_userInfo_ = NULL,
+    .initWithObjects_count_ = NULL,
+    .initWithSet_ = NULL,
+    .initWithString_ = NULL,
+    .initWithString_attributes_ = NULL,
+    .initWithTimeIntervalSince1970_ = NULL,
+    .initWithUTF8String_ = NULL,
+    .initWithUUIDString_ = NULL,
+    .insertObject_atIndex_ = NULL,
+    .insertString_atIndex_ = NULL,
+    .intValue = NULL,
+    .intersectsIndexesInRange_ = NULL,
+    .invalidate = NULL,
+    .invert = NULL,
+    .isAtEnd = NULL,
+    .isCancelled = NULL,
+    .isDirectoryAtPath_ = NULL,
+    .isEqualToDate_ = NULL,
+    .isEqualToNumber_ = NULL,
+    .isEqualToString_ = NULL,
+    .isEqual_ = NULL,
+    .isExecuting = NULL,
+    .isFinished = NULL,
+    .isKindOfClass_ = NULL,
+    .isKindOf_ = NULL,
+    .isLocked = NULL,
+    .isMatchInString_ = NULL,
+    .isNotANumber = NULL,
+    .isOperatingSystemAtLeastVersion_ = NULL,
+    .isPaused = NULL,
+    .isReadableAtPath_ = NULL,
+    .isStarted = NULL,
+    .isSuspended = NULL,
+    .isValid = NULL,
+    .isValidIndex_ = NULL,
+    .isWritableAtPath_ = NULL,
+    .join = NULL,
+    .key = NULL,
+    .keyPath = NULL,
+    .lastIndex = NULL,
+    .lastObject = NULL,
+    .length = NULL,
+    .lengthOfBytesUsingEncoding_ = NULL,
+    .lock = NULL,
+    .longLongValue = NULL,
+    .lowercaseString = NULL,
+    .machine = NULL,
+    .maxConcurrentOperationCount = NULL,
+    .minute = NULL,
+    .month = NULL,
+    .moveItemAtPath_toPath_ = NULL,
+    .mutableBytes = NULL,
+    .name = NULL,
+    .nextObject = NULL,
+    .np_addRange_ = NULL,
+    .np_removeRange_ = NULL,
+    .np_scanNumber_dbl_ = NULL,
+    .np_skip = NULL,
+    .numberOfCaptureGroups = NULL,
+    .numberOfMatchesInString_ = NULL,
+    .object = NULL,
+    .objectAtIndex_ = NULL,
+    .objectForKey_ = NULL,
+    .observerCount = NULL,
+    .operatingSystem = NULL,
+    .operatingSystemVersion = NULL,
+    .operatingSystemVersionString = NULL,
+    .operationCount = NULL,
+    .path = NULL,
+    .pendingCount = NULL,
+    .performBlock_ = NULL,
+    .pointerValue = NULL,
+    .poll = NULL,
+    .port = NULL,
+    .postNotificationName_object_ = NULL,
+    .postNotificationName_object_userInfo_ = NULL,
+    .postNotification_ = NULL,
+    .predicateFormat = NULL,
+    .processIdentifier = NULL,
+    .query = NULL,
+    .rangeOfString_ = NULL,
+    .rangeValue = NULL,
+    .release = NULL,
+    .removeAllIndexes = NULL,
+    .removeAllObjects = NULL,
+    .removeCharactersInRange_ = NULL,
+    .removeCharactersInString_ = NULL,
+    .removeIndex_ = NULL,
+    .removeIndexesInRange_ = NULL,
+    .removeItemAtPath_ = NULL,
+    .removeLastObject = NULL,
+    .removeObjectAtIndex_ = NULL,
+    .removeObjectForKey_ = NULL,
+    .removeObject_ = NULL,
+    .removeObserver_ = NULL,
+    .removeObserver_forName_ = NULL,
+    .replaceBytesInRange_withBytes_length_ = NULL,
+    .replaceCharactersInRange_withString_ = NULL,
+    .replaceObjectAtIndex_withObject_ = NULL,
+    .retain = NULL,
+    .reversedSortDescriptor = NULL,
+    .run = NULL,
+    .scanCharactersFromSet_intoString_ = NULL,
+    .scanDouble_ = NULL,
+    .scanInt_ = NULL,
+    .scanLocation = NULL,
+    .scanLongLong_ = NULL,
+    .scanString_intoString_ = NULL,
+    .scanUpToCharactersFromSet_intoString_ = NULL,
+    .scanUpToString_intoString_ = NULL,
+    .scheme = NULL,
+    .second = NULL,
+    .setCharactersToBeSkipped_ = NULL,
+    .setCountLimit_ = NULL,
+    .setData_ = NULL,
+    .setDay_ = NULL,
+    .setEnvironmentVariable_value_ = NULL,
+    .setHour_ = NULL,
+    .setLength_ = NULL,
+    .setMaxConcurrentOperationCount_ = NULL,
+    .setMinute_ = NULL,
+    .setMonth_ = NULL,
+    .setObject_atIndex_ = NULL,
+    .setObject_forKey_ = NULL,
+    .setObject_forKey_cost_ = NULL,
+    .setScanLocation_ = NULL,
+    .setSecond_ = NULL,
+    .setString_ = NULL,
+    .setSuspended_ = NULL,
+    .setTimeoutSeconds_ = NULL,
+    .setTotalCostLimit_ = NULL,
+    .setUTCOffsetMinutes_ = NULL,
+    .setWeekday_ = NULL,
+    .setYear_ = NULL,
+    .signal = NULL,
+    .sortUsingComparator_ = NULL,
+    .sortUsingDescriptors_ = NULL,
+    .sortedArrayUsingComparator_ = NULL,
+    .sortedArrayUsingDescriptors_ = NULL,
+    .start = NULL,
+    .startDetached = NULL,
+    .string = NULL,
+    .stringByAppendingString_ = NULL,
+    .stringByAppendingUTF8String_ = NULL,
+    .stringFromDate_ = NULL,
+    .stringValue = NULL,
+    .stringWithContentsOfURL_ = NULL,
+    .subdataWithRange_ = NULL,
+    .substringFromIndex_ = NULL,
+    .substringToIndex_ = NULL,
+    .substringWithRange_ = NULL,
+    .timeInterval = NULL,
+    .timeIntervalSince1970 = NULL,
+    .timeIntervalSinceDate_ = NULL,
+    .timeoutSeconds = NULL,
+    .totalCostLimit = NULL,
+    .tryLock = NULL,
+    .unlock = NULL,
+    .unsetEnvironmentVariable_ = NULL,
+    .uppercaseString = NULL,
+    .userInfo = NULL,
+    .userName = NULL,
+    .utcOffsetMinutes = NULL,
+    .variable = NULL,
+    .wait = NULL,
+    .waitUntilAllOperationsAreFinished = NULL,
+    .weekday = NULL,
+    .writeToFile_atomically_ = NULL,
+    .year = NULL,
+    .localizedDescription = NULL,
+    .initWithType_ = NULL,
+    .npc_reserve = NULL,
+    ._expandFormat_args_count_ = NULL,
+    .valueForKey_ = NULL,
+    .re_searchFrom_len_pos_length_ = NULL,
+    .add_ = NULL,
     .value = NULL,
+    .errorCode = (int (*)(NPObject *, SEL))BareMetal__NPIoError_errorCode,
 };
 
 /* Meta vtable instance: BareMetal::Calculator */
-__attribute__((weak)) struct JETI_META_VTABLE_$_BareMetal__Calculator JETI_META_VTABLE_$_BareMetal__Calculator_inst = {
+struct JETI_META_VTABLE_$_BareMetal__Calculator JETI_META_VTABLE_$_BareMetal__Calculator_inst = {
     .compute_ = BareMetal__Calculator_compute_,
     .class = JETI_GETCLASS_$_BareMetal__Calculator,
 };
 
 /* Meta vtable instance: BareMetal::Counter */
-__attribute__((weak)) struct JETI_META_VTABLE_$_BareMetal__Counter JETI_META_VTABLE_$_BareMetal__Counter_inst = {
+struct JETI_META_VTABLE_$_BareMetal__Counter JETI_META_VTABLE_$_BareMetal__Counter_inst = {
     .alloc = BareMetal__Counter_alloc,
     .class = JETI_GETCLASS_$_BareMetal__Counter,
 };
 
 /* Meta vtable instance: BareMetal::NPIoError */
-__attribute__((weak)) struct JETI_META_VTABLE_$_BareMetal__NPIoError JETI_META_VTABLE_$_BareMetal__NPIoError_inst = {
+struct JETI_META_VTABLE_$_BareMetal__NPIoError JETI_META_VTABLE_$_BareMetal__NPIoError_inst = {
     .class = JETI_GETCLASS_$_BareMetal__NPIoError,
 };
 
 /* +getClass for BareMetal::Calculator */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_BareMetal__Calculator(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_BareMetal__Calculator(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* +getClass for BareMetal::Counter */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_BareMetal__Counter(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_BareMetal__Counter(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* +getClass for BareMetal::NPIoError */
-__attribute__((weak)) NPClass * JETI_GETCLASS_$_BareMetal__NPIoError(NPClass * self, SEL _cmd) {
+NPClass * JETI_GETCLASS_$_BareMetal__NPIoError(NPClass * self, SEL _cmd) {
     (void)_cmd;
     return self;
 }
 
 /* -------- Section 11 · Class metadata initialization --------- */
-NPClass JETI_CLASS_$_BareMetal__Calculator;
-NPClass JETI_CLASS_$_BareMetal__Counter;
-NPClass JETI_CLASS_$_BareMetal__NPIoError;
+NPClass JETI_CLASS_$_BareMetal__Calculator = {
+        .name = "BareMetal::Calculator",
+        .superclass = &JETI_CLASS_$_jeti_root,
+        .instance_size = sizeof(struct BareMetal__Calculator),
+        .vtable = &JETI_VTABLE_$_BareMetal__Calculator,
+        .class_vtable = &JETI_META_VTABLE_$_BareMetal__Calculator_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = NULL,
+    };
+NPClass JETI_CLASS_$_BareMetal__Counter = {
+        .name = "BareMetal::Counter",
+        .superclass = &JETI_CLASS_$_jeti_root,
+        .instance_size = sizeof(struct BareMetal__Counter),
+        .vtable = &JETI_VTABLE_$_BareMetal__Counter,
+        .class_vtable = &JETI_META_VTABLE_$_BareMetal__Counter_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = NULL,
+    };
+NPClass JETI_CLASS_$_BareMetal__NPIoError = {
+        .name = "BareMetal::NPIoError",
+        .superclass = &JETI_CLASS_$_jeti_root,
+        .instance_size = sizeof(struct BareMetal__NPIoError),
+        .vtable = &JETI_VTABLE_$_BareMetal__NPIoError,
+        .class_vtable = &JETI_META_VTABLE_$_BareMetal__NPIoError_inst,
+        .protocols = NULL,
+        .protocol_count = 0,
+        .dealloc = NULL,
+    };
 
 __attribute__((constructor)) static void __jeti_vtable_layout_check(void) {
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_BareMetal__Calculator)->__sig, 0x6885d9edd6606f27ULL, "add_ errorCode init value | class BareMetal::Calculator | tu freestanding.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_BareMetal__Counter)->__sig, 0x6885d9edd6606f27ULL, "add_ errorCode init value | class BareMetal::Counter | tu freestanding.jeti");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_BareMetal__NPIoError)->__sig, 0x6885d9edd6606f27ULL, "add_ errorCode init value | class BareMetal::NPIoError | tu freestanding.jeti");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_BareMetal__Calculator)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ add_ value errorCode | class BareMetal::Calculator | tu freestanding.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_BareMetal__Calculator)->__layout_sig, 0xfd9bf6483c96313eULL, (&JETI_VTABLE_$_BareMetal__Calculator)->__layout_text, "BareMetal__Calculator < jeti_root | int total");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_BareMetal__Counter)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ add_ value errorCode | class BareMetal::Counter | tu freestanding.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_BareMetal__Counter)->__layout_sig, 0xc1ca0147b6f5aa06ULL, (&JETI_VTABLE_$_BareMetal__Counter)->__layout_text, "BareMetal__Counter < jeti_root | int total");
+    jeti_verify_vtable_sig((&JETI_VTABLE_$_BareMetal__NPIoError)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ add_ value errorCode | class BareMetal::NPIoError | tu freestanding.jeti");
+    jeti_verify_layout_sig((&JETI_VTABLE_$_BareMetal__NPIoError)->__layout_sig, 0x0df3ea5cd0386c65ULL, (&JETI_VTABLE_$_BareMetal__NPIoError)->__layout_text, "BareMetal__NPIoError < jeti_root | int code");
 }
 
 __attribute__((weak)) void jeti_metaInit(void) {
@@ -191,6 +1468,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct BareMetal__Calculator),
         .vtable = &JETI_VTABLE_$_BareMetal__Calculator,
         .class_vtable = &JETI_META_VTABLE_$_BareMetal__Calculator_inst,
+        .protocols = NULL,
         .protocol_count = 0,
         .dealloc = NULL,
     };
@@ -200,6 +1478,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct BareMetal__Counter),
         .vtable = &JETI_VTABLE_$_BareMetal__Counter,
         .class_vtable = &JETI_META_VTABLE_$_BareMetal__Counter_inst,
+        .protocols = NULL,
         .protocol_count = 0,
         .dealloc = NULL,
     };
@@ -209,6 +1488,7 @@ __attribute__((weak)) void jeti_metaInit(void) {
         .instance_size = sizeof(struct BareMetal__NPIoError),
         .vtable = &JETI_VTABLE_$_BareMetal__NPIoError,
         .class_vtable = &JETI_META_VTABLE_$_BareMetal__NPIoError_inst,
+        .protocols = NULL,
         .protocol_count = 0,
         .dealloc = NULL,
     };
@@ -219,44 +1499,60 @@ __attribute__((weak)) void jeti_meta_init(void) { jeti_metaInit(); }
 /* --------------- Section 12 · Runtime support ---------------- */
 /* --------------- Section 13 · Function bodies ---------------- */
 /* +[Calculator compute:] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int BareMetal__Calculator_compute_(NPClass * self, SEL _cmd, int x) {
+#line 24 "freestanding.jeti"
     return ((x * 2) + 1);
 }
 
 /* -[Calculator add:] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int BareMetal__Calculator_add_(NPObject * self, SEL _cmd, int x) {
+#line 25 "freestanding.jeti"
     (((struct BareMetal__Calculator *)self)->total += x);
     return ((struct BareMetal__Calculator *)self)->total;
 }
 
 /* -[Calculator value] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int BareMetal__Calculator_value(NPObject * self, SEL _cmd) {
+#line 26 "freestanding.jeti"
     return ((struct BareMetal__Calculator *)self)->total;
 }
 
 /* -[NPIoError errorCode] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int BareMetal__NPIoError_errorCode(NPObject * self, SEL _cmd) {
+#line 36 "freestanding.jeti"
     return ((struct BareMetal__NPIoError *)self)->code;
 }
 
 /* +[Counter alloc] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * BareMetal__Counter_alloc(NPClass * self, SEL _cmd) {
+#line 50 "freestanding.jeti"
     return jeti_alloc(self);
 }
 
 /* -[Counter init] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) NPObject * BareMetal__Counter_init(NPObject * self, SEL _cmd) {
+#line 53 "freestanding.jeti"
     return self;
 }
 
 /* -[Counter add:] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int BareMetal__Counter_add_(NPObject * self, SEL _cmd, int x) {
+#line 55 "freestanding.jeti"
     (((struct BareMetal__Counter *)self)->total += x);
     return ((struct BareMetal__Counter *)self)->total;
 }
 
 /* -[Counter value] */
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int BareMetal__Counter_value(NPObject * self, SEL _cmd) {
+#line 56 "freestanding.jeti"
     return ((struct BareMetal__Counter *)self)->total;
 }
 
@@ -270,83 +1566,173 @@ BareMetal__Calculator * create_calculator(void );
 
 BareMetal__NPIoError * create_error(int code);
 
+#line 1 "<jeti-generated>"
 __attribute__((weak)) int main(void) {
     jeti_metaInit();
+#line 61 "freestanding.jeti"
     jeti_meta_init();
+#line 63 "freestanding.jeti"
     kputs("=== freestanding golden test ===\n");
+#line 66 "freestanding.jeti"
     kputs("[1] @namespace + @interface (implicit root):\n");
+#line 67 "freestanding.jeti"
     kputs("    class method [BareMetal::Calculator compute:21] = ");
-    kputdec(BareMetal__Calculator_compute_(&JETI_CLASS_$_BareMetal__Calculator, __jeti_sel_compute_, 21));
+#line 68 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_0 = BareMetal__Calculator_compute_(&JETI_CLASS_$_BareMetal__Calculator, __jeti_sel_compute_, 21);
+    kputdec(__jeti_eh_tmp_0);
+#line 69 "freestanding.jeti"
     kputs("\n");
+#line 71 "freestanding.jeti"
     BareMetal__Calculator * acc = (BareMetal__Calculator *)(create_calculator());
+#line 72 "freestanding.jeti"
     kputs("    instance: add:7=");
-    kputdec(({ NPObject *__jeti_tmp_0 = ((NPObject *)(acc)); __jeti_tmp_0 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->add_)(__jeti_tmp_0, __jeti_sel_add_, 7) : (int){0}; }));
+#line 73 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_1 = ({ NPObject *__jeti_tmp_0 = ((NPObject *)(acc)); __jeti_tmp_0 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_0->isa->vtable)->add_)(__jeti_tmp_0, __jeti_sel_add_, 7) : (int){0}; });
+    kputdec(__jeti_eh_tmp_1);
+#line 74 "freestanding.jeti"
     kputs(" add:35=");
-    kputdec(({ NPObject *__jeti_tmp_1 = ((NPObject *)(acc)); __jeti_tmp_1 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->add_)(__jeti_tmp_1, __jeti_sel_add_, 35) : (int){0}; }));
+#line 75 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_2 = ({ NPObject *__jeti_tmp_1 = ((NPObject *)(acc)); __jeti_tmp_1 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_1->isa->vtable)->add_)(__jeti_tmp_1, __jeti_sel_add_, 35) : (int){0}; });
+    kputdec(__jeti_eh_tmp_2);
+#line 76 "freestanding.jeti"
     kputs(" value=");
-    kputdec(({ NPObject *__jeti_tmp_2 = ((NPObject *)(acc)); __jeti_tmp_2 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->value)(__jeti_tmp_2, __jeti_sel_value) : (int){0}; }));
+#line 77 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_3 = ({ NPObject *__jeti_tmp_2 = ((NPObject *)(acc)); __jeti_tmp_2 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_2->isa->vtable)->value)(__jeti_tmp_2, __jeti_sel_value) : (int){0}; });
+    kputdec(__jeti_eh_tmp_3);
+#line 78 "freestanding.jeti"
     kputs("\n");
-    NPObject *__jeti_tmp_3 = (BareMetal__Counter_alloc(&JETI_CLASS_$_BareMetal__Counter, __jeti_sel_alloc));
-    BareMetal__Counter * c = (BareMetal__Counter *)(__jeti_tmp_3 ? ((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->init(__jeti_tmp_3, __jeti_sel_init) : 0);
+#line 81 "freestanding.jeti"
+    BareMetal__Counter * c = (BareMetal__Counter *)({ NPObject *__jeti_tmp_3 = ((NPObject *)(BareMetal__Counter_alloc(&JETI_CLASS_$_BareMetal__Counter, __jeti_sel_alloc))); __jeti_tmp_3 ? ((NPObject * (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_3->isa->vtable)->init)(__jeti_tmp_3, __jeti_sel_init) : 0; });
+#line 82 "freestanding.jeti"
     kputs("[2] alloc+init (bump allocator):\n");
+#line 83 "freestanding.jeti"
     kputs("    [c add:10]=");
-    kputdec(({ NPObject *__jeti_tmp_4 = ((NPObject *)(c)); __jeti_tmp_4 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->add_)(__jeti_tmp_4, __jeti_sel_add_, 10) : (int){0}; }));
+#line 84 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_4 = ({ NPObject *__jeti_tmp_4 = ((NPObject *)(c)); __jeti_tmp_4 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_4->isa->vtable)->add_)(__jeti_tmp_4, __jeti_sel_add_, 10) : (int){0}; });
+    kputdec(__jeti_eh_tmp_4);
+#line 85 "freestanding.jeti"
     kputs(" [c add:20]=");
-    kputdec(({ NPObject *__jeti_tmp_5 = ((NPObject *)(c)); __jeti_tmp_5 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->add_)(__jeti_tmp_5, __jeti_sel_add_, 20) : (int){0}; }));
+#line 86 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_5 = ({ NPObject *__jeti_tmp_5 = ((NPObject *)(c)); __jeti_tmp_5 ? ((int (*)(NPObject *, SEL, int))((struct jeti_vtable *)__jeti_tmp_5->isa->vtable)->add_)(__jeti_tmp_5, __jeti_sel_add_, 20) : (int){0}; });
+    kputdec(__jeti_eh_tmp_5);
+#line 87 "freestanding.jeti"
     kputs(" [c value]=");
-    kputdec(({ NPObject *__jeti_tmp_6 = ((NPObject *)(c)); __jeti_tmp_6 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_6->isa->vtable)->value)(__jeti_tmp_6, __jeti_sel_value) : (int){0}; }));
+#line 88 "freestanding.jeti"
+    __auto_type __jeti_eh_tmp_6 = ({ NPObject *__jeti_tmp_6 = ((NPObject *)(c)); __jeti_tmp_6 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_6->isa->vtable)->value)(__jeti_tmp_6, __jeti_sel_value) : (int){0}; });
+    kputdec(__jeti_eh_tmp_6);
+#line 89 "freestanding.jeti"
     kputs("\n");
+#line 92 "freestanding.jeti"
     BareMetal__NPIoError * err = (BareMetal__NPIoError *)(create_error(42));
+#line 93 "freestanding.jeti"
     kputs("[3] @try/@catch/@finally:\n");
+#line 94 "freestanding.jeti"
     kputs("    try body, throwing...\n");
+#line 95 "freestanding.jeti"
     {
-        jmp_buf __jeti_saved;
-        memcpy(__jeti_saved, __jeti_exception_buf, sizeof(jmp_buf));
-        volatile int __jeti_state = 0;
-        if ((setjmp(__jeti_exception_buf) != 0))         __jeti_state = 1;
-        if ((__jeti_state == 0)) {
-            jeti_release(c);
+        int __jeti_eh_saved_7 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+        __jeti_eh_flag = 0;
+#line 95 "freestanding.jeti"
+        int __jeti_eh_done_7 = 0;
+        {
+#line 96 "freestanding.jeti"
             {
-                __jeti_exception_value = err;
-                longjmp(__jeti_exception_buf, 1);
+                NPObject * __jeti_eh_thrown_8 = (NPObject *)err;
+#line 1 "<jeti-generated>"
+                __jeti_eh_val = __jeti_eh_thrown_8;
+                jeti_retain(__jeti_eh_val);
+                jeti_autorelease(__jeti_eh_val);
+                __jeti_eh_flag = 1;
             }
-            kputs("    unreachable\n");
+            if (__jeti_eh_flag == 0) {
+                {
+#line 97 "freestanding.jeti"
+                    kputs("    unreachable\n");
+                }
+            }
         }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
-        if ((__jeti_state == 1)) {
-            __jeti_state = 2;
-            NPObject * e = (NPObject *)__jeti_exception_value;
+#line 95 "freestanding.jeti"
+        if ((__jeti_eh_flag == 1) && (__jeti_eh_done_7 == 0)) {
+#line 1 "<jeti-generated>"
+            __jeti_eh_done_7 = 1;
+            __jeti_eh_flag = 0;
+#line 95 "freestanding.jeti"
+            NPObject * e = (NPObject *)__jeti_eh_val;
+#line 98 "freestanding.jeti"
             {
+#line 99 "freestanding.jeti"
                 kputs("    caught [e errorCode] = ");
-                kputdec(({ NPObject *__jeti_tmp_7 = ((NPObject *)(e)); __jeti_tmp_7 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_7->isa->vtable)->errorCode)(__jeti_tmp_7, __jeti_sel_errorCode) : (int){0}; }));
+#line 100 "freestanding.jeti"
+                __auto_type __jeti_eh_tmp_9 = ({ NPObject *__jeti_tmp_7 = ((NPObject *)(e)); __jeti_tmp_7 ? ((int (*)(NPObject *, SEL))((struct jeti_vtable *)__jeti_tmp_7->isa->vtable)->errorCode)(__jeti_tmp_7, __jeti_sel_errorCode) : (int){0}; });
+                kputdec(__jeti_eh_tmp_9);
+#line 101 "freestanding.jeti"
                 kputs("\n");
             }
         }
-        memcpy(__jeti_exception_buf, __jeti_saved, sizeof(jmp_buf));
+#line 95 "freestanding.jeti"
         {
-            kputs("    finally always runs\n");
+            int __jeti_eh_saved_10 = __jeti_eh_flag;
+#line 1 "<jeti-generated>"
+            __jeti_eh_flag = 0;
+#line 102 "freestanding.jeti"
+            {
+#line 103 "freestanding.jeti"
+                kputs("    finally always runs\n");
+            }
+#line 1 "<jeti-generated>"
+            __jeti_eh_flag = (__jeti_eh_saved_10 || __jeti_eh_flag);
         }
-        if ((__jeti_state == 1))         longjmp(__jeti_exception_buf, 1);
+        __jeti_eh_flag = (__jeti_eh_saved_7 || __jeti_eh_flag);
     }
-    kputs("    after-try continues\n");
-    {
-        int x = 42;
-        __asm__ __volatile__ ("" : "+r"(x) :  : );
-        kputs("[4] inline asm: no-op barrier OK\n");
+    if (__jeti_eh_flag == 0) {
+        {
+#line 105 "freestanding.jeti"
+            kputs("    after-try continues\n");
+#line 108 "freestanding.jeti"
+            {
+#line 109 "freestanding.jeti"
+                int x = 42;
+#line 110 "freestanding.jeti"
+                __asm__ __volatile__ ("" : "+r"(x) :  : );
+#line 111 "freestanding.jeti"
+                kputs("[4] inline asm: no-op barrier OK\n");
+            }
+#line 115 "freestanding.jeti"
+            SEL s = __jeti_sel_compute_;
+#line 116 "freestanding.jeti"
+            kputs("[5] @selector: name=");
+#line 117 "freestanding.jeti"
+            kputs(s.name);
+#line 118 "freestanding.jeti"
+            kputs(" hash=0x");
+#line 119 "freestanding.jeti"
+            kputhex(s.hash);
+#line 120 "freestanding.jeti"
+            kputs("\n");
+#line 123 "freestanding.jeti"
+            {
+#line 124 "freestanding.jeti"
+                void * p = 0;
+#line 125 "freestanding.jeti"
+                int * ip = (int *)p;
+#line 126 "freestanding.jeti"
+                (void)ip;
+#line 127 "freestanding.jeti"
+                kputs("[6] C-style cast: (int *)p OK\n");
+            }
+#line 130 "freestanding.jeti"
+            kputs("PASS\n");
+#line 1 "<jeti-generated>"
+            jeti_release((struct NPObject *)c);
+#line 131 "freestanding.jeti"
+            return 0;
+        }
     }
-    SEL s = __jeti_sel_compute_;
-    kputs("[5] @selector: name=");
-    kputs(s.name);
-    kputs(" hash=0x");
-    kputhex(s.hash);
-    kputs("\n");
-    {
-        void * p = 0;
-        int * ip = (int *)p;
-        (void)ip;
-        kputs("[6] C-style cast: (int *)p OK\n");
+#line 1 "<jeti-generated>"
+    if (__jeti_eh_flag == 1) {
+        jeti_eh_uncaught();
     }
-    kputs("PASS\n");
-    return 0;
+    jeti_release((struct NPObject *)c);
 }
 
