@@ -239,6 +239,36 @@ static C_STDLIB_FUNCTIONS: &[(&str, &[&str])] = &[
     ("time.h", &[
         "time", "clock", "localtime", "gmtime", "mktime", "strftime",
         "difftime", "nanosleep", "timegm",
+        // POSIX clock/timer surface — hosted and baremetal programs reach for
+        // it through <time.h>, and the checker would otherwise reject the
+        // call as undeclared (`clock_gettime`).
+        "clock_gettime", "clock_settime", "clock_getres", "clock_nanosleep",
+        "localtime_r", "gmtime_r", "strptime", "timespec_get", "tzset",
+    ]),
+    ("sys/socket.h", &[
+        "socket", "bind", "listen", "accept", "connect", "send", "recv",
+        "sendto", "recvfrom", "setsockopt", "getsockopt", "shutdown",
+        "getpeername", "getsockname", "socketpair",
+    ]),
+    ("netdb.h", &[
+        "getaddrinfo", "freeaddrinfo", "gai_strerror", "getnameinfo",
+        "gethostbyname", "gethostbyaddr",
+    ]),
+    ("arpa/inet.h", &[
+        "inet_pton", "inet_ntop", "htons", "ntohs", "htonl", "ntohl",
+    ]),
+    // Win32/Winsock surface — the `_WIN32` halves of dual-backend code
+    // (NPURLSession, runtime threads) reach for these; the POSIX names are
+    // already covered above.
+    ("winsock2.h", &[
+        "WSAStartup", "WSACleanup", "WSAGetLastError", "closesocket",
+        // MAKEWORD 在 winsock2.h 里是函数式宏，调用形状按函数门控。
+        "MAKEWORD",
+        // winsock2.h/ws2tcpip.h 在 Windows 上同时声明这些 POSIX 同名 socket
+        // 函数——双后端共享代码在 Win 分支下由它们提供。
+        "socket", "bind", "listen", "accept", "connect", "send", "recv",
+        "sendto", "recvfrom", "setsockopt", "getsockopt", "shutdown",
+        "getaddrinfo", "freeaddrinfo", "getnameinfo",
     ]),
     ("ctype.h", &[
         "isdigit", "isalpha", "isalnum", "isspace", "isupper", "islower",
@@ -330,8 +360,36 @@ static C_STDLIB_BINDINGS: &[(&str, &[&str])] = &[
         "M_PI", "M_E", "M_LOG2E", "M_SQRT2", "INFINITY", "NAN", "HUGE_VAL",
         "HUGE_VALF",
     ]),
-    ("time.h", &["CLOCKS_PER_SEC"]),
+    ("time.h", &[
+        "CLOCKS_PER_SEC",
+        // POSIX clock identifiers — plain macro constants the AST never sees,
+        // so `clock_gettime(CLOCK_MONOTONIC, &ts)` used to fail the checker
+        // with "use of undeclared identifier".
+        "CLOCK_REALTIME", "CLOCK_MONOTONIC", "CLOCK_PROCESS_CPUTIME_ID",
+        "CLOCK_THREAD_CPUTIME_ID", "CLOCK_MONOTONIC_RAW",
+        "CLOCK_MONOTONIC_COARSE", "CLOCK_REALTIME_COARSE", "CLOCK_BOOTTIME",
+        "TIME_UTC", "TIME_MONOTONIC", "TIME_ACTIVE", "TIME_THREAD_ACTIVE",
+    ]),
     ("stdlib.h", &["EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX"]),
+    ("sys/socket.h", &[
+        "AF_UNSPEC", "AF_INET", "AF_INET6", "AF_UNIX",
+        "SOCK_STREAM", "SOCK_DGRAM", "SOCK_RAW",
+        "SOL_SOCKET", "SO_REUSEADDR", "SO_RCVTIMEO", "SO_SNDTIMEO",
+        "SO_KEEPALIVE", "SO_ERROR", "SHUT_RD", "SHUT_WR", "SHUT_RDWR",
+        "MSG_PEEK", "MSG_DONTWAIT", "MSG_WAITALL",
+    ]),
+    ("netdb.h", &[
+        "AI_PASSIVE", "AI_CANONNAME", "AI_NUMERICHOST",
+        "NI_MAXHOST", "NI_MAXSERV", "NI_NUMERICHOST", "NI_NUMERICSERV",
+        "EAI_AGAIN", "EAI_BADFLAGS", "EAI_FAIL", "EAI_FAMILY",
+        "EAI_MEMORY", "EAI_NONAME", "EAI_SERVICE", "EAI_SOCKTYPE",
+    ]),
+    // Win32/Winsock bindings for the `_WIN32` halves of dual-backend code;
+    // SOCKET / DWORD / WSADATA are the branch's type names.
+    ("winsock2.h", &[
+        "INVALID_SOCKET", "SOCKET_ERROR", "MAKEWORD", "SD_BOTH",
+        "SOCKET", "DWORD", "WSADATA", "LPSOCKADDR",
+    ]),
     ("dlfcn.h", &[
         "RTLD_LAZY", "RTLD_NOW", "RTLD_GLOBAL", "RTLD_LOCAL",
         "RTLD_DEFAULT", "RTLD_NEXT", "RTLD_SELF",
@@ -791,15 +849,71 @@ impl Checker {
         false
     }
 
+    /// Does this receiver type carry a protocol qualification — either the
+    /// explicit `id<P>` / `NPObject<P>` spelling (`protocol_refs` /
+    /// `protocol_ref`) or an angle argument naming a known protocol
+    /// (`NPObject<FSNodeProtocol>` parses through the generic-argument slot).
+    /// Only these shapes *guarantee* the instance implements the protocol's
+    /// methods, so only they may trust the `a_subclass_declares_selector`
+    /// exemption. A plain superclass receiver (`NPDictionary *`) makes no such
+    /// promise — its instance may be the base class, whose vtable slot is NULL.
+    fn type_is_protocol_qualified(&self, t: &AstType) -> bool {
+        if !t.protocol_refs.is_empty() || t.protocol_ref.is_some() {
+            return true;
+        }
+        let st = match self.symtab.as_ref() {
+            Some(st) => st,
+            None => return false,
+        };
+        // Angle arguments live either in `type_args` or inline in the name
+        // spelling (`NPObject<FSNodeProtocol>` arrives as
+        // name = "NPObject<FSNodeProtocol>" — `named_class_of` strips it).
+        // An argument naming a KNOWN protocol is the conformance bound the
+        // exemption may trust; class arguments (`NPDictionary<NPString *, …>`)
+        // promise element types, not methods, so they do not qualify.
+        if t.type_args.iter().any(|a| {
+            a.name
+                .as_deref()
+                .map(|n| st.find_protocol(n).is_some())
+                .unwrap_or(false)
+        }) {
+            return true;
+        }
+        if let Some(name) = t.name.as_deref() {
+            if let (Some(lt), Some(gt)) = (name.find('<'), name.rfind('>')) {
+                if gt > lt {
+                    return name[lt + 1..gt]
+                        .split(',')
+                        .any(|p| st.find_protocol(p.trim()).is_some());
+                }
+            }
+        }
+        false
+    }
+
     /// Is `selector` declared on some class that derives from `class_name`?
-    /// This is the downcast-safe-dispatch allowance: the receiver is typed as
-    /// an ancestor, but a subclass in this unit derives from it *and* declares
-    /// the selector — `NPObject *o; [o speak]` with `Dog : NPObject` declaring
-    /// `speak` (the guarded `respondsToSelector:` idiom, and the
-    /// protocol-qualified root receivers written `NPObject<P> *`). Sibling
-    /// classes never qualify, so a `Mute *` sending `Talker`'s method stays an
-    /// error — that shape is a bug, not dynamic dispatch.
-    fn a_subclass_declares_selector(&self, class_name: &str, selector: &str) -> bool {
+    /// This is the downcast-safe-dispatch allowance, and it is gated: the
+    /// receiver is typed as an ancestor, a subclass in this unit derives from
+    /// it *and* declares the selector, **and** the receiver's static type is
+    /// protocol-qualified (`NPObject<P> *` / `id<P> *`) so the instance is
+    /// guaranteed to be a conformer. Sibling classes never qualify, so a
+    /// `Mute *` sending `Talker`'s method stays an error — that shape is a
+    /// bug, not dynamic dispatch.
+    ///
+    /// Without the gate, a plain `NPDictionary *` receiver sending
+    /// `setObject:forKey:` (declared on the subclass `NPMutableDictionary`)
+    /// slipped through and dispatched through a NULL vtable slot — a segfault
+    /// at runtime, where ObjC rejects the same shape at compile time
+    /// ("no visible @interface").
+    fn a_subclass_declares_selector(
+        &self,
+        class_name: &str,
+        selector: &str,
+        receiver_protocol_qualified: bool,
+    ) -> bool {
+        if !receiver_protocol_qualified {
+            return false;
+        }
         let st = match self.symtab.as_ref() {
             Some(st) => st,
             None => return false,
@@ -1009,6 +1123,13 @@ impl Checker {
             if let Some(ref st) = self.symtab {
                 if st.lookup(&name).is_some() { return; }
             }
+            // A block ivar invoked directly (`_body()`): clang accepts calling
+            // a block-typed ivar of the enclosing class. The ivar list is
+            // name-only here, so blockness cannot be confirmed — stay silent
+            // rather than risk a false "undeclared function" (missing a call
+            // on a non-block ivar is acceptable; flagging a real block call
+            // is not).
+            if self.is_local_var(&name) { return; }
             // Passthrough headers and quoted includes declare functions the
             // AST never saw (escape hatch, not the normal channel — §1 决策).
             // The quoted-include escape hatch is un-auditable in total, so it
@@ -1472,8 +1593,13 @@ impl Checker {
     /// limits). It is a whitelist gate for the undeclared-function check
     /// ONLY; it never invents arity or type information.
     fn c_stdlib_declares(&self, name: &str) -> bool {
+        // Any table header that declares the name counts, not just the first
+        // match: POSIX/Win32 dual-backend code gets the same functions from
+        // either `netdb.h`/`sys/socket.h` or `winsock2.h`/`ws2tcpip.h`
+        // (`getaddrinfo`, `socket`, …), and only one side is included
+        // depending on the branch. (Hover provenance keeps first-match.)
         for h in &self.included_c_headers {
-            if c_stdlib_function_header(name) == Some(h.as_str()) {
+            if C_STDLIB_FUNCTIONS.iter().any(|(hdr, fns)| hdr == h && fns.contains(&name)) {
                 return true;
             }
         }
@@ -3465,6 +3591,21 @@ impl Checker {
                         }
                         _ => None,
                     });
+                // Only a protocol-qualified receiver (`id<P> *`,
+                // `NPObject<P> *`) may trust the subclass exemption — see
+                // `a_subclass_declares_selector`. A bare superclass receiver
+                // makes no promise about the instance's concrete class.
+                let recv_qualified = receiver
+                    .expr_type
+                    .as_ref()
+                    .map(|t| self.type_is_protocol_qualified(t))
+                    .or_else(|| match &receiver.data {
+                        AstExprData::VarRef { name, .. } => self
+                            .lookup_scope_var_type(name)
+                            .map(|t| self.type_is_protocol_qualified(&t)),
+                        _ => None,
+                    })
+                    .unwrap_or(false);
                 // Static dispatch safety: a statically-typed receiver whose
                 // class chain does NOT declare the selector would dispatch
                 // through a NULL vtable slot — a segfault at runtime (ObjC
@@ -3499,7 +3640,7 @@ impl Checker {
                             if !self.is_foundation_source(e.line)
                                 && !Self::is_vtable_exempt_selector(selector)
                                 && !self.selector_is_known_ivar(selector)
-                                && !self.a_subclass_declares_selector(cn, selector)
+                                && !self.a_subclass_declares_selector(cn, selector, recv_qualified)
                             {
                                 self.check_error_over(e.line, e.col, e.end_line, e.end_col, &format!(
                                     "no visible method '{}' on receiver type '{} *' — static dispatch would hit a NULL vtable slot; declare it on '{}' (or a superclass) or type the receiver as 'id'",

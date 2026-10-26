@@ -7225,31 +7225,52 @@ fn emit_condition(cond: &CgExpr, out: &mut String) {
 fn emit_expr(e: &CgExpr, out: &mut String) {
     match &e.data {
         CgExprData::Int(val) => {
-            let _ = write!(out, "{}", val);
             // Suffix-carrying literals must keep their suffix in the emitted
             // C: `1LL << 60` printed as `1 << 60` shifts in `int` (UB) and
             // corrupts the value before any widening. The suffix decision
             // comes from the parser-annotated literal type, not the value.
-            if let Some(t) = e.type_str.as_deref().map(str::trim) {
-                let suf = match t {
-                    "long" => "L",
-                    "long long" => "LL",
-                    "unsigned" => "U",
-                    "unsigned long" => "UL",
-                    "unsigned long long" => "ULL",
-                    _ => "",
-                };
-                if !suf.is_empty() && *val >= 0 {
-                    let _ = write!(out, "{}", suf);
-                }
+            let suf = match e.type_str.as_deref().map(str::trim) {
+                Some("long") => "L",
+                Some("long long") => "LL",
+                Some("unsigned") => "U",
+                Some("unsigned long") => "UL",
+                Some("unsigned long long") => "ULL",
+                _ => "",
+            };
+            if *val < 0 && suf.contains('U') {
+                // An unsigned literal above i64::MAX wrapped into a negative
+                // i64 at parse time. Emitting that negative value (the suffix
+                // used to be suppressed for negatives, which is exactly when
+                // it is needed) makes the C compiler evaluate the literal as
+                // SIGNED: `(int)(18446744073709551615ull % 10)` came out -7
+                // instead of 9. Re-interpret the bits modulo 2^64 and keep the
+                // suffix, so the C value matches the source literal.
+                let _ = write!(out, "{}", *val as u64);
+                out.push_str(suf);
+                return;
+            }
+            let _ = write!(out, "{}", val);
+            if !suf.is_empty() && *val >= 0 {
+                let _ = write!(out, "{}", suf);
             }
         }
         CgExprData::Float(val) => {
+            // A bare float literal is a DOUBLE in C, and both the checker
+            // (`AstExprData::Float` → `TypePrim::Double`) and this file's own
+            // type table agree — appending `f` narrowed every one of them to
+            // single precision, so `double d = 0.1;` compiled to `0.1f` and
+            // lost its low bits (0.10000000149011612 instead of 0.1).
+            //
+            // An explicit `0.1f` in the source is not modelled yet: the lexer
+            // consumes the suffix without recording it (integers keep theirs in
+            // `int_suffix`), so both spellings land here. Emitting the double
+            // spelling is C-exact for the bare one, and identical in value for
+            // the suffixed one in a `float` context.
             let s = format!("{}", val);
             if s.contains('.') || s.contains('e') || s.contains('E') {
-                let _ = write!(out, "{}f", s);
+                let _ = write!(out, "{}", s);
             } else {
-                let _ = write!(out, "{}.0f", s);
+                let _ = write!(out, "{}.0", s);
             }
         }
         CgExprData::FloatRaw(raw) => {
@@ -7599,9 +7620,14 @@ fn emit_expr(e: &CgExpr, out: &mut String) {
         }
         CgExprData::BlockLit(data) => {
             if is_clang_backend() {
-                // Emit block literal: `^return_type(params) { body }`
+                // Emit block literal: `(^return_type(params) { body })`.
+                // The parens are not cosmetic: jetic decides "the generated C
+                // needs -fblocks" by grepping for `(^` (crates/jetic main).
+                // A block literal in ARGUMENT position used to emit a bare
+                // `^void(){…}`, the grep missed it, and clang rejected the
+                // syntax (probe: [[NPThread alloc] initWithBlock:^{…}]).
+                out.push_str("(^");
                 let rt = &data.return_type;
-                out.push('^');
                 out.push_str(rt);
                 out.push('(');
                 for (i, (pt, pn)) in data.params.iter().enumerate() {
@@ -7617,6 +7643,7 @@ fn emit_expr(e: &CgExpr, out: &mut String) {
                 } else {
                     out.push_str(" {}");
                 }
+                out.push(')');
             } else {
                 // gcc/portable: use-site is a compound-literal struct initializer.
                 // The struct + invoke definitions were already emitted in the
@@ -7768,10 +7795,15 @@ fn emit_stmt_inline(s: &CgStmt, out: &mut String) {
             out.push_str(");");
         }
         CgStmtData::Empty => out.push_str(";"),
-        // Unsupported inline forms: fall back to multi-line emission then strip newlines.
+        // Unsupported inline forms: fall back to multi-line emission then
+        // strip newlines. The strip happens under LINE_SUPPRESS: emit_stmt
+        // emits `#line` directives, and a directive flattened into the middle
+        // of the inline line (`{ #line 12 "f.jeti" for …`) is invalid C
+        // (clang: "expected expression") — clang block literals hit exactly
+        // this, their bodies go through this fallback arm.
         _ => {
             let mut buf = String::new();
-            emit_stmt(s, &mut buf, 0);
+            with_line_suppressed(|| emit_stmt(s, &mut buf, 0));
             buf.truncate(buf.trim_end().len());
             out.push_str(&buf.replace('\n', " "));
         }
@@ -8140,10 +8172,16 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
                     // head and start an independent declaration.
                     match n_type.as_str() {
                         t if !t.is_empty() => {
+                            // A later declarator can carry an array suffix
+                            // (`char a[4], b[4];`) or stars. The suffix belongs
+                            // AFTER the name — emitting the type verbatim put
+                            // the brackets before it (`char[4] b;`, invalid C).
+                            let (nbase, nsuffix) = split_array_type(t);
                             out.push_str(";\n    ");
-                            out.push_str(t);
+                            out.push_str(nbase);
                             out.push(' ');
                             out.push_str(&n_name);
+                            out.push_str(nsuffix);
                         }
                         _ => {
                             out.push_str(", ");
@@ -8319,10 +8357,16 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
                     // head and start an independent declaration.
                     match n_type.as_str() {
                         t if !t.is_empty() => {
+                            // A later declarator can carry an array suffix
+                            // (`char a[4], b[4];`) or stars. The suffix belongs
+                            // AFTER the name — emitting the type verbatim put
+                            // the brackets before it (`char[4] b;`, invalid C).
+                            let (nbase, nsuffix) = split_array_type(t);
                             out.push_str(";\n    ");
-                            out.push_str(t);
+                            out.push_str(nbase);
                             out.push(' ');
                             out.push_str(&n_name);
+                            out.push_str(nsuffix);
                         }
                         _ => {
                             out.push_str(", ");
@@ -8999,6 +9043,12 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
         }
         for ancestor in chain.iter().rev() {
             for (ivt, ivn) in ancestor.ivar_types.iter().zip(ancestor.ivar_names.iter()) {
+                // Block / fn-ptr declarators embed their name (`void (^_b)(void)`);
+                // appending the ivar name again would emit `(^_b)(void) _b;`.
+                if ivt.contains("(^") || ivt.contains("(*") {
+                    let _ = write!(out, "    {};\n", ivt);
+                    continue;
+                }
                 if let Some(pos) = ivt.find('[') {
                     let decl_t = &ivt[..pos].trim();
                     let suffix = &ivt[pos..];
@@ -9009,6 +9059,10 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             }
         }
         for (ivt, ivn) in cm.ivar_types.iter().zip(cm.ivar_names.iter()) {
+            if ivt.contains("(^") || ivt.contains("(*") {
+                let _ = write!(out, "    {};\n", ivt);
+                continue;
+            }
             if let Some(pos) = ivt.find('[') {
                 let decl_t = &ivt[..pos].trim();
                 let suffix = &ivt[pos..];

@@ -923,6 +923,37 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Lookahead for the tentative-cast shape `( X ... ) operand`: from the
+    /// offset just past the identifier, count parens to the group's `)`, then
+    /// require the next token to be able to START a unary operand — an
+    /// identifier, a number, or a string/char literal. `(x) y` has no
+    /// parenthesized-expression reading, so a cast to an unknown typedef is
+    /// the only sane parse; an operator or `(` keeps the expression reading
+    /// (`(x) - y` is subtraction, `(f)(x)` is a call — C's own tie-break for
+    /// names that are not typedefs).
+    fn scan_paren_operand_after_group(&self, from: usize) -> bool {
+        let bytes = self.source.as_bytes();
+        let mut i = from;
+        let mut depth = 0usize;
+        loop {
+            match bytes.get(i) {
+                None => return false,
+                Some(b'(') => { depth += 1; i += 1; }
+                Some(b')') => {
+                    i += 1;
+                    if depth == 0 { break; }
+                    depth -= 1;
+                }
+                Some(_) => { i += 1; }
+            }
+        }
+        while matches!(bytes.get(i), Some(c) if c.is_ascii_whitespace()) {
+            i += 1;
+        }
+        matches!(bytes.get(i),
+            Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9' | b'"' | b'\''))
+    }
+
     fn add_type_param(&mut self, name: &str) {
         if !name.is_empty() && !self.type_params.iter().any(|n| n == name) {
             self.type_params.push(name.to_string());
@@ -2197,7 +2228,7 @@ line: pri_line,
                     end_col: self.previous.end_col,
                 });
             }
-            let is_cast = {
+            let mut is_cast = {
                 if self.current.kind == TokenKind::Keyword {
                     let kw = self.current.keyword;
                     matches!(kw, KeywordKind::Int | KeywordKind::Char | KeywordKind::Short |
@@ -2238,6 +2269,27 @@ line: pri_line,
                         "unknown type name '{}' — declare it (@class / @interface / typedef) or include the header that declares it",
                         tname));
                     return None;
+                }
+            }
+            // Tentative casts when the table is NOT authoritative: the name
+            // may be a typedef from a `#include`d header jetic passes through
+            // (winsock2's `DWORD`, `SOCKET`, …), so decide textually, the way
+            // `scan_cast_star_paren` does. The star-inside shape is
+            // unambiguous, and so is an operand starting right after the
+            // group — `(x) y` has no expression reading. Operators and `(`
+            // keep the parenthesized-expression reading (`(x) - y`
+            // subtraction, `(f)(x)` call), matching C's tie-break for names
+            // that are not typedefs.
+            if !is_cast
+                && self.current.kind == TokenKind::Identifier
+                && !self.type_table_is_authoritative()
+            {
+                let tname = self.current_text().to_string();
+                if !self.is_type_name(&tname) && !self.is_type_param(&tname) {
+                    let after = self.current.start + self.current.length;
+                    if self.scan_cast_star_paren(after) || self.scan_paren_operand_after_group(after) {
+                        is_cast = true;
+                    }
                 }
             }
             if is_cast {
@@ -5448,20 +5500,17 @@ line: pri_line,
                 end_column: self.previous.end_col,
 };
 
-            // Array suffix: name[size]
-            if self.match_token(TokenKind::LBracket) {
+            // Array suffix: name[size] — loop so multi-dimensional arrays
+            // (`int m[2][3];`) nest exactly like struct fields do.
+            while self.match_token(TokenKind::LBracket) {
                 let mut array_type = CstType::new(TypePrim::Named);
                 if let CstDeclData::Variable { ref mut var_type, .. } = var.data {
                     let base = var_type.take().map(|t| *t).unwrap_or_else(|| CstType::new(TypePrim::Int));
                     array_type.subtype = Some(Box::new(base));
                     array_type.is_array = true;
-                    if self.current.kind == TokenKind::Integer {
-                        array_type.array_size = self.current_text().parse().unwrap_or(0);
-                        self.advance();
-                    } else if self.current.kind == TokenKind::Identifier {
-                        array_type.array_size_name = Some(self.current_text().to_string());
-                        self.advance();
-                    }
+                    let (size, name) = self.parse_array_dimension();
+                    array_type.array_size = size;
+                    array_type.array_size_name = name;
                     *var_type = Some(Box::new(array_type));
                 }
                 self.consume(TokenKind::RBracket, "expected ']'");
@@ -5550,17 +5599,15 @@ line: pri_line,
                         end_line: self.previous.end_line,
                         end_column: self.previous.end_col,
 };
-                    // Array suffix on this declarator: `T a[2], b[3];`
-                    if self.match_token(TokenKind::LBracket) {
+                    // Array suffix on this declarator: `T a[2], b[3];` — loop
+                    // for multi-dimensional (`b[2][3]`) and expression
+                    // dimensions, same as the single-declarator path.
+                    while self.match_token(TokenKind::LBracket) {
                         let mut array_type = CstType::new(TypePrim::Named);
                         array_type.is_array = true;
-                        if self.current.kind == TokenKind::Integer {
-                            array_type.array_size = self.current_text().parse().unwrap_or(0);
-                            self.advance();
-                        } else if self.current.kind == TokenKind::Identifier {
-                            array_type.array_size_name = Some(self.current_text().to_string());
-                            self.advance();
-                        }
+                        let (size, name) = self.parse_array_dimension();
+                        array_type.array_size = size;
+                        array_type.array_size_name = name;
                         let inner = match &mut next_var.data {
                             CstDeclData::Variable { var_type, .. } => {
                                 var_type.take().map(|t| *t).unwrap_or_else(|| CstType::new(TypePrim::Int))
@@ -5896,6 +5943,35 @@ if self.current.kind == TokenKind::Identifier {
         None
     }
 
+    /// Parse an array dimension, with the `[` already consumed and the `]`
+    /// still pending. A plain integer literal keeps the numeric form
+    /// (`int a[65536];`); a name keeps its name (`int a[N];`); **anything
+    /// else** — a constant expression such as `A * B`, `N + 1` or
+    /// `sizeof(T)` — is recorded as its SOURCE TEXT, which codegen emits
+    /// verbatim so the C compiler folds it. The layout engine cannot fold a
+    /// named size and skips it (see `crates/layout`), so nothing silently
+    /// assumes a wrong extent.
+    fn parse_array_dimension(&mut self) -> (i32, Option<String>) {
+        if self.check(TokenKind::RBracket) {
+            return (0, None); // `int a[];`
+        }
+        let start = self.current.start;
+        let _ = self.required_expression(|p| p.parse_assignment());
+        let end = self.previous.start + self.previous.length;
+        let text = if start <= end && end <= self.source.len() {
+            self.source[start..end].trim().to_string()
+        } else {
+            String::new()
+        };
+        if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) {
+            return (text.parse::<i32>().unwrap_or(0), None);
+        }
+        if text.is_empty() {
+            return (0, None);
+        }
+        (0, Some(text))
+    }
+
     fn parse_struct_body(&mut self, _is_union: bool) -> Option<Vec<CstDecl>> {
         self.advance(); // consume {
         let mut fields = Vec::new();
@@ -5917,7 +5993,10 @@ if self.current.kind == TokenKind::Identifier {
                     String::new()
                 };
                 if !fname.is_empty() {
-                    let mut field_type = ftype;
+                    // `ftype` (the base type, before this declarator's array
+                    // suffixes) stays available for the comma-separated
+                    // declarators below.
+                    let mut field_type = ftype.clone();
                     // Array field(s): name[size1][size2]... — loop so
                     // multi-dimensional arrays nest correctly.
                     while self.match_token(TokenKind::LBracket) {
@@ -5997,11 +6076,30 @@ if self.current.kind == TokenKind::Identifier {
                         end_column: self.previous.end_col,
 });
                 }
-                // Handle comma-separated fields
+                // Handle comma-separated fields: each declarator carries the
+                // HEAD declarator's base type plus its own array suffixes.
+                // Leaving `ivar_type` empty made codegen fall back to `int`
+                // for the second field, so `uint64_t hi, lo;` emitted
+                // `int lo;` — a silent type corruption (probes/p2_decimal).
                 while self.match_token(TokenKind::Comma) {
                     if self.current.kind == TokenKind::Identifier {
                         let fname = self.current_text().to_string();
                         self.advance();
+                        let mut this_type = ftype.clone();
+                        while self.match_token(TokenKind::LBracket) {
+                            let mut array_type = CstType::new(TypePrim::Named);
+                            array_type.subtype = Some(Box::new(this_type));
+                            array_type.is_array = true;
+                            if self.current.kind == TokenKind::Integer {
+                                array_type.array_size = self.current_text().parse().unwrap_or(0);
+                                self.advance();
+                            } else if self.current.kind == TokenKind::Identifier {
+                                array_type.array_size_name = Some(self.current_text().to_string());
+                                self.advance();
+                            }
+                            this_type = array_type;
+                            self.consume(TokenKind::RBracket, "expected ']'");
+                        }
                         let field_attrs = self.parse_attributes();
                         fields.push(CstDecl {
                             kind: CstDeclKind::Ivar,
@@ -6009,7 +6107,7 @@ if self.current.kind == TokenKind::Identifier {
                             name: Some(fname),
                             next: None,
                             data: CstDeclData::Ivar {
-                                ivar_type: None,
+                                ivar_type: Some(Box::new(this_type)),
                                 iboutlet: false,
                                 is_weak: false,
                             },
@@ -6331,6 +6429,35 @@ if self.current.kind == TokenKind::Identifier {
                 let ivar_type = self.parse_type_annotated();
                 self.ivar_position = saved_ivar;
                 if let Some(ivar_type) = ivar_type {
+                    // Block / function-pointer ivars carry their name INSIDE
+                    // the declarator — `void (^_body)(void);`,
+                    // `int (*cb)(int);` — so no separate name token follows
+                    // the type, and the `match_name` loop below registered
+                    // nothing (probe-verified: `_body` vanished from the ivar
+                    // table and every use failed "undeclared identifier").
+                    if (ivar_type.is_block || ivar_type.is_fn_ptr)
+                        && ivar_type.block_name.is_some()
+                    {
+                        let bname = ivar_type.block_name.clone().unwrap_or_default();
+                        ivars.push(CstDecl {
+                            kind: CstDeclKind::Ivar,
+                            line: ci_line, column: ci_col,
+                            name: Some(bname),
+                            next: None,
+                            data: CstDeclData::Ivar {
+                                ivar_type: Some(Box::new(ivar_type.clone())),
+                                iboutlet,
+                                is_weak,
+                            },
+                                                    attributes: Vec::new(),
+
+                            end_line: self.previous.end_line,
+                            end_column: self.previous.end_col,
+                        });
+                        // No consume here: the trailing `;` is consumed by the
+                        // zero-progress guard below, exactly like every other
+                        // ivar declaration.
+                    } else {
                     while self.match_name() {
                         let ivar_name = self.previous_text().to_string();
                         let mut final_type = ivar_type.clone();
@@ -6374,6 +6501,7 @@ if self.current.kind == TokenKind::Identifier {
                             end_column: self.previous.end_col,
 });
                         if !self.match_token(TokenKind::Comma) { break; }
+                    }
                     }
                 }
                 // Zero-progress guard: a failed consume leaves the current
@@ -7597,6 +7725,56 @@ mod tests {
         // without assuming the old tuple form `Await(`.
         let dbg = format!("{:?}", unit);
         dbg.contains("Await {") || dbg.contains("Await(")
+    }
+
+    #[test]
+    fn block_typed_ivar_registers_its_declarator_name() {
+        // `void (^_body)(void);` carries the ivar name INSIDE the declarator;
+        // the ivar loop used to find no separate name token and drop the ivar
+        // entirely — every use failed "undeclared identifier".
+        let parse = |src: &str| {
+            let mut p = Parser::new(src);
+            let unit = p.parse_translation_unit().unwrap();
+            let text = format!("{:?}", unit);
+            (text, p.last_error().is_empty())
+        };
+        let (text, ok) = parse(
+            "@interface B : NPObject {\n@public\n    void (^_body)(void);\n    int (*_cb)(int);\n    int _n;\n}\n@end\n",
+        );
+        assert!(ok, "block/fn-ptr ivars must parse: {}", text);
+        assert!(text.contains("\"_body\""), "block ivar must register: {}", text);
+        assert!(text.contains("\"_cb\""), "fn-ptr ivar must register: {}", text);
+        assert!(text.contains("\"_n\""), "plain ivar still registers: {}", text);
+    }
+
+    #[test]
+    fn unknown_typedef_cast_parses_when_type_table_is_passthrough() {
+        // `(DWORD)x` with a name the table never saw: the table is NOT
+        // authoritative (pass-through `#include`), so the cast shape is
+        // decided textually. `(x) y` has no expression reading — the cast is
+        // the only parse; operators and `(` keep the expression reading.
+        let parse = |src: &str| {
+            let mut p = Parser::new(src);
+            let unit = p.parse_translation_unit().unwrap();
+            (format!("{:?}", unit), p.last_error().is_empty())
+        };
+
+        let (text, ok) = parse("int f(int timeout) { return (DWORD)timeout * 1000; }");
+        assert!(ok, "cast to a pass-through typedef must parse");
+        assert!(text.contains("Cast {"), "the (DWORD) shape must be a cast");
+
+        let (_, ok) = parse("int f(void) { int x = 1, y = 2; return (x) - y; }");
+        assert!(ok, "`(x) - y` stays subtraction");
+
+        let (text, ok) = parse("int f(void) { int x = 1, y = 2; return (x) * y; }");
+        assert!(ok && !text.contains("Cast {"), "`(x) * y` stays multiplication");
+
+        let (text, ok) = parse("int f(void) { return (f)(3); }");
+        assert!(ok && !text.contains("Cast {"), "`(f)(x)` stays a call");
+
+        // The pointer shape `(T *)p` is unambiguous either way.
+        let (text, ok) = parse("void *f(void *p) { return (WSADATA *)p; }");
+        assert!(ok && text.contains("Cast {"), "`(T *)p` is a cast");
     }
 
     #[test]

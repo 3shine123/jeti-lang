@@ -77,6 +77,14 @@ impl AstType {
         t.nulls = ct.nulls;
         t.block_name = ct.block_name.clone();
         t.block_params = ct.block_params.as_ref().map(|bp| Box::new(AstType::from_cst_type(bp)));
+        // Carry the angle surface across: generic arguments AND protocol
+        // qualifications. Dropping them here made `NPObject<FSNodeProtocol> *`
+        // parameters arrive at the checker as bare `NPObject *`, so the
+        // receiver-visibility check could not see the conformance bound and
+        // rejected legal sends (vfs_event_bus_test `[node nodeName]`). The
+        // inverse `to_cst_type` already round-trips both.
+        t.protocol_refs = ct.protocols.clone();
+        t.type_args = ct.type_args.iter().map(|a| AstType::from_cst_type(a)).collect();
         if let Some(ref name) = ct.name {
             t.name = Some(name.clone());
             t.class_ref = Some(name.clone());
