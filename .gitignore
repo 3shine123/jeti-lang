@@ -38,7 +38,10 @@ mimo.sh
 # Python env for test_all.py (`rich`) — test_all.sh bootstraps it on first use.
 .venv/
 
-# Rust build
+# Rust build — cargo output directories, including the Zed editor extension's
+# (a `git add -A` once swept ~2100 rlibs / 218 MB of it into history).
+/target/
+editors/zed/target/
 target/probes/p2_threads/*.c
 editors/zed/grammar/
 editors/zed/grammars/jeti/
