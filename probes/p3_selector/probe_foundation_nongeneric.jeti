@@ -1,0 +1,8 @@
+#import <Foundation/Foundation.hje>
+
+// P3：Foundation 非泛型类。NPString 未声明 setObject:forKey: → 应编译期报错。
+int main(void) {
+    NPString *s = [NPString stringWithUTF8String:"x"];
+    [s setObject:@"y" forKey:@"k"];   // 期望：no visible method … on receiver type 'NPString *'
+    return 0;
+}

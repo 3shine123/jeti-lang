@@ -1,0 +1,70 @@
+#import <Foundation/NPCondition.hje>
+#import <Foundation/NPObject.jeti>
+
+// NPCondition 实现：内置锁 + 条件变量（运行期线程层，hosted 双后端）。
+// 契约与 ObjC 的 NSCondition 一致：wait 前必须持锁，返回时重新持有。
+
+@implementation NPCondition
+
+- (instancetype)init {
+    self = [super init];
+    if (!self) { return NULL; }
+    _mu = NULL;
+    _cv = NULL;
+#ifndef __JETI_FREESTANDING
+    _mu = jeti_mutex_create();
+    _cv = jeti_cond_create();
+#endif
+    return self;
+}
+
+- (void)dealloc {
+#ifndef __JETI_FREESTANDING
+    if (_mu) { jeti_mutex_destroy((jeti_mutex_t *)_mu); _mu = NULL; }
+    if (_cv) { jeti_cond_destroy((jeti_cond_t *)_cv); _cv = NULL; }
+#else
+    _mu = NULL;
+    _cv = NULL;
+#endif
+    [super dealloc];
+}
+
+- (void)lock {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+#endif
+}
+
+- (void)unlock {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+#endif
+}
+
+- (BOOL)tryLock {
+#ifndef __JETI_FREESTANDING
+    return (BOOL)jeti_mutex_trylock((jeti_mutex_t *)_mu);
+#else
+    return YES;
+#endif
+}
+
+- (void)wait {
+#ifndef __JETI_FREESTANDING
+    jeti_cond_wait((jeti_cond_t *)_cv, (jeti_mutex_t *)_mu);
+#endif
+}
+
+- (void)signal {
+#ifndef __JETI_FREESTANDING
+    jeti_cond_signal((jeti_cond_t *)_cv);
+#endif
+}
+
+- (void)broadcast {
+#ifndef __JETI_FREESTANDING
+    jeti_cond_broadcast((jeti_cond_t *)_cv);
+#endif
+}
+
+@end

@@ -1,0 +1,32 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+int main(void) {
+    NPURLSession *s = [NPURLSession sharedSession];
+    printf("timeout=%d\n", [s timeoutSeconds]);
+
+    NPURL *u = [NPURL URLWithString:S("http://127.0.0.1:8765/hello.txt")];
+    printf("host=%s path=%s port=%d\n", [[u host] UTF8String], [[u path] UTF8String], [[u port] intValue]);
+
+    NPData *d = [s dataWithContentsOfURL:u];
+    if (d) {
+        printf("bytes=%zu body=%s", [d length], (const char *)[d bytes]);
+    } else {
+        printf("fetch failed\n");
+    }
+
+    NPString *str = [s stringWithContentsOfURL:u];
+    printf("str=%s", str ? [str UTF8String] : "(nil)\n");
+
+    // https 必须被拒绝（不静默降级成明文）
+    NPURL *h = [NPURL URLWithString:S("https://example.com/")];
+    printf("https_rejected=%d\n", [s dataWithContentsOfURL:h] == NULL);
+
+    // 连接失败 → nil
+    NPURL *bad = [NPURL URLWithString:S("http://127.0.0.1:1/nope")];
+    printf("refused=%d\n", [s dataWithContentsOfURL:bad] == NULL);
+    return 0;
+}

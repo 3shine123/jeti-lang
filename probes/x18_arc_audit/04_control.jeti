@@ -1,0 +1,59 @@
+// 审计面 4：复杂控制流（分支合并、循环、早退）
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+@interface Obj : NPObject
+@end
+
+@implementation Obj
+@end
+
+static int early_ret(int n) {
+    Obj *o = [[Obj alloc] init];             /* 活局部跨早退 */
+    if (n > 0) {
+        printf("early\n");
+        return 1;                            /* ARC 应在早退前释放 o */
+    }
+    (void)o;
+    return 0;
+}
+
+int main(void) {
+    /* C1：嵌套分支中创建，两路径都释放 → freed */
+    if (1) {
+        Obj *a = [[Obj alloc] init];
+        (void)a;
+    } else {
+        Obj *b = [[Obj alloc] init];
+        (void)b;
+    }
+
+    /* C2：循环体内创建+释放，多轮 → 单抽象对象 freed */
+    for (int i = 0; i < 3; i++) {
+        Obj *c = [[Obj alloc] init];
+        (void)c;
+    }
+
+    /* C3：循环外创建、循环内有条件释放 → [0,1] possibly leaked 属实 */
+    Obj *d = [[Obj alloc] init];
+    for (int i = 0; i < 2; i++) {
+        if (i == 1) {
+            jeti_release(d);
+        }
+    }
+
+    /* C4：早退路径上的活局部 → freed */
+    early_ret(1);
+
+    /* C5：switch（结构化走查回退路径）中的对象 → freed */
+    Obj *e = [[Obj alloc] init];
+    switch (1) {
+    case 1:
+        (void)e;
+        break;
+    default:
+        break;
+    }
+
+    return 0;
+}

@@ -1,0 +1,42 @@
+// 审计面 2：异常路径（EH 与 ARC 的交接）
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+@interface Err : NPObject
+@end
+
+@implementation Err
+@end
+
+static void thrower(void) {
+    @throw [[Err alloc] init];               /* 抛出 +1 值：EH 机制负责平衡 */
+}
+
+int main(void) {
+    /* E1：活局部跨 @throw 存活 → catch 后作用域末释放 → freed */
+    Err *live = [[Err alloc] init];
+    @try {
+        @throw [[Err alloc] init];
+    } @catch (Err *e) {
+        printf("caught\n");
+    }
+    (void)live;
+
+    /* E2：循环内反复抛 → 每轮抛出值都平衡 → freed */
+    for (int i = 0; i < 2; i++) {
+        @try {
+            @throw [[Err alloc] init];
+        } @catch (Err *e) {
+            printf("loop %d\n", i);
+        }
+    }
+
+    /* E3：finally 中活局部 → freed */
+    @try {
+        printf("body\n");
+    } @finally {
+        printf("finally\n");
+    }
+
+    return 0;
+}

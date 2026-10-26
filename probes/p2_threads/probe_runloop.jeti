@@ -1,0 +1,26 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static int g_order = 0;
+static int g_seen[8];
+
+int main(void) {
+    NPRunLoop *rl = [NPRunLoop mainRunLoop];
+    printf("singleton=%d\n", rl == [NPRunLoop mainRunLoop]);
+
+    // FIFO 入队三块，一拍排空后按序执行
+    void (^b1)(void) = ^{ g_seen[g_order++] = 1; };
+    void (^b2)(void) = ^{ g_seen[g_order++] = 2; };
+    void (^b3)(void) = ^{ g_seen[g_order++] = 3; };
+    printf("enqueue=%d%d%d pending=%d\n",
+           [rl performBlock:b1], [rl performBlock:b2], [rl performBlock:b3],
+           [rl pendingCount]);
+    [rl poll];
+    printf("order=%d%d%d pending_after=%d\n",
+           g_seen[0], g_seen[1], g_seen[2], [rl pendingCount]);
+
+    // 重复 poll：无块时无害
+    [rl poll];
+    printf("poll_empty=%d\n", [rl pendingCount]);
+    return 0;
+}

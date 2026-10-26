@@ -1,0 +1,261 @@
+#import <Foundation/NPOperationQueue.hje>
+#import <Foundation/NPObject.jeti>
+
+#include <stdlib.h>
+
+// NPOperationQueue 实现：常驻工作线程池 + FIFO 块队列。
+// 容量/上限常量来自 .hje（NP_OQ_CAP / NP_OQ_MAX_THREADS，ivar 布局可见）。
+// 调度契约（全部在 _mu 保护下）：
+//   - 工作线程：有活 → 取尾执行；无活 → 等 _cv；_quit → 退出。
+//   - addOperation：入队头，signal 一次；若 spawned < maxConcurrent 且未达
+//     上限则补建线程（懒扩池）。
+//   - waitUntilAll：count==0 && busy==0 才返回（broadcast 唤醒）。
+//   - cancelAll：置标志 + 清空未开始的块（release）。
+// 块用 _Block_copy/_Block_release 显式管理（Foundation MRC）。
+
+// 工作线程主循环。self 由 addOperation 补建线程时 retain，退出时 release。
+static void *np_oq_worker(void *arg) {
+    NPOperationQueue *q = (NPOperationQueue *)arg;
+    for (;;) {
+        jeti_mutex_lock((jeti_mutex_t *)q->_mu);
+        // 睡到「有活且未暂停」或退出。谓词用 while：假唤醒安全。
+        // _suspended 必须挡在取件之前——只查 count 会让暂停形同虚设
+        // （入队 signal 直接把块派发下去，probes/p2_threads/probe_opqueue 实证）。
+        while (!q->_quit && (q->_count == 0 || q->_suspended)) {
+            jeti_cond_wait((jeti_cond_t *)q->_cv, (jeti_mutex_t *)q->_mu);
+        }
+        if (q->_quit) {
+            // dealloc 已清空队列并广播；这里只退出。
+            jeti_mutex_unlock((jeti_mutex_t *)q->_mu);
+            break;
+        }
+        // 取一个操作（FIFO：从头部取）。
+        void (^blk)(void) = (void (^)(void))q->_pending[q->_head];
+        q->_pending[q->_head] = NULL;
+        q->_head = (q->_head + 1) % NP_OQ_CAP;
+        q->_count--;
+        q->_busy++;
+        jeti_mutex_unlock((jeti_mutex_t *)q->_mu);
+
+        blk();                          // 执行（锁外）
+        _Block_release(blk);
+
+        jeti_mutex_lock((jeti_mutex_t *)q->_mu);
+        q->_busy--;
+        // 队列空且无人忙：唤醒 waitUntilAllOperationsAreFinished。
+        if (q->_count == 0 && q->_busy == 0) {
+            jeti_cond_broadcast((jeti_cond_t *)q->_cv);
+        }
+        jeti_mutex_unlock((jeti_mutex_t *)q->_mu);
+    }
+    jeti_release(q);
+    return NULL;
+}
+
+@implementation NPOperationQueue
+
+- (instancetype)init {
+    self = [super init];
+    if (!self) { return NULL; }
+    _head = 0;
+    _count = 0;
+    _maxConcurrent = 4;
+    _suspended = 0;
+    _cancelled = 0;
+    _spawned = 0;
+    _busy = 0;
+    _quit = 0;
+    for (int i = 0; i < NP_OQ_CAP; i++) { _pending[i] = NULL; }
+    for (int i = 0; i < NP_OQ_MAX_THREADS; i++) { _threads[i] = NULL; }
+#ifndef __JETI_FREESTANDING
+    _mu = jeti_mutex_create();
+    _cv = jeti_cond_create();
+#else
+    _mu = NULL;
+    _cv = NULL;
+#endif
+    return self;
+}
+
+- (void)dealloc {
+#ifndef __JETI_FREESTANDING
+    // 通知停机：置 quit、广播，join 全部工作线程。
+    if (_mu && _cv) {
+        jeti_mutex_lock((jeti_mutex_t *)_mu);
+        _quit = 1;
+        // 清空未执行的操作。
+        for (int i = 0; i < _count; i++) {
+            int idx = (_head + i) % NP_OQ_CAP;
+            if (_pending[idx]) {
+                _Block_release(_pending[idx]);
+                _pending[idx] = NULL;
+            }
+        }
+        _count = 0;
+        _head = 0;
+        jeti_cond_broadcast((jeti_cond_t *)_cv);
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+        for (int i = 0; i < NP_OQ_MAX_THREADS; i++) {
+            if (_threads[i]) {
+                jeti_thread_join((jeti_thread_t *)_threads[i], NULL);
+                _threads[i] = NULL;
+            }
+        }
+        jeti_mutex_destroy((jeti_mutex_t *)_mu);
+        jeti_cond_destroy((jeti_cond_t *)_cv);
+        _mu = NULL;
+        _cv = NULL;
+    }
+#else
+    for (int i = 0; i < _count; i++) {
+        int idx = (_head + i) % NP_OQ_CAP;
+        if (_pending[idx]) { _pending[idx] = NULL; }
+    }
+    _count = 0;
+    _mu = NULL;
+    _cv = NULL;
+#endif
+    [super dealloc];
+}
+
++ (NPOperationQueue *)mainQueue {
+    static NPOperationQueue *q = NULL;
+    if (!q) {
+        q = [[NPOperationQueue alloc] init];
+        if (q) { q->_maxConcurrent = 1; }
+    }
+    return q;
+}
+
++ (NPOperationQueue *)queue {
+    return [[NPOperationQueue alloc] init];   // 默认 maxConcurrent = 4
+}
+
+- (void)setMaxConcurrentOperationCount:(int)count {
+    if (count < 1) { count = 1; }
+    if (count > NP_OQ_MAX_THREADS) { count = NP_OQ_MAX_THREADS; }
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    _maxConcurrent = count;
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+#else
+    _maxConcurrent = count;
+#endif
+}
+
+- (int)maxConcurrentOperationCount {
+    return _maxConcurrent;
+}
+
+- (void)addOperationWithBlock:(void (^)(void))block {
+#ifndef __JETI_FREESTANDING
+    if (!block || !_mu || !_cv) { return; }
+    void *copy = _Block_copy(block);
+    if (!copy) { return; }
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    if (_cancelled) {
+        // 已取消：拒绝新操作（ObjC 对已取消队列的 add 也是 no-op 语义）。
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+        _Block_release(copy);
+        return;
+    }
+    while (_count >= NP_OQ_CAP) {
+        // 满：阻塞等容量（ObjC 的队列无界；我们容量固定，满时背压）。
+        jeti_cond_wait((jeti_cond_t *)_cv, (jeti_mutex_t *)_mu);
+    }
+    int tail = (_head + _count) % NP_OQ_CAP;
+    _pending[tail] = copy;
+    _count++;
+    // 懒扩池：未达 maxConcurrent 就补一条工作线程。
+    if (_spawned < _maxConcurrent) {
+        jeti_thread_t *h = NULL;
+        if (jeti_thread_spawn(np_oq_worker, self, &h) == 0) {
+            jeti_retain(self);            // worker 退出时释放
+            _threads[_spawned] = h;
+            _spawned++;
+        }
+    }
+    jeti_cond_signal((jeti_cond_t *)_cv);
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+#else
+    (void)block;
+#endif
+}
+
+- (int)operationCount {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    int n = _count + _busy;
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+    return n;
+#else
+    return 0;
+#endif
+}
+
+- (void)waitUntilAllOperationsAreFinished {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    while (_count > 0 || _busy > 0) {
+        jeti_cond_wait((jeti_cond_t *)_cv, (jeti_mutex_t *)_mu);
+    }
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+#endif
+}
+
+- (void)cancelAllOperations {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    _cancelled = 1;
+    for (int i = 0; i < _count; i++) {
+        int idx = (_head + i) % NP_OQ_CAP;
+        if (_pending[idx]) {
+            _Block_release(_pending[idx]);
+            _pending[idx] = NULL;
+        }
+    }
+    _count = 0;
+    _head = 0;
+    jeti_cond_broadcast((jeti_cond_t *)_cv);   // 让 waitUntil 返回（若已空）
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+#endif
+}
+
+- (void)setSuspended:(BOOL)flag {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    _suspended = flag ? 1 : 0;
+    jeti_cond_broadcast((jeti_cond_t *)_cv);   // 状态翻转唤醒重查
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+#else
+    _suspended = flag ? 1 : 0;
+#endif
+}
+
+- (BOOL)isSuspended {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    int v = _suspended;
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+    return (BOOL)v;
+#else
+    return (BOOL)_suspended;
+#endif
+}
+
+- (BOOL)isCancelled {
+#ifndef __JETI_FREESTANDING
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    int v = _cancelled;
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+    return (BOOL)v;
+#else
+    return (BOOL)_cancelled;
+#endif
+}
+
+- (BOOL)isPaused {
+    return [self isSuspended];
+}
+
+@end

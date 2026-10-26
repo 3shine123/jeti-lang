@@ -1,0 +1,51 @@
+#include <stdio.h>
+#define ROWS 2
+#define COLS 3
+#define MAXC 262144
+
+typedef struct { int grid[2][3]; int flat[6]; } Board;
+
+int g_maze[3][4];
+int g_dist[MAXC];
+
+int main(void) {
+    // 2D 局部
+    int m[2][3];
+    m[0][0] = 1; m[1][2] = 6;
+    printf("a2d=%d %d\n", m[0][0], m[1][2]);
+
+    // 3D 局部
+    int t[2][2][2];
+    t[0][0][0] = 7; t[1][1][1] = 8;
+    printf("a3d=%d %d\n", t[0][0][0], t[1][1][1]);
+
+    // 全局 2D
+    g_maze[2][3] = 42;
+    printf("g2d=%d\n", g_maze[2][3]);
+
+    // 结构体字段 2D
+    Board b;
+    b.grid[1][1] = 11;
+    printf("field=%d\n", b.grid[1][1]);
+
+    // 维度表达式
+    int e[ROWS * COLS];
+    e[5] = 55;
+    printf("expr=%d\n", e[5]);
+    int p[ROWS + 1];
+    p[2] = 9;
+    printf("plus=%d\n", p[2]);
+    int s[sizeof(int) * 2];
+    s[7] = 77;
+    printf("sizeof=%d\n", s[7]);
+
+    // 全局大数组（按需使用）
+    g_dist[100] = 100;
+    printf("big=%d\n", g_dist[100]);
+
+    // 逗号多声明符 + 数组
+    int c1[2], c2[3];
+    c1[1] = 1; c2[2] = 2;
+    printf("comma=%d %d\n", c1[1], c2[2]);
+    return 0;
+}

@@ -39,4 +39,4 @@ mimo.sh
 .venv/
 
 # Rust build
-target/
+target/probes/p2_threads/*.c

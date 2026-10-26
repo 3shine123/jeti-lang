@@ -1,0 +1,31 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+int main(void) {
+    NPString *s = [NPString stringWithUTF8String:"hello"];
+    NPString *kColor = [NPString stringWithUTF8String:"color"];
+    NPString *kFont = [NPString stringWithUTF8String:"font"];
+
+    NPMutableDictionary *attrs = [[NPMutableDictionary alloc] init];
+    [attrs setObject:[NPString stringWithUTF8String:"red"] forKey:kColor];
+    [attrs setObject:[NPString stringWithUTF8String:"mono"] forKey:kFont];
+
+    NPAttributedString *as = [NPAttributedString attributedStringWithString:s attributes:attrs];
+    printf("len=%zu\n", [as length]);
+    printf("str=%s\n", [[as string] UTF8String]);
+    printf("valid0=%d valid4=%d valid5=%d\n", [as isValidIndex:0], [as isValidIndex:4], [as isValidIndex:5]);
+    printf("color=%s\n", [[as attribute:kColor atIndex:0] UTF8String]);
+    printf("font=%s\n", [[as attribute:kFont atIndex:4] UTF8String]);
+    printf("missing=%d\n", [as attribute:[NPString stringWithUTF8String:"nope"] atIndex:0] == NULL);
+    printf("oob_attr=%d\n", [as attributesAtIndex:9] == NULL);
+    printf("efflen=%zu\n", [as effectiveRangeLengthAtIndex:2]);
+    printf("attrs_count=%zu\n", [[as attributes] count]);
+
+    NPAttributedString *bare = [NPAttributedString attributedStringWithString:s];
+    printf("bare_len=%zu bare_attr0=%d\n", [bare length], [bare attributesAtIndex:0] == NULL);
+
+    // 拷贝语义：构造后改原字典不影响本对象
+    [attrs setObject:[NPString stringWithUTF8String:"blue"] forKey:kColor];
+    printf("copied_color=%s\n", [[as attribute:kColor atIndex:0] UTF8String]);
+    return 0;
+}

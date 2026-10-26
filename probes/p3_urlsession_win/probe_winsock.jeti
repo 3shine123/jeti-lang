@@ -1,0 +1,120 @@
+// Winsock 分支实证探针：NPURLSession 的 socket 层单独抽出（纯 C，无块字面量，
+// 规避 mingw gcc 不支持 -fblocks 的限制）。交叉验证：
+//   JETIC_WINDOWS=1 jetic -rewrite-jeti probes/p3_urlsession_win/probe_winsock.jeti \
+//     -o probe_winsock.c
+//   x86_64-w64-mingw32-gcc -fsyntax-only -D__JETI__ probe_winsock.c
+// 探针生成的 .c 不进提交。语义来源：winsock2.h 实测（SOCKET/INVALID_SOCKET/
+// WSAStartup/closesocket；DWORD 即 unsigned long）。
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#ifndef __JETI_FREESTANDING
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET np_urls_sock_t;
+#define NP_URLS_SOCK_BAD INVALID_SOCKET
+#define np_urls_close(fd) closesocket(fd)
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/time.h>
+typedef int np_urls_sock_t;
+#define NP_URLS_SOCK_BAD (-1)
+#define np_urls_close(fd) close(fd)
+#endif
+
+static np_urls_sock_t np_urls_connect(const char *host, const char *port, int timeout) {
+#ifdef _WIN32
+    static int wsa_ready = 0;
+    if (!wsa_ready) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { return NP_URLS_SOCK_BAD; }
+        wsa_ready = 1;
+    }
+#endif
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = NULL;
+    if (getaddrinfo(host, port, &hints, &res) != 0) { return NP_URLS_SOCK_BAD; }
+    np_urls_sock_t fd = NP_URLS_SOCK_BAD;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+#ifdef _WIN32
+        if (fd == INVALID_SOCKET) { continue; }
+        DWORD tv = (DWORD)timeout * 1000;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof tv);
+#else
+        if (fd < 0) { continue; }
+        struct timeval tv;
+        tv.tv_sec = timeout;
+        tv.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+#endif
+        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) { break; }
+        np_urls_close(fd);
+        fd = NP_URLS_SOCK_BAD;
+    }
+    freeaddrinfo(res);
+    return fd;
+}
+
+static int np_urls_send_all(np_urls_sock_t fd, const char *buf, size_t len) {
+    size_t off = 0;
+    while (off < len) {
+        int chunk = (len - off > 0x40000000) ? 0x40000000 : (int)(len - off);
+#ifdef _WIN32
+        int n = send(fd, buf + off, chunk, 0);
+#else
+        ssize_t n = send(fd, buf + off, (size_t)chunk, 0);
+#endif
+        if (n <= 0) { return 0; }
+        off += (size_t)n;
+    }
+    return 1;
+}
+
+static char *np_urls_read_all(np_urls_sock_t fd, size_t *out_len) {
+    size_t cap = 8192;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { return NULL; }
+    for (;;) {
+        if (len + 4096 + 1 > cap) {
+            size_t ncap = cap * 2;
+            char *nb = (char *)realloc(buf, ncap);
+            if (!nb) { free(buf); return NULL; }
+            buf = nb;
+            cap = ncap;
+        }
+#ifdef _WIN32
+        int n = recv(fd, buf + len, 4096, 0);
+#else
+        ssize_t n = recv(fd, buf + len, 4096, 0);
+#endif
+        if (n <= 0) { break; }
+        len += (size_t)n;
+    }
+    buf[len] = '\0';
+    *out_len = len;
+    return buf;
+}
+
+#endif  // !__JETI_FREESTANDING
+
+int np_urls_probe_main(void) {
+#ifndef __JETI_FREESTANDING
+    (void)np_urls_connect;
+    (void)np_urls_send_all;
+    (void)np_urls_read_all;
+#endif
+    return 0;
+}

@@ -1,0 +1,52 @@
+/* NPLock + NPRecursiveLock golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * 语义对齐 ObjC 的 NSLock / NSRecursiveLock；实现用 `__atomic_*` 自旋
+ * （与 runtime.c 的 C11 atomic_flag 同一套机制，不引入 pthread）：
+ *   E1  NPLock：初始未持有；tryLock 空闲成功、已持有失败；unlock 后可再取
+ *   E2  NPRecursiveLock：同线程重入只加深度；深度归零才真正释放
+ *   E3  两把锁的 isLocked 与 tryLock 在"已持有/空闲"两态下一致
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   E1 ok / E2 ok / E3 ok
+ *
+ * 诚实边界见 .hje：真锁，但 Jeti 运行期是协作式单线程，正常程序里锁不竞争；
+ * 没有 -lockBeforeDate:（需阻塞原语）。
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+int main(void) {
+    // E1：NPLock 基本语义
+    NPLock *l = [[NPLock alloc] init];
+    int e1 = ![l isLocked]
+          && [l tryLock] && [l isLocked]
+          && ![l tryLock]            // 已持有 → 失败
+          ;
+    [l unlock];
+    e1 = e1 && ![l isLocked] && [l tryLock];
+    [l unlock];
+    e1 = e1 && ![l isLocked];
+    printf("%s\n", e1 ? "E1 ok" : "E1 FAIL");
+
+    // E2：NPRecursiveLock 重入与深度
+    NPRecursiveLock *r = [[NPRecursiveLock alloc] init];
+    [r lock];
+    [r lock];
+    [r lock];
+    int e2 = [r isLocked];
+    [r unlock];
+    [r unlock];
+    e2 = e2 && [r isLocked];       // 深度未归零 → 仍持有
+    [r unlock];
+    e2 = e2 && ![r isLocked];      // 归零 → 释放
+    printf("%s\n", e2 ? "E2 ok" : "E2 FAIL");
+
+    // E3：两态一致性（空闲可 tryLock；持有不可）
+    NPLock *l3 = [[NPLock alloc] init];
+    [l3 lock];
+    int busy = [l3 isLocked] && ![l3 tryLock];
+    [l3 unlock];
+    int idle = ![l3 isLocked] && [l3 tryLock];
+    [l3 unlock];
+    printf("%s\n", (busy && idle) ? "E3 ok" : "E3 FAIL");
+    return 0;
+}

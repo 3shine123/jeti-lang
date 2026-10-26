@@ -1,0 +1,34 @@
+#ifndef NPLOCK_NH
+#define NPLOCK_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPLock —— 互斥锁（对应 ObjC 的 NSLock）。
+//
+// 实现沿用运行期自己的原语族：**C11 原子**（`include/jeti/runtime.c` 的
+// `jeti_syncLock` 就是 atomic_flag 自旋），因此不引入 pthread 依赖——macOS 的
+// libc 不提供 C11 `<threads.h>`，而 pthread 会给 Linux 客户端加链接负担。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 锁本身是**真锁**（原子操作，多线程下正确）；但 Jeti 的运行期是**协作式
+//   单线程**（async 任务由 `jeti_task_resume` 泵动，见 runtime.h）：同一时刻
+//   只有一条执行流，所以正常程序里锁永远不竞争。它的价值在于"把临界区写对"，
+//   以及将来引入真实线程（或用户 C 代码里 pthread_create）时仍然正确。
+// - `-lock` 是**自旋**而非阻塞：单线程下不会自旋（无人持有），多线程下会
+//   空转等待。没有 `-lockBeforeDate:`（需要阻塞原语，见诚实边界）。
+// - 不可重入：同一执行流重复 `-lock` 会自旋（ObjC 的 NSLock 亦然；可重入请用
+//   NPRecursiveLock）。
+@interface NPLock : NPObject {
+@public
+    int _flag;      // 0 = 未持有，1 = 已持有（C11 原子访问）
+    int _depth;     // 持有计数（诊断用；非可重入锁恒为 0/1）
+}
+- (void)lock;
+- (void)unlock;
+// 尝试获取：成功返回 YES，已被持有返回 NO（不阻塞）。
+- (BOOL)tryLock;
+// 当前是否被持有（诊断用；多线程下是瞬时快照）。
+- (BOOL)isLocked;
+@end
+
+#endif

@@ -1,0 +1,72 @@
+/* NPCondition golden（声明伞头 + 预编译库；运行期线程层双后端）。
+ *
+ * 全部握手式或时序无关（结果不依赖调度路径）：
+ *   J1  tryLock 两态：空闲成功 / 持有失败
+ *   J2  signal 握手：worker 置状态后 signal，主线程 wait 醒来读到
+ *       （wait 用 while 重查，假唤醒安全）
+ *   J3  broadcast：两个等待者都被放行。到达路径有两种（worker 已 wait →
+ *       broadcast 唤醒；尚未 wait → lock 后见 state==1 直接通过），两种时序
+ *       收敛到同一结果 w1=w2=1 —— 确定性。
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   J1 ok / J2 ok / J3 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static NPCondition *g_c = NULL;
+static int g_state = 0;
+static int g_w1 = 0;
+static int g_w2 = 0;
+
+int main(void) {
+    NPCondition *c = [[NPCondition alloc] init];
+    g_c = c;
+
+    // J1：tryLock 两态
+    int j1 = [c tryLock] && ![c tryLock];
+    [c unlock];
+    j1 = j1 && [c tryLock];
+    [c unlock];
+    printf("%s\n", j1 ? "J1 ok" : "J1 FAIL");
+
+    // J2：signal 握手
+    NPThread *t = [[NPThread alloc] initWithBlock:^{
+        [g_c lock];
+        g_state = 1;
+        [g_c signal];
+        [g_c unlock];
+    }];
+    [t start];
+    [c lock];
+    while (g_state == 0) {
+        [c wait];              // while 重查：假唤醒安全
+    }
+    [c unlock];
+    [t join];
+    printf("%s\n", g_state == 1 ? "J2 ok" : "J2 FAIL");
+
+    // J3：broadcast 双方放行（两种到达时序同收敛）
+    g_state = 0;
+    NPThread *a = [[NPThread alloc] initWithBlock:^{
+        [g_c lock];
+        while (g_state == 0) { [g_c wait]; }
+        g_w1 = 1;
+        [g_c unlock];
+    }];
+    NPThread *b = [[NPThread alloc] initWithBlock:^{
+        [g_c lock];
+        while (g_state == 0) { [g_c wait]; }
+        g_w2 = 1;
+        [g_c unlock];
+    }];
+    [a start];
+    [b start];
+    [c lock];
+    g_state = 1;
+    [c broadcast];
+    [c unlock];
+    [a join];
+    [b join];
+    printf("%s\n", (g_w1 && g_w2) ? "J3 ok" : "J3 FAIL");
+    return 0;
+}

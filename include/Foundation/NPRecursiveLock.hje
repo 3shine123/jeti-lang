@@ -1,0 +1,30 @@
+#ifndef NPRECURSIVELOCK_NH
+#define NPRECURSIVELOCK_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPRecursiveLock —— 可重入互斥锁（对应 ObjC 的 NSRecursiveLock）。
+//
+// 与 NPLock 同一套原语（`__atomic_*` 自旋），额外记录持有者与递归深度。
+//
+// 持有者识别**不引入 pthread**：用 `__thread` 变量的地址作线程令牌（每个线程
+// 的 TLS 地址唯一），运行期已用 `__thread` 存异常状态，是既有先例。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 同一线程重复 `-lock` 只增加深度（不阻塞），`-unlock` 递减；深度归零才真正
+//   释放——与 NSRecursiveLock 一致。
+// - 仍受协作式单线程运行期约束（见 NPLock 的诚实边界）：真锁、但正常程序里
+//   不竞争；没有 `-lockBeforeDate:`。
+@interface NPRecursiveLock : NPObject {
+@public
+    int    _flag;    // 0 = 未持有，1 = 已持有
+    int    _depth;   // 递归深度
+    void  *_owner;   // 持有者线程令牌（`__thread` 变量地址）
+}
+- (void)lock;
+- (void)unlock;
+- (BOOL)tryLock;
+- (BOOL)isLocked;
+@end
+
+#endif

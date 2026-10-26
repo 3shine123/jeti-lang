@@ -1,0 +1,50 @@
+#ifndef NPTHREAD_NH
+#define NPTHREAD_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPThread —— 线程对象（对应 ObjC 的 NSThread）。
+//
+// 建立在运行期线程层之上（include/jeti/runtime.h 的 jeti_thread_*，hosted 双
+// 后端 Win32/pthread）。Foundation 为 MRC：线程体的块用 _Block_copy 持有，
+// 线程运行期间 jeti_retain(self)，结束后释放。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - `-start` 启动**真线程**（OS 调度、与主线程并行）；`-join` 等待结束。
+//   ObjC 的 NSThread 没有 join，这里补上（等待一个自己启动的线程是常见需求）。
+// - `-cancel` 是**协作式**取消：只置标志，线程体须自行检查 `-isCancelled`
+//   并提前返回（ObjC 同语义，NSThread 也不强杀线程）。
+// - `+currentThread` 不做：需要 TLS 反查当前 NPThread 对象，v1 不值得；
+//   线程体直接捕获 self 查 `-isCancelled`。
+// - 线程内未建 autorelease 池——Jeti 的池本就是 __thread 每线程一份，首次
+//   `@autoreleasepool` 即 lazy 建（与 ObjC 行为一致，无需显式管理）。
+// - `-ffreestanding` 下不可用：`-start` 返回 NO（裸机没有线程层）。
+@interface NPThread : NPObject {
+@private
+    void *_thread;      // jeti_thread_t*（join/detach 后置 NULL）
+    void *_body;        // void(^)(void)，_Block_copy 的副本（存 void*：block 类型 ivar 的解析有缺口）
+    void *_mu;          // jeti_mutex_t*（保护状态位）
+    int _started;
+    int _finished;
+    int _joined;
+    int _cancelled;
+}
+// 以块构造线程体；start 前可改（无 setter，重建对象即可）。
+- (instancetype)initWithBlock:(void (^)(void))block;
+// 启动。只能成功一次；再次调用返回 NO。失败返回 NO。
+- (BOOL)start;
+// 等待线程结束（未启动直接返回）。join 后对象不可再 start。
+- (void)join;
+// 启动并分离：调用方拿不到 join 机会，线程自行回收。
+- (BOOL)startDetached;
+// 协作式取消：置标志；线程体用 -isCancelled 自查。
+- (void)cancel;
+- (BOOL)isCancelled;
+- (BOOL)isStarted;
+- (BOOL)isFinished;
+- (BOOL)isExecuting;
+// ObjC 对齐的便捷入口：构造 + startDetached。
++ (void)detachNewThreadWithBlock:(void (^)(void))block;
+@end
+
+#endif

@@ -1,0 +1,22 @@
+// 审计面 3：闭包捕获（块延长生命周期）
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+int main(void) {
+    /* B1：强变量被块捕获 → ARC 不在作用域末释放（块接管）→ 不判泄漏 */
+    NPObject *captured = [[NPObject alloc] init];
+    void (^blk)(void) = ^{ (void)captured; };
+    blk();
+
+    /* B2：块捕获 + 块本身存到局部 → 块对象自身逃逸 → 不判泄漏 */
+    NPObject *c2 = [[NPObject alloc] init];
+    void (^held)(void) = ^{ (void)c2; printf("held\n"); };
+    held();
+    (void)held;
+
+    /* B3：未捕获的普通局部 → 照常释放 → freed */
+    NPObject *plain = [[NPObject alloc] init];
+    (void)plain;
+
+    return 0;
+}

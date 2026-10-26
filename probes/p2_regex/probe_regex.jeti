@@ -1,0 +1,55 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+static void m(const char *pat, const char *txt) {
+    NPRegularExpression *re = [NPRegularExpression regularExpressionWithPattern:S(pat)];
+    if (!re) { printf("  /%s/ 编译失败\n", pat); return; }
+    int loc = [re firstMatchLocationInString:S(txt)];
+    int len = [re firstMatchLengthInString:S(txt)];
+    int cnt = [re numberOfMatchesInString:S(txt)];
+    printf("  /%s/ vs \"%s\": loc=%d len=%d count=%d groups=%d\n",
+           pat, txt, loc, len, cnt, [re numberOfCaptureGroups]);
+}
+
+static void bad(const char *pat) {
+    NPRegularExpression *re = [NPRegularExpression regularExpressionWithPattern:S(pat)];
+    printf("  /%s/ -> %s\n", pat, re ? "接受(非预期)" : "nil");
+}
+
+int main(void) {
+    printf("--- 字面量/点/类 ---\n");
+    m("abc", "xxabcxx");
+    m("a.c", "abc");
+    m("[a-z]+", "12abc34");
+    m("[^0-9]+", "12abc34");
+    printf("--- 转义类 ---\n");
+    m("\\d+", "ab123cd");
+    m("\\w+", "  hi_1  ");
+    m("\\s", "a b");
+    printf("--- 锚点 ---\n");
+    m("^abc", "abcx");
+    m("^abc", "xabc");
+    m("abc$", "xabc");
+    m("^abc$", "abc");
+    printf("--- 量词 ---\n");
+    m("ab*", "a");
+    m("ab+", "abbb");
+    m("ab?", "a");
+    m("a{2,3}", "aaaa");
+    m("a{2}", "aaaa");
+    printf("--- 选择/分组 ---\n");
+    m("cat|dog", "a dog");
+    m("(ab)+", "ababab");
+    m("(?:ab)+", "abab");
+    m("(a|b)+c", "abac");
+    printf("--- 非法模式 ---\n");
+    bad("(");
+    bad("[a");
+    bad("a{2,1}");
+    bad("\\1");
+    bad("(?=x)");
+    bad("a*?");
+    return 0;
+}

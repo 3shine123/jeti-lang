@@ -1,0 +1,37 @@
+#ifndef NPCONDITION_NH
+#define NPCONDITION_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPCondition —— 条件变量（对应 ObjC 的 NSCondition：mutex + cond 一体）。
+//
+// 建立在运行期线程层之上（jeti_mutex_*/jeti_cond_*，hosted 双后端 Win32/POSIX）。
+// 与 ObjC 一致的契约：`-wait` 前必须持有内置锁，返回时重新持有（可能被
+// 假唤醒，判定用 while 循环——用法见 golden 35/36）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 无 `-waitUntilDate:`（限次等待需要平台超时语义，v1 不做；需要超时请用
+//   NPConditionLock 形态的轮询或 OS 级机制）。
+// - `-signal` 唤醒**至多一个**等待者，`-broadcast` 唤醒全部（对齐 ObjC 的
+//   signal/broadcast，非 POSIX 的"至多一个"承诺强度差异见平台文档）。
+// - `-ffreestanding` 下不可用：lock/wait 等 no-op 但 wait 永不返回唤醒
+//   （裸机没有并发执行体，本类整体不应在裸机使用——探针与 golden 均标注）。
+@interface NPCondition : NPObject {
+@private
+    void *_mu;      // jeti_mutex_t*
+    void *_cv;      // jeti_cond_t*
+}
+- (instancetype)init;
+- (void)dealloc;
+// 内置锁。
+- (void)lock;
+- (void)unlock;
+- (BOOL)tryLock;
+// 等待：释放内置锁并挂起，signal/broadcast 后重新持有锁返回。
+// 必须已持有内置锁（未持有是调用方 bug；平台返回伪唤醒）。
+- (void)wait;
+- (void)signal;
+- (void)broadcast;
+@end
+
+#endif

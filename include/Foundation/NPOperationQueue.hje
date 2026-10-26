@@ -1,0 +1,62 @@
+#ifndef NPOPERATIONQUEUE_NH
+#define NPOPERATIONQUEUE_NH
+
+#import <Foundation/NPObject.hje>
+
+// 队列容量与线程池上限（.hje 自包含：ivar 布局客户端可见）。
+#ifndef NP_OQ_CAP
+#define NP_OQ_CAP 256
+#endif
+#ifndef NP_OQ_MAX_THREADS
+#define NP_OQ_MAX_THREADS 16
+#endif
+
+// NPOperationQueue —— 后台执行队列（对应 ObjC 的 NSOperationQueue）。
+//
+// 建立在 NPThread + NPCondition 之上：常驻工作线程池，操作块 FIFO 出队执行。
+// `maxConcurrentOperationCount` 决定池宽（1 = 串行队列，语义与 ObjC 一致）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **操作是裸块**：没有 NSOperation 对象、没有依赖图（addDependency:）、
+//   没有单独操作的 completionBlock。批量完成请用 -waitUntilAllOperationsAreFinished。
+// - `-waitUntilAllOperationsAreFinished` 只等**已入队**的操作排空；等待期间
+//   新入队的操作会被继续执行到完成（与 ObjC 语义一致）。
+// - `-cancelAllOperations` 是协作式：队列停止派发**未开始**的操作并置全局
+//   取消标志；已开跑的操作须自行检查（用队列的 -isCancelled，或自备
+//   NPThread）。
+// - `-suspended` 暂停派发：已在跑的不受影响，入队照常（ObjC 同语义）。
+// - 无优先级/QoS：v1 全部同优先级 FIFO。
+// - `-ffreestanding` 下不可用（无线程层）：addOperation 静默不执行、返回后
+//   operationCount 恒 0——裸机不应使用本类。
+@interface NPOperationQueue : NPObject {
+@private
+    void *_pending[NP_OQ_CAP];     // 已 _Block_copy 的操作块（存 void*：block 类型 ivar 的解析有缺口）
+    int _head;
+    int _count;
+    int _maxConcurrent;            // 1 = 串行
+    int _suspended;
+    int _cancelled;
+    int _spawned;                  // 已创建的工作线程数
+    int _busy;                     // 正在执行操作的线程数
+    int _quit;                     // 唤醒工作线程退出（dealloc 用）
+    void *_mu;                     // jeti_mutex_t*
+    void *_cv;                     // jeti_cond_t*（工作线程等操作 / waitUntilAll）
+    void *_threads[NP_OQ_MAX_THREADS];
+}
++ (NPOperationQueue *)mainQueue;          // 串行（maxConcurrent = 1）
++ (NPOperationQueue *)queue;              // 默认并发（maxConcurrent = 4）
+- (instancetype)init;
+- (void)dealloc;
+- (void)setMaxConcurrentOperationCount:(int)count;   // 运行中可调（不缩已建池）
+- (int)maxConcurrentOperationCount;
+- (void)addOperationWithBlock:(void (^)(void))block; // 满队列时阻塞等待容量
+- (int)operationCount;                    // 已入队未完成（含执行中）
+- (void)waitUntilAllOperationsAreFinished;
+- (void)cancelAllOperations;
+- (void)setSuspended:(BOOL)flag;
+- (BOOL)isSuspended;
+- (BOOL)isCancelled;
+- (BOOL)isPaused;                          // = isSuspended（易读别名）
+@end
+
+#endif

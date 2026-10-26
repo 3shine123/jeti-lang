@@ -1,0 +1,70 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static jeti_mutex_t *g_mu = NULL;
+static int g_sum = 0;
+
+int main(void) {
+    g_mu = jeti_mutex_create();
+
+    // 串行队列：10 个操作按 FIFO 各 +1，waitUntilAll 后必为 10
+    NPOperationQueue *serial = [NPOperationQueue mainQueue];
+    printf("serial_max=%d\n", [serial maxConcurrentOperationCount]);
+    for (int i = 0; i < 10; i++) {
+        [serial addOperationWithBlock:^{
+            jeti_mutex_lock(g_mu);
+            g_sum++;
+            jeti_mutex_unlock(g_mu);
+        }];
+    }
+    [serial waitUntilAllOperationsAreFinished];
+    printf("serial_sum=%d count=%d\n", g_sum, [serial operationCount]);
+
+    // 并发队列：100 个操作全部完成后总数确定（不关心中间交错）
+    NPOperationQueue *conc = [[NPOperationQueue alloc] init];
+    [conc setMaxConcurrentOperationCount:4];
+    printf("conc_max=%d\n", [conc maxConcurrentOperationCount]);
+    for (int i = 0; i < 100; i++) {
+        [conc addOperationWithBlock:^{
+            jeti_mutex_lock(g_mu);
+            g_sum += 1;
+            jeti_mutex_unlock(g_mu);
+        }];
+    }
+    [conc waitUntilAllOperationsAreFinished];
+    printf("conc_sum=%d count=%d\n", g_sum, [conc operationCount]);
+
+    // 暂停/恢复：暂停时入队的操作不会被消费（count 稳定），恢复后完成
+    NPOperationQueue *q3 = [[NPOperationQueue alloc] init];
+    [q3 setMaxConcurrentOperationCount:1];
+    [q3 setSuspended:YES];
+    printf("suspended=%d\n", [q3 isSuspended]);
+    for (int i = 0; i < 3; i++) {
+        [q3 addOperationWithBlock:^{
+            jeti_mutex_lock(g_mu);
+            g_sum += 1;
+            jeti_mutex_unlock(g_mu);
+        }];
+    }
+    // 排空既有操作后，暂停的队列不消费新块：让 mainQueue 帮忙同步一个探针
+    __block int drained = 0;
+    [serial addOperationWithBlock:^{ drained = 1; }];
+    [serial waitUntilAllOperationsAreFinished];
+    int during = [q3 operationCount];     // 3 个操作应仍在队列里
+    [q3 setSuspended:NO];
+    [q3 waitUntilAllOperationsAreFinished];
+    printf("pause: during>0=%d after_sum=%d\n", during == 3, g_sum);
+
+    // 取消：清空未开始的操作，operationCount 归零
+    NPOperationQueue *q4 = [[NPOperationQueue alloc] init];
+    [q4 setMaxConcurrentOperationCount:1];
+    [q4 setSuspended:YES];
+    for (int i = 0; i < 5; i++) {
+        [q4 addOperationWithBlock:^{ }];
+    }
+    [q4 cancelAllOperations];
+    [q4 setSuspended:NO];
+    [q4 waitUntilAllOperationsAreFinished];
+    printf("cancel: cancelled=%d count=%d\n", [q4 isCancelled], [q4 operationCount]);
+    return 0;
+}

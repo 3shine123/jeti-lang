@@ -1,0 +1,28 @@
+// 审计面 5：C 接口与对象系统之间的转换
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+@interface Box : NPObject
+@end
+
+@implementation Box
+@end
+
+int main(void) {
+    /* X1：对象 → void * → 对象往返，ARC 视角不变 → freed */
+    Box *b = [[Box alloc] init];
+    void *raw = (void *)b;
+    Box *back = (Box *)raw;
+    printf("roundtrip %d\n", back == b);
+
+    /* X2：经 C 结构体字段短暂持对象（无所有权语义，仅别名）→ freed */
+    Box *alias = (Box *)raw;
+    (void)alias;
+
+    /* X3：char * 与 NPString 互转（工厂返回 +0，不释放）→ freed */
+    NPString *s = [NPString stringWithUTF8String:"interop"];
+    const char *c = [s UTF8String];
+    printf("interop %s\n", c);
+
+    return 0;
+}

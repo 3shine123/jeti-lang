@@ -1,0 +1,65 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+// NPCondition 探针：全部握手式（等待方阻塞到被 signal 才继续），无时序依赖。
+// 结果均在 join 后读取。
+
+static NPCondition *g_cond = NULL;
+static int g_state = 0;        // 受 g_cond 内置锁保护
+
+int main(void) {
+    // tryLock 两态
+    NPCondition *c = [[NPCondition alloc] init];
+    printf("create=%d\n", c != NULL);
+    printf("try_idle=%d\n", [c tryLock]);
+    printf("try_busy=%d\n", [c tryLock]);
+    [c unlock];
+
+    // signal 握手：主线程 wait，工作线程置状态后 signal → 主线程醒来读到
+    g_cond = c;
+    NPThread *t1 = [[NPThread alloc] initWithBlock:^{
+        [g_cond lock];
+        g_state = 1;
+        [g_cond signal];
+        [g_cond unlock];
+    }];
+    [t1 start];
+    [c lock];
+    while (g_state == 0) {
+        [c wait];              // 假唤醒安全：while 重查
+    }
+    [c unlock];
+    [t1 join];
+    printf("signal_handshake=%d\n", g_state == 1);
+
+    // broadcast：两个等待线程都被唤醒（各持一个计数的 +1，握手两次）
+    g_state = 0;
+    static int w1 = 0;
+    static int w2 = 0;
+    NPThread *a = [[NPThread alloc] initWithBlock:^{
+        [g_cond lock];
+        while (g_state == 0) { [g_cond wait]; }
+        w1 = 1;
+        [g_cond unlock];
+    }];
+    NPThread *b = [[NPThread alloc] initWithBlock:^{
+        [g_cond lock];
+        while (g_state == 0) { [g_cond wait]; }
+        w2 = 1;
+        [g_cond unlock];
+    }];
+    [a start];
+    [b start];
+    // 稍候再广播：给两个等待者入队的时间片（非确定性来源仅此一处，
+    // 即便都还没 wait，broadcast 也已发出——POSIX 语义下後续 wait 会
+    // 伪唤醒返回；两个 worker 的 while 在 state==0 时会继续等，
+    // 因此用"先锁主线程置状态再广播"保证确定性：
+    [c lock];
+    g_state = 1;
+    [c broadcast];
+    [c unlock];
+    [a join];
+    [b join];
+    printf("broadcast_both=%d%d\n", w1, w2);
+    return 0;
+}

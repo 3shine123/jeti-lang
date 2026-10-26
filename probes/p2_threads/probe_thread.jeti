@@ -1,0 +1,49 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static jeti_mutex_t *g_mu = NULL;
+static int g_counter = 0;
+static NPThread *g_worker = NULL;
+
+int main(void) {
+    // 1) join 语义：线程体对共享计数 +1000（带锁），join 后读值确定
+    g_mu = jeti_mutex_create();
+    NPThread *t = [[NPThread alloc] initWithBlock:^{
+        for (int i = 0; i < 1000; i++) {
+            jeti_mutex_lock(g_mu);
+            g_counter++;
+            jeti_mutex_unlock(g_mu);
+        }
+    }];
+    printf("before: started=%d finished=%d executing=%d\n",
+           [t isStarted], [t isFinished], [t isExecuting]);
+    int ok = [t start];
+    printf("start=%d executing=%d\n", ok, [t isExecuting]);
+    [t join];
+    printf("after join: counter=%d finished=%d executing=%d\n",
+           g_counter, [t isFinished], [t isExecuting]);
+    printf("restart=%d\n", [t start]);     // 只能启动一次
+
+    // 2) 协作式取消：线程体见到 isCancelled 提前退出
+    g_worker = [[NPThread alloc] initWithBlock:^{
+        for (int i = 0; i < 1000000; i++) {
+            if ([g_worker isCancelled]) { return; }
+            g_counter++;
+        }
+    }];
+    [g_worker start];
+    [g_worker cancel];
+    [g_worker join];
+    printf("cancel early=%d\n", g_counter < 1000000);
+
+    // 3) detach：startDetached 后对象可立即释放（trampoline 持有）
+    [NPThread detachNewThreadWithBlock:^{
+        jeti_mutex_lock(g_mu);
+        g_counter += 100;
+        jeti_mutex_unlock(g_mu);
+    }];
+    // 给一点时间片让 detached 线程跑完（探针专用；正式测试不依赖其完成时序）
+    for (volatile int i = 0; i < 200000; i++) { }
+    printf("detach contributed=%d\n", g_counter >= 1100);
+    return 0;
+}

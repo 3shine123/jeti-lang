@@ -1,0 +1,60 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static void show(NPCalendar *cal, double secs) {
+    NPDate *d = [NPDate dateWithTimeIntervalSince1970:secs];
+    NPDateComponents *c = [cal componentsFromDate:d];
+    if (!c) { printf("  %lld -> nil\n", (long long)secs); return; }
+    printf("  %.0f -> %04d-%02d-%02d %02d:%02d:%02d wd=%d\n", secs,
+           [c year], [c month], [c day], [c hour], [c minute], [c second], [c weekday]);
+}
+
+int main(void) {
+    NPCalendar *cal = [NPCalendar currentCalendar];
+    printf("--- 分解（UTC） ---\n");
+    show(cal, 0);
+    show(cal, 1792931696);
+    show(cal, -1);
+    show(cal, 1792886400);
+
+    printf("--- 构造往返 ---\n");
+    NPDateComponents *c = [NPDateComponents components];
+    [c setYear:2026]; [c setMonth:10]; [c setDay:25];
+    [c setHour:12]; [c setMinute:34]; [c setSecond:56];
+    NPDate *d = [cal dateFromComponents:c];
+    printf("  2026-10-25 12:34:56 -> %.0f\n", d ? [d timeIntervalSince1970] : -1);
+
+    printf("--- 某月天数 ---\n");
+    printf("  2024-02=%d 2025-02=%d 2000-02=%d 1900-02=%d 2026-10=%d\n",
+           [cal daysInMonth:2 year:2024], [cal daysInMonth:2 year:2025],
+           [cal daysInMonth:2 year:2000], [cal daysInMonth:2 year:1900],
+           [cal daysInMonth:10 year:2026]);
+
+    printf("--- 星期几（1=周日） ---\n");
+    printf("  1970-01-01=%d 2026-10-25=%d\n",
+           [cal dayOfWeekFromDate:[NPDate dateWithTimeIntervalSince1970:0]],
+           [cal dayOfWeekFromDate:[NPDate dateWithTimeIntervalSince1970:1792886400]]);
+
+    printf("--- 加减天数 ---\n");
+    NPDate *base = [NPDate dateWithTimeIntervalSince1970:1792886400];
+    NPDate *plus = [cal dateByAddingDays:7 toDate:base];
+    NPDate *minus = [cal dateByAddingDays:-1 toDate:base];
+    show(cal, [plus timeIntervalSince1970]);
+    show(cal, [minus timeIntervalSince1970]);
+
+    printf("--- 固定偏移（+480） ---\n");
+    NPCalendar *off = [NPCalendar calendarWithUTCOffsetMinutes:480];
+    show(off, 0);
+
+    printf("--- 非法分量 ---\n");
+    NPDateComponents *bad = [NPDateComponents components];
+    [bad setYear:2026]; [bad setMonth:13]; [bad setDay:1];
+    printf("  month=13 -> %s\n", [cal dateFromComponents:bad] ? "非nil" : "nil");
+    NPDateComponents *bad2 = [NPDateComponents components];
+    [bad2 setYear:2025]; [bad2 setMonth:2]; [bad2 setDay:29];
+    printf("  2025-02-29 -> %s\n", [cal dateFromComponents:bad2] ? "非nil" : "nil");
+    NPDateComponents *bad3 = [NPDateComponents components];
+    [bad3 setMonth:10];
+    printf("  无年份 -> %s\n", [cal dateFromComponents:bad3] ? "非nil" : "nil");
+    return 0;
+}

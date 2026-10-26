@@ -1,0 +1,57 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <stdint.h>
+
+// 探针 1：数组 ivar（NPUUID 注释说"避免数组 ivar 的解析边界"，需实证）
+@interface ProbeBuf : NPObject {
+@public
+    unsigned char _d[40];
+    int _len;
+}
+- (void)fill;
+- (int)sum;
+@end
+
+@implementation ProbeBuf
+- (void)fill { for (int i = 0; i < 40; i++) { _d[i] = (unsigned char)(i % 10); } _len = 40; }
+- (int)sum { int s = 0; for (int i = 0; i < _len; i++) { s += _d[i]; } return s; }
+@end
+
+// 探针 2：struct 局部量 + 128 位加减乘十
+typedef struct { uint64_t hi, lo; } u128;
+
+static u128 u128_from(uint64_t hi, uint64_t lo) { u128 r; r.hi = hi; r.lo = lo; return r; }
+
+static u128 u128_add(u128 a, u128 b) {
+    u128 r;
+    r.lo = a.lo + b.lo;
+    r.hi = a.hi + b.hi + (r.lo < a.lo ? 1 : 0);
+    return r;
+}
+
+static u128 u128_mul10(u128 a, int *ovf) {
+    u128 r;
+    r.lo = a.lo * 10;
+    r.hi = a.hi * 10 + (a.lo >> 60);
+    if (ovf) { *ovf = (a.hi > (UINT64_MAX / 10)) ? 1 : 0; }
+    return r;
+}
+
+int main(void) {
+    ProbeBuf *b = [[ProbeBuf alloc] init];
+    [b fill];
+    printf("array_ivar: len=%d sum=%d d39=%d\n", b->_len, [b sum], b->_d[39]);
+
+    u128 a = u128_from(1, 2);
+    u128 c = u128_add(a, u128_from(0, 3));
+    printf("u128_add: hi=%llu lo=%llu\n", (unsigned long long)c.hi, (unsigned long long)c.lo);
+
+    int ovf = 0;
+    u128 m = u128_mul10(u128_from(0, 12345), &ovf);
+    printf("u128_mul10: hi=%llu lo=%llu ovf=%d\n", (unsigned long long)m.hi, (unsigned long long)m.lo, ovf);
+
+    char buf[32];
+    snprintf(buf, sizeof buf, "%llu", (unsigned long long)9876543210123456789ull);
+    printf("snprintf: %s mod10=%d\n", buf, (int)(9876543210123456789ull % 10));
+    return 0;
+}

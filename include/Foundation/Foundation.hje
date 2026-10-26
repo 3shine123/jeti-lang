@@ -54,6 +54,20 @@
 #import "NPRunLoop.hje"
 #import "NPUUID.hje"
 #import "NPIndexSet.hje"
+#import "NPDecimalNumber.hje"
+#import "NPDateFormatter.hje"
+#import "NPDateComponents.hje"
+#import "NPCalendar.hje"
+#import "NPRegularExpression.hje"
+#import "NPLock.hje"
+#import "NPRecursiveLock.hje"
+#import "NPThread.hje"
+#import "NPCondition.hje"
+#import "NPOperationQueue.hje"
+#import "NPAttributedString.hje"
+#import "NPKeyedArchiver.hje"
+#import "NPKeyedUnarchiver.hje"
+#import "NPURLSession.hje"
 
 // NPAssert — Jeti 断言宏（定参拼写；预处理器尚无 __VA_ARGS__，
 // 变参格式串版本待预处理器支持后补）。断言失败抛 NPError：

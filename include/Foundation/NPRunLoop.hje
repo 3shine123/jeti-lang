@@ -3,6 +3,11 @@
 
 #import <Foundation/NPObject.hje>
 
+// 待执行块的固定容量（`-performBlock:` 的诚实边界之一，见下）。
+#ifndef NP_RL_CAP
+#define NP_RL_CAP 64
+#endif
+
 // NPRunLoop —— 主线程事件泵的 ObjC 面（对应 NSRunLoop 的最小核）。
 //
 // 底层是运行期 timer 注册表 + 任务就绪队列（include/jeti/runtime.h 的
@@ -22,18 +27,29 @@
 //   mode 相关 API（-runMode:beforeDate: 等）待真实需求出现再加。
 // - `-poll` 不是 ObjC 形状（NSRunLoop 的 `-run` 之外没有对应物），它是 GUI/
 //   嵌入式宿主每轮事件循环驱一泵的合法入口——应用代码不需要它。
+// - `-performBlock:` 是"在主 run loop 上执行"的入口（对齐 ObjC 的
+//   -performSelectorOnMainThread: 家族的 block 形态）：入队即返回，块在下一拍
+//   `-poll`/`-run` 驱动时按 FIFO 执行。线程安全（可从任何线程调用，hosted）；
+//   **容量固定 64**，满时返回 NO（不静默丢弃——调用方可检查返回值）；
+//   -ffreestanding 下不可用（返回 NO，裸机没有这一层调度）。
 @interface NPRunLoop : NPObject {
 @private
-    int _placeholder;
+    void *_pending[NP_RL_CAP];   // 已 _Block_copy 的 void(^)(void)（NP_RL_CAP 定义在 .jeti）
+    int _pendingCount;
+    void *_mu;                   // jeti_mutex_t*（hosted；freestanding 为 NULL）
 }
 // 主线程的 run loop（进程级单例）。
 + (NPRunLoop *)mainRunLoop;
 // 阻塞驱动：触发到期 timer、清空就绪队列，两者全空即返回。
 // hosted 下在 deadline 之间睡眠；-ffreestanding 无此实现（主循环自泵）。
 - (void)run;
-// 非阻塞驱动一次：触发全部到期 timer，再清空当前就绪队列。给 GUI/嵌入式
-// 宿主的每轮事件循环用；应用代码请用 -run。
+// 非阻塞驱动一次：先排空待执行块，再触发全部到期 timer、清空就绪队列。
+// 给 GUI/嵌入式宿主的每轮事件循环用；应用代码请用 -run。
 - (void)poll;
+// 把 block 排进主 run loop，下一拍执行（FIFO）。满时返回 NO。
+- (BOOL)performBlock:(void (^)(void))block;
+// 当前待执行的块数（诊断用）。
+- (int)pendingCount;
 @end
 
 #endif

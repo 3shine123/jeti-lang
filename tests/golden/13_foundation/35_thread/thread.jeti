@@ -1,0 +1,103 @@
+/* NPThread golden（声明伞头 + 预编译库；真线程，运行期线程层双后端）。
+ *
+ * 全部用例**确定性**：不依赖调度时序——
+ *   I1  join 语义：线程体带锁 +1000，join 后读值必为 1000
+ *   I2  生命周期：启动前/执行中/结束后三态 + 不可重复启动
+ *   I3  协作式取消：cancel 先于 start 置位 → 线程体立即退出（无竞态）
+ *   I4  detach：detached 线程以条件变量握手回报完成（阻塞等待，无时序依赖）
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   I1 ok … I4 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static jeti_mutex_t *g_mu = NULL;
+static jeti_cond_t *g_cv = NULL;
+static int g_counter = 0;
+static int g_detached_done = 0;
+static NPThread *g_self = NULL;   // 供线程体反查 -isCancelled
+
+int main(void) {
+    g_mu = jeti_mutex_create();
+    g_cv = jeti_cond_create();
+
+    // I1：join 后计数确定
+    NPString *k1 = [NPString stringWithUTF8String:"x"];
+    (void)k1;
+    NPThread *t1 = [[NPThread alloc] initWithBlock:^{
+        for (int i = 0; i < 1000; i++) {
+            jeti_mutex_lock(g_mu);
+            g_counter++;
+            jeti_mutex_unlock(g_mu);
+        }
+    }];
+    [t1 start];
+    [t1 join];
+    if (g_counter == 1000 && [t1 isFinished] && ![t1 isExecuting]) {
+        printf("I1 ok\n");
+    } else {
+        printf("I1 FAIL %d\n", g_counter);
+    }
+
+    // I2：生命周期（新线程；join 前后状态翻转；不可二次启动）
+    NPThread *t2 = [[NPThread alloc] initWithBlock:^{
+        jeti_mutex_lock(g_mu);
+        g_counter += 10;
+        jeti_mutex_unlock(g_mu);
+    }];
+    int before = ![t2 isStarted] && ![t2 isFinished] && ![t2 isExecuting];
+    [t2 start];
+    int running = [t2 isStarted];          // finished 与否不依赖时序
+    [t2 join];
+    int after = [t2 isFinished] && ![t2 isExecuting];
+    int restart = [t2 start];              // 第二次 start 必须 NO
+    if (before && running && after && !restart) {
+        printf("I2 ok\n");
+    } else {
+        printf("I2 FAIL %d%d%d%d\n", before, running, after, restart);
+    }
+
+    // I3：cancel 先于 start → 线程体首轮即退出（确定性，无调度依赖）
+    g_self = [[NPThread alloc] initWithBlock:^{
+        if ([g_self isCancelled]) { return; }   // 已置位 → 必走这里
+        jeti_mutex_lock(g_mu);
+        g_counter += 100000;                    // 不应发生
+        jeti_mutex_unlock(g_mu);
+    }];
+    [g_self cancel];
+    int flag = [g_self isCancelled];
+    [g_self start];
+    [g_self join];
+    if (flag && g_counter == 1010) {
+        printf("I3 ok\n");
+    } else {
+        printf("I3 FAIL flag=%d counter=%d\n", flag, g_counter);
+    }
+
+    // I4：detached 线程 + 条件变量握手（阻塞等 signal，结果与调度时序无关）
+    NPThread *t4 = [[NPThread alloc] initWithBlock:^{
+        jeti_mutex_lock(g_mu);
+        g_counter += 100;
+        g_detached_done = 1;
+        jeti_cond_signal(g_cv);
+        jeti_mutex_unlock(g_mu);
+    }];
+    int started4 = [t4 startDetached];
+    jeti_mutex_lock(g_mu);
+    while (!g_detached_done) {
+        jeti_cond_wait(g_cv, g_mu);        // 等到为止：确定性
+    }
+    jeti_mutex_unlock(g_mu);
+    @noarc {
+        [t4 release];                      // detached：自行回收（trampoline 持有）
+    }
+    if (started4 && g_detached_done && g_counter == 1110) {
+        printf("I4 ok\n");
+    } else {
+        printf("I4 FAIL %d %d %d\n", started4, g_detached_done, g_counter);
+    }
+
+    jeti_mutex_destroy(g_mu);
+    jeti_cond_destroy(g_cv);
+    return 0;
+}

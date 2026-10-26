@@ -32,6 +32,22 @@ outdir="${1:-target/foundation}"
 mkdir -p "$outdir"
 lib="$outdir/libjetifoundation.a"
 
+# Optimisation flags for the generated C. `-O3` is the default; the archive is
+# consumed by other builds, so the semantics- and portability-changing flags
+# stay opt-in:
+#
+#   FOUNDATION_CFLAGS="-O3 -ffast-math -mcpu=native" ./tools/build-foundation-lib.sh
+#
+# Two measured caveats before you reach for the aggressive set:
+#   * `-ffast-math` drops IEEE semantics — clang folds `NaN == NaN` to TRUE,
+#     so NaN-guarded logic in NPNumber/NPValue/NPJSONSerialization/NPDate can
+#     silently take the wrong branch (verified with a probe on this toolchain).
+#   * `-mcpu=native` bakes this machine's CPU features into the archive, so the
+#     `.a` may SIGILL on a different CPU. It is accepted by Apple clang here.
+# LTO is deliberately absent: the archive is linked by clients that jetic
+# compiles without it, so it would buy nothing.
+cflags="${FOUNDATION_CFLAGS:--O3}"
+
 # Mach-O prepends `_` to every C symbol; ELF uses the name as written.
 sym_prefix=""
 case "$(uname -s)" in
@@ -121,8 +137,15 @@ for gm in include/Foundation/*.jeti; do
     { echo '#import <Foundation/Foundation.hje>'; cat "$gm"; } > "$wrap"
     c="$outdir/$name.c"
     o="$outdir/$name.o"
-    "$jetic" -rewrite-jeti "$wrap" -o "$c" -I include -I include/Foundation --slots "$slots"
-    clang -c -w "$c" -o "$o" -I include
+    # MRC by design (user decision): Foundation is the layer that implements
+    # the memory primitives, so it manages retain/release explicitly and is
+    # compiled with ARC insertion disabled — never at the mercy of the
+    # checker's ARC analysis for its own correctness.
+    "$jetic" -rewrite-jeti "$wrap" -o "$c" -I include -I include/Foundation -fno-jeti-arc --slots "$slots"
+    # -fblocks：Foundation 头里有 block 形参（enumerateUsingBlock: 等），原型
+    # 展开即含 `(^`。Apple clang 默认开；Linux/上游 clang 必须显式给，否则
+    # 归档里的原型就编不过（链接侧的 BlocksRuntime 由 jetic 在客户端补）。
+    clang -c -w -fblocks $cflags "$c" -o "$o" -I include
     objs+=("$o")
     echo "  $name"
 done

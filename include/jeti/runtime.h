@@ -462,6 +462,46 @@ long jeti_syncLock(void *object);
 void jeti_syncUnlock(long bucket);
 void jeti_syncAutoCleanup(void *ptr);   // cleanup attr: long* → unlock
 
+// ─── Threads / mutexes / condition variables (hosted only) ──────────────────
+//
+// 真实线程层（NPThread/NPCondition/NPOperationQueue 的地基）。双后端：
+// Win32（CRITICAL_SECTION + CONDITION_VARIABLE + _beginthreadex）与 POSIX
+// pthread。原语一律堆上不透明结构——平台头文件（windows.h/pthread.h）只在
+// runtime.c 里展开，不进生成代码的翻译单元。
+//
+// 引用计数与此配套改为原子操作（见 jeti_retain/jeti_release）：多线程共享
+// 对象是安全前提。仍不原子的：weak 表与 autorelease 池栈（后者本就是
+// __thread 每线程一份；weak 表的跨线程竞争按"单写者"约定，跨线程弱引用
+// 请用锁保护——与 ObjC 不同，这里诚实写明而不是假装原子）。
+// freestanding 下整节不编译（裸机单核，无并发执行体）。
+#ifndef __JETI_FREESTANDING
+
+typedef struct jeti_thread jeti_thread_t;
+// 0 = 成功，非 0 = 创建失败；句柄堆分配，join/detach 后由运行期释放。
+int jeti_thread_spawn(void *(*fn)(void *), void *arg, jeti_thread_t **out);
+// 等待线程结束（取回 fn 的返回值），随后释放句柄。线程不可 join 两次。
+int jeti_thread_join(jeti_thread_t *t, void **ret_out);
+// 分离：线程自行回收，句柄立即释放，之后不可 join。
+int jeti_thread_detach(jeti_thread_t *t);
+
+typedef struct jeti_mutex jeti_mutex_t;
+jeti_mutex_t *jeti_mutex_create(void);
+void jeti_mutex_destroy(jeti_mutex_t *m);
+void jeti_mutex_lock(jeti_mutex_t *m);
+void jeti_mutex_unlock(jeti_mutex_t *m);
+// 1 = 获取成功；0 = 已被持有（不阻塞）。
+int jeti_mutex_trylock(jeti_mutex_t *m);
+
+typedef struct jeti_cond jeti_cond_t;
+jeti_cond_t *jeti_cond_create(void);
+void jeti_cond_destroy(jeti_cond_t *c);
+// 必须持有 m 才能等待；返回时重新持有 m（平台语义一致）。
+void jeti_cond_wait(jeti_cond_t *c, jeti_mutex_t *m);
+void jeti_cond_signal(jeti_cond_t *c);
+void jeti_cond_broadcast(jeti_cond_t *c);
+
+#endif /* !__JETI_FREESTANDING */
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 #define NP_OBJECT_ISA(obj)        (((np_object_t *)(obj))->isa)

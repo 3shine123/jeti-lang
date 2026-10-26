@@ -322,7 +322,17 @@ static void jeti_rc_trace(const char *op, NPObject *obj, uint32_t rc_after, cons
 
 NPObject *jeti_retain(NPObject *obj) {
     if (!obj) return NULL;
+#ifdef __JETI_FREESTANDING
+    /* 单核裸机：没有并发执行体，普通自增即可（也避免依赖原子内建）。 */
     obj->retain_count++;
+#else
+    /* 多线程安全：引用计数必须原子（见 runtime.h 线程层一节的说明）。 */
+  #if defined(_MSC_VER)
+    _InterlockedExchangeAdd((volatile long *)&obj->retain_count, 1);
+  #else
+    __atomic_add_fetch(&obj->retain_count, 1, __ATOMIC_RELAXED);
+  #endif
+#endif
     if (jeti_rc_debug_enabled())
         jeti_rc_trace("retain", obj, obj->retain_count, NULL);
     return obj;
@@ -330,15 +340,28 @@ NPObject *jeti_retain(NPObject *obj) {
 
 void jeti_release(NPObject *obj) {
     if (!obj) return;
+    int freed = 0;
+#ifdef __JETI_FREESTANDING
     if (obj->retain_count > 0)
         obj->retain_count--;
+    freed = (obj->retain_count == 0);
+#else
+  #if defined(_MSC_VER)
+    /* 返回减之前的值：减到 0 的那一次负责释放。 */
+    freed = (_InterlockedExchangeAdd((volatile long *)&obj->retain_count, -1) == 1);
+  #else
+    freed = (__atomic_sub_fetch(&obj->retain_count, 1, __ATOMIC_ACQ_REL) == 0);
+    if (freed)
+        __atomic_thread_fence(__ATOMIC_ACQUIRE); /* 看见其它线程在释放前的全部写入 */
+  #endif
+#endif
     if (jeti_rc_debug_enabled()) {
         // Under-counting release (already at 0) is a bug worth flagging.
-        const char *note = (obj->retain_count == 0 && obj->isa && obj->isa->dealloc)
+        const char *note = (freed && obj->isa && obj->isa->dealloc)
             ? "dealloc" : NULL;
         jeti_rc_trace("release", obj, obj->retain_count, note);
     }
-    if (obj->retain_count == 0) {
+    if (freed) {
         // Zero weak references BEFORE dealloc: dealloc may free other objects
         // (strong ivars) whose memory holds a weak slot pointing back to us
         // (e.g. a child's `__weak parent`). Zeroing first avoids a use-after-free.
@@ -793,3 +816,190 @@ const char *jeti_argv(int index) {
 int jeti_argc(void) { return 0; }
 const char *jeti_argv(int index) { (void)index; return NULL; }
 #endif
+
+// ─── Threads / mutexes / condition variables (hosted only) ──────────────────
+#ifndef __JETI_FREESTANDING
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600     /* TryEnterCriticalSection / CONDITION_VARIABLE */
+#endif
+#include <windows.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#endif
+
+struct jeti_thread {
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    pthread_t handle;
+#endif
+    void *ret;   /* fn 的返回值，join 时取走（Win32 经 trampoline 写回） */
+};
+
+#ifdef _WIN32
+typedef struct {
+    void *(*fn)(void *);
+    void *arg;
+    jeti_thread_t *t;
+} jeti_thread_arg;
+
+static unsigned __stdcall jeti_thread_trampoline(void *p) {
+    jeti_thread_arg a = *(jeti_thread_arg *)p;
+    free(p);
+    a.t->ret = a.fn(a.arg);
+    return 0;
+}
+#endif
+
+int jeti_thread_spawn(void *(*fn)(void *), void *arg, jeti_thread_t **out) {
+    if (!out) return -1;
+    jeti_thread_t *t = (jeti_thread_t *)calloc(1, sizeof *t);
+    if (!t) return -1;
+#ifdef _WIN32
+    jeti_thread_arg *a = (jeti_thread_arg *)malloc(sizeof *a);
+    if (!a) { free(t); return -1; }
+    a->fn = fn; a->arg = arg; a->t = t;
+    uintptr_t h = _beginthreadex(NULL, 0, jeti_thread_trampoline, a, 0, NULL);
+    if (!h) { free(a); free(t); return -1; }
+    t->handle = (HANDLE)h;
+#else
+    if (pthread_create(&t->handle, NULL, fn, arg) != 0) { free(t); return -1; }
+#endif
+    *out = t;
+    return 0;
+}
+
+int jeti_thread_join(jeti_thread_t *t, void **ret_out) {
+    if (!t) return -1;
+#ifdef _WIN32
+    WaitForSingleObject(t->handle, INFINITE);
+    CloseHandle(t->handle);
+#else
+    void *ret = NULL;
+    pthread_join(t->handle, &ret);
+    t->ret = ret;
+#endif
+    if (ret_out) *ret_out = t->ret;
+    free(t);
+    return 0;
+}
+
+int jeti_thread_detach(jeti_thread_t *t) {
+    if (!t) return -1;
+#ifdef _WIN32
+    CloseHandle(t->handle);
+#else
+    pthread_detach(t->handle);
+#endif
+    free(t);
+    return 0;
+}
+
+struct jeti_mutex {
+#ifdef _WIN32
+    CRITICAL_SECTION cs;
+#else
+    pthread_mutex_t m;
+#endif
+};
+
+jeti_mutex_t *jeti_mutex_create(void) {
+    jeti_mutex_t *m = (jeti_mutex_t *)calloc(1, sizeof *m);
+    if (!m) return NULL;
+#ifdef _WIN32
+    InitializeCriticalSection(&m->cs);
+#else
+    if (pthread_mutex_init(&m->m, NULL) != 0) { free(m); return NULL; }
+#endif
+    return m;
+}
+
+void jeti_mutex_destroy(jeti_mutex_t *m) {
+    if (!m) return;
+#ifdef _WIN32
+    DeleteCriticalSection(&m->cs);
+#else
+    pthread_mutex_destroy(&m->m);
+#endif
+    free(m);
+}
+
+void jeti_mutex_lock(jeti_mutex_t *m) {
+#ifdef _WIN32
+    EnterCriticalSection(&m->cs);
+#else
+    pthread_mutex_lock(&m->m);
+#endif
+}
+
+void jeti_mutex_unlock(jeti_mutex_t *m) {
+#ifdef _WIN32
+    LeaveCriticalSection(&m->cs);
+#else
+    pthread_mutex_unlock(&m->m);
+#endif
+}
+
+int jeti_mutex_trylock(jeti_mutex_t *m) {
+    if (!m) return 0;
+#ifdef _WIN32
+    return TryEnterCriticalSection(&m->cs) ? 1 : 0;
+#else
+    return pthread_mutex_trylock(&m->m) == 0 ? 1 : 0;
+#endif
+}
+
+struct jeti_cond {
+#ifdef _WIN32
+    CONDITION_VARIABLE cv;
+#else
+    pthread_cond_t c;
+#endif
+};
+
+jeti_cond_t *jeti_cond_create(void) {
+    jeti_cond_t *c = (jeti_cond_t *)calloc(1, sizeof *c);
+    if (!c) return NULL;
+#ifndef _WIN32
+    if (pthread_cond_init(&c->c, NULL) != 0) { free(c); return NULL; }
+#endif
+    return c;
+}
+
+void jeti_cond_destroy(jeti_cond_t *c) {
+    if (!c) return;
+#ifndef _WIN32
+    pthread_cond_destroy(&c->c);
+#endif
+    free(c);
+}
+
+void jeti_cond_wait(jeti_cond_t *c, jeti_mutex_t *m) {
+#ifdef _WIN32
+    SleepConditionVariableCS(&c->cv, &m->cs, INFINITE);
+#else
+    pthread_cond_wait(&c->c, &m->m);
+#endif
+}
+
+void jeti_cond_signal(jeti_cond_t *c) {
+#ifdef _WIN32
+    WakeConditionVariable(&c->cv);
+#else
+    pthread_cond_signal(&c->c);
+#endif
+}
+
+void jeti_cond_broadcast(jeti_cond_t *c) {
+#ifdef _WIN32
+    WakeAllConditionVariable(&c->cv);
+#else
+    pthread_cond_broadcast(&c->c);
+#endif
+}
+
+#endif /* !__JETI_FREESTANDING */

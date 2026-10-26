@@ -1,9 +1,39 @@
 #import <Foundation/NPRunLoop.hje>
 #import <Foundation/NPObject.jeti>
 
+#include <stdlib.h>
+
+// NPRunLoop 实现：运行期 timer/就绪队列之上的 ObjC 面 + `-performBlock:`
+// 待执行块队列（Foundation MRC：块用 _Block_copy/_Block_release 显式管理，
+// 队列互斥用运行期线程层的 jeti_mutex——可从任意线程入队）。
+
 // 进程级单例：`+mainRunLoop` 的返回值。惰性创建，永不释放（与 NSRunLoop 的
 // 主 run loop 同寿命）。
-static NPRunLoop *g_mainRunLoop = 0;
+static NPRunLoop *g_mainRunLoop = NULL;
+
+// 排空待执行块：FIFO 逐个取出执行。执行期间新入队的块留到下一拍
+// （不在同一次排空里追新），避免无界递归。
+#ifndef __JETI_FREESTANDING
+static void np_rl_drain(NPRunLoop *self) {
+    for (;;) {
+        void *item = NULL;
+        if (self->_mu) { jeti_mutex_lock((jeti_mutex_t *)self->_mu); }
+        if (self->_pendingCount == 0) {
+            if (self->_mu) { jeti_mutex_unlock((jeti_mutex_t *)self->_mu); }
+            break;
+        }
+        item = self->_pending[0];
+        for (int i = 1; i < self->_pendingCount; i++) {
+            self->_pending[i - 1] = self->_pending[i];
+        }
+        self->_pendingCount--;
+        if (self->_mu) { jeti_mutex_unlock((jeti_mutex_t *)self->_mu); }
+        void (^blk)(void) = (void (^)(void))item;
+        blk();
+        _Block_release(item);
+    }
+}
+#endif
 
 @implementation NPRunLoop
 
@@ -14,15 +44,74 @@ static NPRunLoop *g_mainRunLoop = 0;
     return g_mainRunLoop;
 }
 
+- (instancetype)init {
+    self = [super init];
+    if (!self) { return NULL; }
+    self->_pendingCount = 0;
+    self->_mu = NULL;
+#ifndef __JETI_FREESTANDING
+    self->_mu = jeti_mutex_create();
+#endif
+    return self;
+}
+
+- (void)dealloc {
+#ifndef __JETI_FREESTANDING
+    // 释放残余块（不执行），回收互斥量。
+    for (int i = 0; i < self->_pendingCount; i++) {
+        _Block_release(self->_pending[i]);
+        self->_pending[i] = NULL;
+    }
+    self->_pendingCount = 0;
+    if (self->_mu) {
+        jeti_mutex_destroy((jeti_mutex_t *)self->_mu);
+        self->_mu = NULL;
+    }
+#endif
+    [super dealloc];
+}
+
 - (void)run {
     // 机制层的阻塞泵：deadline 之间睡眠，timer 注册表与就绪队列同时排空
     // 即返回。-ffreestanding 无此符号——裸机主循环自己泵（机制层文档已注）。
+#ifndef __JETI_FREESTANDING
+    np_rl_drain(self);            // run 前先执行已入队的块（其余见诚实边界）
+#endif
     jeti_sched_run_loop();
 }
 
 - (void)poll {
-    // 非阻塞一泵：先到期 timer（回调可入队任务），再清一次就绪队列。
+    // 非阻塞一泵：先排空待执行块，再到期 timer（回调可入队任务），
+    // 最后清一次就绪队列。
+#ifndef __JETI_FREESTANDING
+    np_rl_drain(self);
+#endif
     jeti_sched_run();
+}
+
+- (BOOL)performBlock:(void (^)(void))block {
+#ifndef __JETI_FREESTANDING
+    if (!block) { return NO; }
+    // block 字面量在栈上：入库前必须 copy，执行后 release（两种内存模式一致）。
+    void *copy = _Block_copy(block);
+    if (!copy) { return NO; }
+    if (self->_mu) { jeti_mutex_lock((jeti_mutex_t *)self->_mu); }
+    if (self->_pendingCount >= NP_RL_CAP) {
+        if (self->_mu) { jeti_mutex_unlock((jeti_mutex_t *)self->_mu); }
+        _Block_release(copy);
+        return NO;                // 满：显式失败，不静默丢弃
+    }
+    self->_pending[self->_pendingCount++] = copy;
+    if (self->_mu) { jeti_mutex_unlock((jeti_mutex_t *)self->_mu); }
+    return YES;
+#else
+    (void)block;
+    return NO;                    // freestanding：无这一层调度（诚实边界）
+#endif
+}
+
+- (int)pendingCount {
+    return _pendingCount;
 }
 
 @end

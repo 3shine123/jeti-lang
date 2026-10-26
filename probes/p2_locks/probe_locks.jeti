@@ -1,0 +1,29 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+int main(void) {
+    NPLock *l = [[NPLock alloc] init];
+    printf("init_locked=%d\n", [l isLocked]);
+    printf("try_idle=%d\n", [l tryLock]);
+    printf("after_try=%d\n", [l isLocked]);
+    printf("try_busy=%d\n", [l tryLock]);     // 已持有 → 0
+    [l unlock];
+    printf("after_unlock=%d\n", [l isLocked]);
+    [l lock];
+    printf("relock=%d\n", [l isLocked]);
+    [l unlock];
+
+    NPRecursiveLock *r = [[NPRecursiveLock alloc] init];
+    [r lock];
+    [r lock];
+    [r lock];
+    printf("rec_depth3=%d\n", [r isLocked]);
+    [r unlock];
+    [r unlock];
+    printf("rec_after2=%d\n", [r isLocked]);  // 深度未归零 → 仍持有
+    [r unlock];
+    printf("rec_released=%d\n", [r isLocked]);
+    printf("rec_try=%d\n", [r tryLock]);
+    [r unlock];
+    return 0;
+}

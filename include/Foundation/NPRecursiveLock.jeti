@@ -1,0 +1,60 @@
+#import <Foundation/NPRecursiveLock.hje>
+#import <Foundation/NPObject.jeti>
+
+// NPRecursiveLock 实现：原子自旋 + 线程令牌 + 递归深度。
+//
+// 线程令牌是 `__thread` 变量的地址——每线程唯一，无需 pthread。
+
+static __thread int np_recursive_lock_token;
+
+static void *np_recursive_lock_self(void) {
+    return (void *)&np_recursive_lock_token;
+}
+
+@implementation NPRecursiveLock
+
+- (void)lock {
+    void *me = np_recursive_lock_self();
+    if (_owner == me) {
+        _depth++;          // 同一线程重入：只加深度
+        return;
+    }
+    while (__atomic_exchange_n(&_flag, 1, __ATOMIC_ACQUIRE) != 0) {
+        // 空转等待
+    }
+    _owner = me;
+    _depth = 1;
+}
+
+- (void)unlock {
+    void *me = np_recursive_lock_self();
+    if (_owner != me) {
+        return;            // 非持有者 unlock：忽略（ObjC 亦为未定义行为，这里不崩）
+    }
+    _depth--;
+    if (_depth <= 0) {
+        _depth = 0;
+        _owner = NULL;
+        __atomic_store_n(&_flag, 0, __ATOMIC_RELEASE);
+    }
+}
+
+- (BOOL)tryLock {
+    void *me = np_recursive_lock_self();
+    if (_owner == me) {
+        _depth++;
+        return 1;
+    }
+    if (__atomic_exchange_n(&_flag, 1, __ATOMIC_ACQUIRE) == 0) {
+        _owner = me;
+        _depth = 1;
+        return 1;
+    }
+    return 0;
+}
+
+- (BOOL)isLocked {
+    return (BOOL)(__atomic_load_n(&_flag, __ATOMIC_RELAXED) != 0);
+}
+
+@end

@@ -1,0 +1,21 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+// P1：用户泛型类。接收者 Plain 未声明 put: → 应编译期报错。
+@interface Gen<T> : NPObject
+- (void)put:(T)v;
+@end
+@implementation Gen
+- (void)put:(id)v { }
+@end
+
+@interface Plain : NPObject
+@end
+@implementation Plain
+@end
+
+int main(void) {
+    Plain *p = [[Plain alloc] init];
+    [p put:@"x"];          // 期望：no visible method 'put:' on receiver type 'Plain *'
+    return 0;
+}

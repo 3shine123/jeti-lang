@@ -1,0 +1,67 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+// 运行期线程层探针：直接调 runtime.h 的 jeti_thread_*/jeti_mutex_*/jeti_cond_*。
+// 结果全部在 join 之后读取 → 输出确定。
+
+static jeti_mutex_t *g_mu = NULL;
+static long g_counter = 0;
+static jeti_cond_t *g_cv = NULL;
+static int g_ready = 0;
+
+static void *worker_add(void *arg) {
+    for (int i = 0; i < 100000; i++) {
+        jeti_mutex_lock(g_mu);
+        g_counter++;
+        jeti_mutex_unlock(g_mu);
+    }
+    return arg;
+}
+
+static void *worker_signal(void *arg) {
+    jeti_mutex_lock(g_mu);
+    g_ready = 1;
+    jeti_cond_signal(g_cv);
+    jeti_mutex_unlock(g_mu);
+    return arg;
+}
+
+int main(void) {
+    g_mu = jeti_mutex_create();
+    g_cv = jeti_cond_create();
+    printf("mu=%d cv=%d\n", g_mu != NULL, g_cv != NULL);
+
+    // trylock 两态
+    printf("try_idle=%d\n", jeti_mutex_trylock(g_mu));
+    printf("try_busy=%d\n", jeti_mutex_trylock(g_mu));
+    jeti_mutex_unlock(g_mu);
+
+    // 4 线程 × 100000 互斥自增
+    jeti_thread_t *ths[4];
+    for (int i = 0; i < 4; i++) {
+        ths[i] = NULL;
+        if (jeti_thread_spawn(worker_add, NULL, &ths[i]) != 0) {
+            printf("spawn failed at %d\n", i);
+            return 1;
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        jeti_thread_join(ths[i], NULL);
+    }
+    printf("counter=%ld\n", g_counter);   // 期望 400000
+
+    // 条件变量握手：join 前 worker 必已 signal
+    jeti_thread_t *sig = NULL;
+    jeti_thread_spawn(worker_signal, NULL, &sig);
+    jeti_mutex_lock(g_mu);
+    while (!g_ready) {
+        jeti_cond_wait(g_cv, g_mu);
+    }
+    jeti_mutex_unlock(g_mu);
+    jeti_thread_join(sig, NULL);
+    printf("ready=%d\n", g_ready);
+
+    jeti_mutex_destroy(g_mu);
+    jeti_cond_destroy(g_cv);
+    return 0;
+}

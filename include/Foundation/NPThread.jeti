@@ -1,0 +1,184 @@
+#import <Foundation/NPThread.hje>
+#import <Foundation/NPObject.jeti>
+
+// NPThread 实现：真线程（运行期线程层之上）。Foundation MRC：
+// 块 _Block_copy/_Block_release，线程运行期 jeti_retain(self) 保活。
+
+#ifndef __JETI_FREESTANDING
+
+// 线程入口：跑块 → 置 finished → 释放块与 self。
+// self 由 -start 额外 retain 一次，这里负责配平。
+static void *np_thread_trampoline(void *arg) {
+    NPThread *t = (NPThread *)arg;
+    void (^body)(void) = (void (^)(void))t->_body;
+    if (body) { body(); }
+    jeti_mutex_lock((jeti_mutex_t *)t->_mu);
+    if (t->_body) {
+        _Block_release(t->_body);
+        t->_body = NULL;
+    }
+    t->_finished = 1;
+    jeti_mutex_unlock((jeti_mutex_t *)t->_mu);
+    jeti_release(t);
+    return NULL;
+}
+
+#endif /* !__JETI_FREESTANDING */
+
+@implementation NPThread
+
+- (instancetype)initWithBlock:(void (^)(void))block {
+    self = [super init];
+    if (!self) { return NULL; }
+    _thread = NULL;
+    _body = NULL;
+    _started = 0;
+    _finished = 0;
+    _joined = 0;
+    _cancelled = 0;
+    _mu = NULL;
+#ifndef __JETI_FREESTANDING
+    _mu = jeti_mutex_create();
+#endif
+    if (block) {
+        _body = _Block_copy(block);   // 栈上字面量：持有副本
+    }
+    return self;
+}
+
+- (void)dealloc {
+#ifndef __JETI_FREESTANDING
+    // 收编句柄：用 detach 而非 join——dealloc 可能正跑在工作线程自己的
+    // trampoline 里（最后一个 release 来自线程体末尾），对自己 pthread_join
+    // 返回 EDEADLK、Win32 WaitForSingleObject(自身) 直接挂死；detach 两种
+    // 平台都合法（线程已结束时同样成立）。
+    if (_thread) {
+        jeti_thread_detach((jeti_thread_t *)_thread);
+        _thread = NULL;
+        _joined = 1;
+    }
+    if (_body) {
+        _Block_release(_body);
+        _body = NULL;
+    }
+    if (_mu) {
+        jeti_mutex_destroy((jeti_mutex_t *)_mu);
+        _mu = NULL;
+    }
+#else
+    _thread = NULL;
+    _body = NULL;
+    _mu = NULL;
+#endif
+    [super dealloc];
+}
+
+- (BOOL)start {
+#ifndef __JETI_FREESTANDING
+    if (!_mu || !_body) { return NO; }        // 无体可跑
+    jeti_mutex_lock((jeti_mutex_t *)_mu);
+    if (_started) {
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+        return NO;                            // 只能启动一次
+    }
+    _started = 1;
+    jeti_retain(self);                        // trampoline 负责释放
+    jeti_thread_t *h = NULL;
+    int rc = jeti_thread_spawn(np_thread_trampoline, self, &h);
+    if (rc != 0) {
+        _started = 0;
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+        jeti_release(self);                   // 回滚
+        return NO;
+    }
+    _thread = h;
+    jeti_mutex_unlock((jeti_mutex_t *)_mu);
+    return YES;
+#else
+    return NO;                                // 裸机无线程层（诚实边界）
+#endif
+}
+
+- (BOOL)startDetached {
+#ifndef __JETI_FREESTANDING
+    if (![self start]) { return NO; }
+    jeti_thread_detach((jeti_thread_t *)_thread);   // 句柄由运行期回收
+    _thread = NULL;
+    _joined = 1;                              // 不可再 join
+    return YES;
+#else
+    return NO;
+#endif
+}
+
+- (void)join {
+#ifndef __JETI_FREESTANDING
+    if (_thread) {
+        jeti_thread_join((jeti_thread_t *)_thread, NULL);
+        _thread = NULL;
+        _joined = 1;
+    }
+#endif
+}
+
+- (void)cancel {
+#ifndef __JETI_FREESTANDING
+    if (_mu) {
+        jeti_mutex_lock((jeti_mutex_t *)_mu);
+        _cancelled = 1;
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+    }
+#else
+    _cancelled = 1;
+#endif
+}
+
+- (BOOL)isCancelled {
+#ifndef __JETI_FREESTANDING
+    if (_mu) {
+        jeti_mutex_lock((jeti_mutex_t *)_mu);
+        int v = _cancelled;
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+        return (BOOL)v;
+    }
+#endif
+    return (BOOL)_cancelled;
+}
+
+- (BOOL)isStarted {
+    return (BOOL)_started;
+}
+
+- (BOOL)isFinished {
+#ifndef __JETI_FREESTANDING
+    if (_mu) {
+        jeti_mutex_lock((jeti_mutex_t *)_mu);
+        int v = _finished;
+        jeti_mutex_unlock((jeti_mutex_t *)_mu);
+        return (BOOL)v;
+    }
+#endif
+    return (BOOL)_finished;
+}
+
+- (BOOL)isExecuting {
+    return (BOOL)(_started && !_finished);
+}
+
++ (void)detachNewThreadWithBlock:(void (^)(void))block {
+#ifndef __JETI_FREESTANDING
+    if (!block) { return; }
+    // @noarc 在 MRC 归档下是冗余的，但自包含模式把本文件内联进用户 TU（那里
+    // 跑用户的 ARC）：没有它，`[t release]` 被 checker 拒，且 ARC 还会对 t 插
+    // 一次 scope-end release → 与 trampoline 的释放叠加成过度释放/UAF。
+    @noarc {
+        NPThread *t = [[NPThread alloc] initWithBlock:block];
+        if (t) {
+            [t startDetached];
+            [t release];                      // trampoline 持有，运行期自回收
+        }
+    }
+#endif
+}
+
+@end

@@ -1,0 +1,38 @@
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+int main(void) {
+    NPKeyedArchiver *a = [[NPKeyedArchiver alloc] init];
+    [a encodeObject:S("jim") forKey:S("name")];
+    [a encodeInt:42 forKey:S("age")];
+    [a encodeDouble:1.5 forKey:S("score")];
+    [a encodeBool:1 forKey:S("ok")];
+    NPData *d = [a finishEncoding];
+    printf("bytes=%zu\n", [d length]);
+    printf("finish_twice=%d\n", [a finishEncoding] == NULL);
+
+    NPKeyedUnarchiver *u = [[NPKeyedUnarchiver alloc] initForReadingWithData:d];
+    printf("name=%s\n", [[u decodeObjectForKey:S("name")] UTF8String]);
+    printf("age=%d\n", [u decodeIntForKey:S("age")]);
+    printf("score=%.2f\n", [u decodeDoubleForKey:S("score")]);
+    printf("ok=%d\n", [u decodeBoolForKey:S("ok")]);
+    printf("missing=%d missing_int=%d\n", [u containsValueForKey:S("nope")], [u decodeIntForKey:S("nope")]);
+
+    // 类型不符：把字符串当整数读 → 0
+    printf("wrong_type=%d\n", [u decodeIntForKey:S("name")]);
+
+    // 根对象归档（JSON 可表示的树）
+    NPMutableDictionary *root = [[NPMutableDictionary alloc] init];
+    [root setObject:S("v") forKey:S("k")];
+    NPData *d2 = [NPKeyedArchiver archivedDataWithRootObject:root];
+    id back = [NPKeyedUnarchiver unarchiveObjectWithData:d2];
+    printf("root_ok=%d\n", back != NULL && [back isKindOfClass:[NPDictionary class]]);
+
+    // 坏归档：根不是字典
+    NPData *bad = [NPData dataWithBytes:"[1,2,3]" length:7];
+    NPKeyedUnarchiver *badu = [[NPKeyedUnarchiver alloc] initForReadingWithData:bad];
+    printf("bad_root=%d\n", badu == NULL);
+    return 0;
+}

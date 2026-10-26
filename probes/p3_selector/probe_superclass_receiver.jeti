@@ -1,0 +1,6 @@
+#import <Foundation/Foundation.hje>
+int main(void) {
+    NPDictionary *a = [NPDictionary dictionary];
+    [a setObject:@"x" forKey:@"k"];   // 期望：no visible method 'setObject:forKey:' on receiver type 'NPDictionary *'
+    return 0;
+}

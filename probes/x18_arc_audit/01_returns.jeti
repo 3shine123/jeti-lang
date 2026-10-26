@@ -1,0 +1,40 @@
+// 审计面 1：返回值所有权（returned-object 规则的边界）
+// 每组对象的期望终态写在行尾注释；summary 里出现任何 leaked/over-released 即问题。
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+@interface Kid : NPObject
+- (NPString *)name;
+@end
+
+@implementation Kid
+- (NPString *)name { return @"kid"; }        /* 字面量：+0，调用方不得释放 */
+@end
+
+@interface Mom : NPObject
+- (Kid *)kid;                                /* 返回创建值：returned-object 规则平衡 */
+- (Kid *)kid2;
+@end
+
+@implementation Mom
+- (Kid *)kid { return [[Kid alloc] init]; }
+- (Kid *)kid2 { if (1) { return [[Kid alloc] init]; } return NULL; }
+@end
+
+int main(void) {
+    /* R1：+1 方法返回值赋局部 → ARC 作用域末释放 → freed */
+    Mom *m = [[Mom alloc] init];
+    Kid *k = [m kid];                        /* freed */
+    (void)k;
+
+    /* R2：+1 返回值作为临时直接消费 → return 处 autorelease 平衡 → freed */
+    printf("%s\n", [[m kid] name]);
+
+    /* R3：分支内返回创建值 → 两个 return 都要平衡 → freed */
+    printf("%s\n", [[m kid2] name]);
+
+    /* R4：字面量方法返回值（+0）当临时 → 不得出现任何平衡操作 → freed */
+    printf("%s\n", [[m kid] name]);
+
+    return 0;
+}

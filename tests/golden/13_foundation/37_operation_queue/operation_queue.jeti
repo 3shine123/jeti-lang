@@ -1,0 +1,106 @@
+/* NPOperationQueue golden（声明伞头 + 预编译库；工作线程池）。
+ *
+ * 全部确定性（结果不依赖调度交错）：
+ *   K1  串行队列（mainQueue）：10 操作 FIFO 各 +1，waitUntilAll 后必为 10
+ *   K2  并发队列（max=4）：100 操作全部完成后总数确定（不关心交错）
+ *   K3  FIFO 顺序：单工作线程串行执行，共享日志恰为 0..7 顺序
+ *   K4  暂停门控：先 suspend 再入队 → operationCount 稳定在 3（worker 睡眠
+ *       不取件）；resume + waitUntilAll 后完成（g_sum 收敛）
+ *   K5  取消：暂停中入队 5 个，cancelAll 清空未开始的 → count 归零、
+ *       isCancelled=YES、g_sum 不变
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   K1 ok … K5 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static jeti_mutex_t *g_mu = NULL;
+static int g_sum = 0;
+static int g_log[16];
+static int g_logn = 0;
+
+static void add1(void) {
+    jeti_mutex_lock(g_mu);
+    g_sum++;
+    jeti_mutex_unlock(g_mu);
+}
+
+int main(void) {
+    g_mu = jeti_mutex_create();
+
+    // K1：串行 FIFO + waitUntilAll
+    NPOperationQueue *serial = [NPOperationQueue mainQueue];
+    int k1 = [serial maxConcurrentOperationCount] == 1;
+    for (int i = 0; i < 10; i++) {
+        [serial addOperationWithBlock:^{ add1(); }];
+    }
+    [serial waitUntilAllOperationsAreFinished];
+    k1 = k1 && g_sum == 10 && [serial operationCount] == 0;
+    printf("%s\n", k1 ? "K1 ok" : "K1 FAIL");
+
+    // K2：并发队列全部完成
+    NPOperationQueue *conc = [[NPOperationQueue alloc] init];
+    [conc setMaxConcurrentOperationCount:4];
+    int k2 = [conc maxConcurrentOperationCount] == 4;
+    for (int i = 0; i < 100; i++) {
+        [conc addOperationWithBlock:^{ add1(); }];
+    }
+    [conc waitUntilAllOperationsAreFinished];
+    k2 = k2 && g_sum == 110 && [conc operationCount] == 0;
+    printf("%s\n", k2 ? "K2 ok" : "K2 FAIL");
+
+    // K3：FIFO 顺序（单 worker 串行 → 日志恰为 0..7）
+    g_logn = 0;
+    NPOperationQueue *fifo = [[NPOperationQueue alloc] init];
+    [fifo setMaxConcurrentOperationCount:1];
+    for (int i = 0; i < 8; i++) {
+        long v = i;   // 标量按值捕获：每迭代独立
+        [fifo addOperationWithBlock:^{
+            jeti_mutex_lock(g_mu);
+            g_log[g_logn++] = (int)v;
+            jeti_mutex_unlock(g_mu);
+        }];
+    }
+    [fifo waitUntilAllOperationsAreFinished];
+    int ordered = g_logn == 8;
+    for (int i = 0; ordered && i < 8; i++) {
+        if (g_log[i] != i) { ordered = 0; }
+    }
+    printf("%s\n", ordered ? "K3 ok" : "K3 FAIL");
+
+    // K4：暂停门控
+    NPOperationQueue *q3 = [[NPOperationQueue alloc] init];
+    [q3 setMaxConcurrentOperationCount:1];
+    [q3 setSuspended:YES];
+    int susp = [q3 isSuspended];
+    for (int i = 0; i < 3; i++) {
+        [q3 addOperationWithBlock:^{ add1(); }];
+    }
+    int during = [q3 operationCount];      // 3 个全部滞留（无时序依赖）
+    [q3 setSuspended:NO];
+    [q3 waitUntilAllOperationsAreFinished];
+    if (susp && during == 3 && g_sum == 113 && [q3 operationCount] == 0) {
+        printf("K4 ok\n");
+    } else {
+        printf("K4 FAIL %d %d %d\n", susp, during, g_sum);
+    }
+
+    // K5：取消清空未开始的
+    NPOperationQueue *q4 = [[NPOperationQueue alloc] init];
+    [q4 setMaxConcurrentOperationCount:1];
+    [q4 setSuspended:YES];
+    for (int i = 0; i < 5; i++) {
+        [q4 addOperationWithBlock:^{ add1(); }];
+    }
+    [q4 cancelAllOperations];
+    [q4 setSuspended:NO];
+    [q4 waitUntilAllOperationsAreFinished];
+    if ([q4 isCancelled] && [q4 operationCount] == 0 && g_sum == 113) {
+        printf("K5 ok\n");
+    } else {
+        printf("K5 FAIL %d %d %d\n", [q4 isCancelled], [q4 operationCount], g_sum);
+    }
+
+    jeti_mutex_destroy(g_mu);
+    return 0;
+}
