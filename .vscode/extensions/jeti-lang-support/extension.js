@@ -206,9 +206,9 @@ function toInlayHints(hints) {
       new vscode.Position(hint.position.line, hint.position.character),
       hint.label,
     );
-    // LSP InlayHintKind: 1 = Parameter, 2 = Type.
-    if (hint.kind === 2) converted.kind = vscode.InlayHintKind.Type;
-    else if (hint.kind === 1) converted.kind = vscode.InlayHintKind.Parameter;
+    // LSP InlayHintKind: 1 = Type, 2 = Parameter.
+    if (hint.kind === 1) converted.kind = vscode.InlayHintKind.Type;
+    else if (hint.kind === 2) converted.kind = vscode.InlayHintKind.Parameter;
     return converted;
   });
 }
@@ -387,7 +387,10 @@ function restart() {
     // editor shows nothing, however many hints the server would return.
     vscode.languages.registerInlayHintsProvider(LANGUAGE_ID, {
       provideInlayHints: async (document, range) => {
-        if (!client) return [];
+        // `jeti.inlayHints: false` — this editor never asks; the server-side
+        // `-fno-inlay-hints` flag (compile_flags.txt / jeti.arguments) is the
+        // project-wide switch that answers every client with an empty set.
+        if (!client || !vscode.workspace.getConfiguration("jeti").get("inlayHints", true)) return [];
         const hints = await client.inlayHints(document.uri.toString(), {
           start: { line: range.start.line, character: range.start.character },
           end: { line: range.end.line, character: range.end.character },

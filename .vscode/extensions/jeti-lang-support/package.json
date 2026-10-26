@@ -62,13 +62,18 @@
           "default": true,
           "markdownDescription": "Analyze in ARC mode (the compiler's default). Turn this off for projects built with `-fno-jeti-arc` (manual retain/release), so the editor stops reporting `explicit 'release' not allowed in ARC mode` for code that builds. The setting is passed to the server as `-fno-jeti-arc`."
         },
+        "jeti.inlayHints": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show inline parameter-name and type hints (gray text over the source). Turn this off to stop asking the server for hints in this editor. A project-wide switch also exists: write `-fno-inlay-hints` in `compile_flags.txt` (or pass it via `jeti.arguments`) — the server then answers every hint request with an empty set, for all clients."
+        },
         "jeti.arguments": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Extra arguments for the language server, using `jetic`'s own spellings. Only the switches that change diagnostics are understood: `-fno-jeti-arc`, `-fno-checker`, `-eh legacy`. Anything else (build output paths, `-g`, …) is ignored — the editor never links or runs code."
+          "markdownDescription": "Extra arguments for the language server, using `jetic`'s own spellings. Only the switches that change diagnostics are understood: `-fno-jeti-arc`, `-fno-checker`, `-fno-inlay-hints`, `-eh legacy`. Anything else (build output paths, `-g`, …) is ignored — the editor never links or runs code."
         }
       }
     }

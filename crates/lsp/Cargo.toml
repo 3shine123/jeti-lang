@@ -19,3 +19,9 @@ jetic = { path = "../jetic" }
 jeti-checker = { path = "../checker" }
 jeti-layout = { path = "../layout" }
 serde_json = "1.0.154"
+
+[dev-dependencies]
+# Strict LSP shape check for the advertised capabilities: clients like Zed
+# deserialize the `initialize` response into typed structs and reject it
+# wholesale on a shape violation, which VS Code's lenient client hides.
+lsp-types = "0.97"

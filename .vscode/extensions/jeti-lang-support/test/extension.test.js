@@ -209,7 +209,9 @@ const vscode = {
     textDocuments: [],
     // Defaults mirror package.json; `overrides` lets a test change a setting.
     getConfiguration: () => ({
-      get: (key) => overrides[key] ?? defaults[key],
+      // `get(key, fallback)` — the real API returns the fallback when the
+      // setting is unset, so the stub must honor it too.
+      get: (key, fallback) => overrides[key] ?? defaults[key] ?? fallback,
     }),
     onDidOpenTextDocument: (listener) => subscribe('open', listener),
     onDidChangeTextDocument: (listener) =>
@@ -230,6 +232,7 @@ const defaults = {
   serverPath: 'jeti-lsp',
   searchPaths: ['include', '.'],
   arc: true,
+  inlayHints: true,
   arguments: [],
 };
 const overrides = {};
@@ -646,7 +649,7 @@ async function main() {
     assert.strictEqual(parameterHints[1].label, 'b: ');
     const typeHints = inlayHints.filter((h) => h.kind === 1);
     assert.ok(
-      typeHints.some((h) => h.label === '-> int'),
+      typeHints.some((h) => h.label === ' -> int'),
       `expected a return-type hint: ${JSON.stringify(inlayHints)}`,
     );
     console.log('ok  inlay hints flow end-to-end (parameter names + types from the real server)');

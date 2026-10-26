@@ -1,0 +1,12 @@
+name = "Jeti"
+grammar = "jeti"
+path_suffixes = ["jeti"]
+line_comments = ["// "]
+tab_size = 4
+
+brackets = [
+  { start = "{", end = "}", close = true, newline = true },
+  { start = "[", end = "]", close = true, newline = true },
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string"] },
+]

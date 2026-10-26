@@ -1,0 +1,18 @@
+id = "jeti"
+name = "Jeti"
+version = "0.1.0"
+schema_version = 1
+authors = ["3shine123"]
+description = "Jeti language support: syntax highlighting, outline and the jeti-lsp language server (diagnostics, inlay hints, go-to-definition)."
+repository = "https://github.com/3shine123/jeti-lang"
+
+[grammars.jeti]
+# Zed clones the grammar from a git repository. For local development this
+# points at the grammar's own git repo inside this directory — see
+# editors/zed/README.md for how to switch it to a published URL.
+repository = "file:///Users/cactus/Desktop/01_CodeProjects/jeti-lang/editors/zed/grammar"
+commit = "ca946a1fccdd57ca590da915a85f4cddc2bbb740"
+
+[language_servers.jeti-lsp]
+name = "jeti-lsp"
+languages = ["Jeti"]

@@ -40,3 +40,5 @@ mimo.sh
 
 # Rust build
 target/probes/p2_threads/*.c
+editors/zed/grammar/
+editors/zed/grammars/jeti/

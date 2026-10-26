@@ -188,6 +188,8 @@ pub struct AnalysisOptions {
     pub no_arc: bool,
     /// `-fno-checker`: parse, bind and elaborate, but skip the type checker.
     pub no_checker: bool,
+    /// `-fno-inlay-hints`: the inlayHint handler answers with an empty set.
+    pub no_inlay_hints: bool,
     /// `-eh checked` (the default) vs `-eh legacy`/`-eh sjlj`.
     pub eh_checked: bool,
 }
@@ -199,6 +201,7 @@ impl Default for AnalysisOptions {
             search_dirs: Pipeline::new().search_dirs,
             no_arc: false,
             no_checker: false,
+            no_inlay_hints: false,
             eh_checked: jetic::pipeline::DEFAULT_EH_CHECKED,
         }
     }
@@ -214,8 +217,9 @@ impl Default for AnalysisOptions {
 /// which is why the server passes `None`).
 ///
 /// Understood: `-I DIR` / `-IDIR` / `--include DIR`, `-eh <checked|legacy|sjlj>`,
-/// `-fno-jeti-arc`, `-fno-checker`. Everything else is ignored — including the
-/// value of `-o`, so an output path can never be mistaken for a directory.
+/// `-fno-jeti-arc`, `-fno-checker`, `-fno-inlay-hints`. Everything else is
+/// ignored — including the value of `-o`, so an output path can never be
+/// mistaken for a directory.
 pub fn apply_flags(
     args: &[String],
     base: Option<&std::path::Path>,
@@ -258,6 +262,7 @@ pub fn apply_flags(
             }
             "fno-jeti-arc" | "no-arc" => options.no_arc = true,
             "fno-checker" | "no-checker" => options.no_checker = true,
+            "fno-inlay-hints" | "no-inlay-hints" => options.no_inlay_hints = true,
             _ => {
                 if let Some(dir) = arg.strip_prefix("-I") {
                     // A flags file holds one argument per line, so `-I include`
@@ -586,7 +591,12 @@ impl Server {
                         "referencesProvider": true,
                         "renameProvider": true,
                         "hoverProvider": true,
-                        "documentLinkProvider": true,
+                        // The LSP spec types this one as `DocumentLinkOptions`,
+                        // not a boolean — VS Code's client tolerates `true`,
+                        // Zed's strict deserializer rejects the whole
+                        // `initialize` response over it, which silently kills
+                        // every feature. Keep it an object.
+                        "documentLinkProvider": { "resolveProvider": false },
                         // clangd-parity coloring: the server classifies what
                         // only the compiler knows (types, classes, fields,
                         // enum members, macros); the extension maps these
@@ -972,6 +982,13 @@ impl Server {
                 // is reachable only through the document's own `-I` dirs.
                 let result = match self.docs.get(uri).map(|doc| (doc.path.clone(), doc.text.clone())) {
                     Some((path, text)) => {
+                        // `-fno-inlay-hints`: the capability stays advertised (it
+                        // is decided at initialize time, before any document is
+                        // known), so the handler simply answers with an empty
+                        // set — the client renders nothing.
+                        if self.effective_options(&path).no_inlay_hints {
+                            json!([])
+                        } else {
                         let dirs = self.effective_options(&path).search_dirs;
                         let c_table = crate::cheader::signatures_for(
                             &SymbolIndex::c_headers_in(&text),
@@ -987,7 +1004,7 @@ impl Server {
                                             "line": hint.position.line,
                                             "character": hint.position.character,
                                         },
-                                        // LSP InlayHintKind: 1 = Parameter, 2 = Type.
+                                        // LSP InlayHintKind: 1 = Type, 2 = Parameter.
                                         "kind": hint.kind,
                                         "label": hint.label,
                                     })
@@ -996,6 +1013,7 @@ impl Server {
                             None => Vec::new(),
                         };
                         json!(hints)
+                        }
                     }
                     None => json!([]),
                 };
@@ -2039,6 +2057,152 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_satisfy_strict_lsp_types() {
+        // A strict client deserializes the `initialize` response into typed
+        // structs and rejects the whole thing on a shape violation. Zed did
+        // exactly that over `documentLinkProvider: true` (the spec types it as
+        // `DocumentLinkOptions`), which silently disabled every feature there
+        // while VS Code's lenient client hid the mistake.
+        let mut server = Server::new(AnalysisOptions::default());
+        server.quiet_period = Duration::ZERO;
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {},
+        }));
+        let capabilities = out[0]["result"]["capabilities"].clone();
+        if let Err(error) = serde_json::from_value::<lsp_types::ServerCapabilities>(capabilities.clone()) {
+            panic!("capabilities rejected by lsp-types ({error}):\n{capabilities}");
+        }
+    }
+
+    /// Drive one request and return its `result` (the response carrying `id`).
+    fn request_result(server: &mut Server, id: u64, method: &str, params: Value) -> Value {
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": id, "method": method, "params": params,
+        }));
+        out.into_iter()
+            .find(|message| message["id"] == json!(id))
+            .unwrap_or_else(|| panic!("no response for {method}"))["result"]
+            .clone()
+    }
+
+    #[test]
+    fn every_response_satisfies_strict_lsp_types() {
+        // Zed deserializes every result into typed structs, so a shape the
+        // spec does not allow fails the feature (or the whole server) there
+        // while a lenient client hides it. The capabilities bug that killed
+        // Zed's session was exactly this class; this test walks the rest of
+        // the surface through `lsp-types` so the next one is caught here.
+        let include = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../include");
+        let mut server = Server::new(AnalysisOptions {
+            search_dirs: vec![include.to_string_lossy().to_string()],
+            ..AnalysisOptions::default()
+        });
+        server.quiet_period = Duration::ZERO;
+
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/shapes.jeti");
+        let text = "\
+#import <Foundation/Foundation.hje>
+static int add(int a, int b) { return a + b; }
+int use(void) { return add(1, 2); }
+";
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1, "text": text,
+            }},
+        }));
+
+        let doc = || json!({ "textDocument": { "uri": uri } });
+        let at = |line: u32, character: u32| json!({ "line": line, "character": character });
+
+        // capabilities
+        let init = request_result(&mut server, 1, "initialize", json!({ "capabilities": {} }));
+        if let Err(error) = serde_json::from_value::<lsp_types::ServerCapabilities>(init["capabilities"].clone()) {
+            panic!("capabilities rejected by lsp-types: {error}");
+        }
+
+        // hover — on the `add` call.
+        let hover: Option<lsp_types::Hover> = serde_json::from_value(request_result(
+            &mut server, 2, "textDocument/hover",
+            json!({ "textDocument": { "uri": uri }, "position": at(2, 25) }),
+        ))
+        .expect("hover shape");
+        assert!(hover.is_some(), "hover should answer on a call");
+
+        // inlay hints — the whole document.
+        let hints: Vec<lsp_types::InlayHint> = serde_json::from_value(request_result(
+            &mut server, 3, "textDocument/inlayHint",
+            json!({ "textDocument": { "uri": uri },
+                    "range": { "start": at(0, 0), "end": at(4, 0) } }),
+        ))
+        .expect("inlayHint shape");
+        assert!(!hints.is_empty(), "expected type hints for `add`");
+
+        // document symbols
+        let symbols: lsp_types::DocumentSymbolResponse =
+            serde_json::from_value(request_result(&mut server, 4, "textDocument/documentSymbol", doc()))
+                .expect("documentSymbol shape");
+        let symbol_count = match symbols {
+            lsp_types::DocumentSymbolResponse::Nested(symbols) => symbols.len(),
+            lsp_types::DocumentSymbolResponse::Flat(symbols) => symbols.len(),
+        };
+        assert!(symbol_count > 0, "expected at least `add`");
+
+        // definition / references — on the `add` declaration.
+        let _: Option<lsp_types::GotoDefinitionResponse> = serde_json::from_value(request_result(
+            &mut server, 5, "textDocument/definition",
+            json!({ "textDocument": { "uri": uri }, "position": at(1, 11) }),
+        ))
+        .expect("definition shape");
+        let _: Option<Vec<lsp_types::Location>> = serde_json::from_value(request_result(
+            &mut server, 6, "textDocument/references",
+            json!({ "textDocument": { "uri": uri }, "position": at(1, 11),
+                    "context": { "includeDeclaration": true } }),
+        ))
+        .expect("references shape");
+
+        // completion — inside the call's argument list.
+        let _: Option<lsp_types::CompletionResponse> = serde_json::from_value(request_result(
+            &mut server, 7, "textDocument/completion",
+            json!({ "textDocument": { "uri": uri }, "position": at(2, 29) }),
+        ))
+        .expect("completion shape");
+
+        // signature help — after `add(`.
+        let _: Option<lsp_types::SignatureHelp> = serde_json::from_value(request_result(
+            &mut server, 8, "textDocument/signatureHelp",
+            json!({ "textDocument": { "uri": uri }, "position": at(2, 29) }),
+        ))
+        .expect("signatureHelp shape");
+
+        // rename — prepare plus the edit itself.
+        let _: Option<lsp_types::PrepareRenameResponse> = serde_json::from_value(request_result(
+            &mut server, 9, "textDocument/prepareRename",
+            json!({ "textDocument": { "uri": uri }, "position": at(1, 11) }),
+        ))
+        .expect("prepareRename shape");
+        let _: Option<lsp_types::WorkspaceEdit> = serde_json::from_value(request_result(
+            &mut server, 10, "textDocument/rename",
+            json!({ "textDocument": { "uri": uri }, "position": at(1, 11), "newName": "sum" }),
+        ))
+        .expect("rename shape");
+
+        // document links, formatting, semantic tokens.
+        let _: Option<Vec<lsp_types::DocumentLink>> =
+            serde_json::from_value(request_result(&mut server, 11, "textDocument/documentLink", doc()))
+                .expect("documentLink shape");
+        let _: Option<Vec<lsp_types::TextEdit>> = serde_json::from_value(request_result(
+            &mut server, 12, "textDocument/formatting",
+            json!({ "textDocument": { "uri": uri },
+                    "options": { "tabSize": 4, "insertSpaces": true } }),
+        ))
+        .expect("formatting shape");
+        let _: Option<lsp_types::SemanticTokens> =
+            serde_json::from_value(request_result(&mut server, 13, "textDocument/semanticTokens/full", doc()))
+                .expect("semanticTokens shape");
+    }
+
+    #[test]
     fn inlay_hints_advertised_and_answered_for_free_calls() {
         let mut server = Server::new(AnalysisOptions::default());
         server.quiet_period = Duration::ZERO;
@@ -2074,15 +2238,15 @@ mod tests {
         let out = server.handle(&request);
         assert_eq!(out.len(), 1, "{out:?}");
         assert_eq!(out[0]["id"], 2);
-        // Parameter hints only — the use-site type hints (kind 2) have their
+        // Parameter hints only — the use-site type hints (kind 1) have their
         // own tests.
         let hints_all = out[0]["result"].as_array().expect("inlay array");
-        let hints: Vec<_> = hints_all.iter().filter(|h| h["kind"] == 1).collect();
+        let hints: Vec<_> = hints_all.iter().filter(|h| h["kind"] == 2).collect();
         assert_eq!(hints.len(), 2, "{hints:?}");
-        // `kind` 1 is LSP's InlayHintKind::Parameter; the position is the
+        // `kind` 2 is LSP's InlayHintKind::Parameter; the position is the
         // argument's own start, in the document's LSP coordinates.
         let line = "int main(void) { return add(1, 2); }";
-        assert_eq!(hints[0]["kind"], 1);
+        assert_eq!(hints[0]["kind"], 2);
         assert_eq!(hints[0]["label"], "a: ");
         assert_eq!(
             hints[0]["position"],
@@ -2093,6 +2257,35 @@ mod tests {
             hints[1]["position"],
             json!({"line": 1, "character": line.find('2').unwrap() as u32})
         );
+    }
+
+    #[test]
+    fn inlay_hints_flag_answers_with_an_empty_set() {
+        // `-fno-inlay-hints` — the project-wide switch (command line,
+        // `jeti.arguments`, `compile_flags.txt`): the handler still answers
+        // (the capability is advertised at initialize time, per-document
+        // options cannot withdraw it), but with no hints at all.
+        let mut server = Server::new(AnalysisOptions {
+            no_inlay_hints: true,
+            ..AnalysisOptions::default()
+        });
+        server.quiet_period = Duration::ZERO;
+
+        let uri = path_to_uri("/tmp/jeti_lsp_unit/inlay_off.jeti");
+        server.handle(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": uri, "languageId": "jeti", "version": 1,
+                "text": "int add(int a, int b) { return a + b; }\nint main(void) { return add(1, 2); }\n",
+            }},
+        }));
+        let out = server.handle(&json!({
+            "jsonrpc": "2.0", "id": 2,
+            "method": "textDocument/inlayHint",
+            "params": { "textDocument": { "uri": uri } },
+        }));
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["result"], json!([]), "{:?}", out[0]["result"]);
     }
 
     #[test]
@@ -2427,6 +2620,31 @@ mod tests {
             .map(|symbol| symbol["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"Late"), "{names:?}");
+    }
+
+    #[test]
+    fn inlay_hints_flag_is_parsed_like_the_cli() {
+        // `-fno-inlay-hints` means one thing on the command line, in
+        // `jeti.arguments` and in `compile_flags.txt` — all three arrive here
+        // through the same parser, and the other flags must keep working.
+        let mut options = AnalysisOptions::default();
+        apply_flags(
+            &["jeti-lsp".into(), "-fno-inlay-hints".into(), "-I".into(), "include".into()],
+            None,
+            None,
+            &mut options,
+        );
+        assert!(options.no_inlay_hints);
+        assert!(options.search_dirs.iter().any(|d| d == "include"));
+
+        let mut options = AnalysisOptions::default();
+        apply_flags(
+            &["jeti-lsp".into(), "--no-inlay-hints".into()],
+            None,
+            None,
+            &mut options,
+        );
+        assert!(options.no_inlay_hints);
     }
 
     #[test]

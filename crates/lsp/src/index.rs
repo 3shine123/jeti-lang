@@ -210,8 +210,9 @@ pub struct SignatureHelp {
 pub struct InlayHint {
     pub position: LspPosition,
     pub label: String,
-    /// LSP `InlayHintKind`: 1 = Parameter, 2 = Type. The editor colors the two
-    /// the same but uses the kind for its own filtering.
+    /// LSP `InlayHintKind`: 1 = Type, 2 = Parameter — the spec's numbering.
+    /// Getting it backwards files the hints under the wrong editor setting
+    /// (`show_type_hints` / `show_parameter_hints`), which is how they vanish.
     pub kind: u8,
 }
 
@@ -1605,8 +1606,8 @@ impl SymbolIndex {
                 {
                     self.type_hints.push(InlayHint {
                         position,
-                        label: format!(": {spelling}"),
-                        kind: 2,
+                        label: format!(" -> {spelling}"),
+                        kind: 1,
                     });
                 }
             }
@@ -1617,8 +1618,8 @@ impl SymbolIndex {
             if let Some(position) = param_list_end(&text, &self.line_offsets, source_map, decl) {
                 self.type_hints.push(InlayHint {
                     position,
-                    label: format!("-> {}", ast_type_spell(return_type)),
-                    kind: 2,
+                    label: format!(" -> {}", ast_type_spell(return_type)),
+                    kind: 1,
                 });
             }
         }
@@ -1661,6 +1662,7 @@ impl SymbolIndex {
                 layouts: &self.layouts,
                 source_map,
                 text: &text,
+                chain_bases: HashSet::new(),
             };
             walk.stmt(body);
         }
@@ -1821,7 +1823,7 @@ impl SymbolIndex {
                     hints.push(InlayHint {
                         position: arg.start,
                         label: format!("{name}: "),
-                        kind: 1,
+                        kind: 2,
                     });
                 }
             }
@@ -2267,7 +2269,14 @@ fn name_end_after(
     from_col: usize,
     name: &str,
 ) -> Option<LspPosition> {
-    let line_text = line_slice(text, offsets, line)?;
+    // `line` is the AST's flattened line (post-`#import` expansion): searching
+    // the editor text on the raw number read a *different* line and anchored
+    // hints mid-identifier (`np_u12⟨ -> T⟩8` — the user's screenshot). Project
+    // it to the document's own line first; columns survive the projection,
+    // since an import replaces whole lines. The span below still passes the
+    // flattened line to `span_from_node`, which owns the same mapping.
+    let (_, real_line) = source_map.locate(line);
+    let line_text = line_slice(text, offsets, real_line as usize)?;
     let bytes = line_text.as_bytes();
     let mut search = from_col.saturating_sub(1);
     while let Some(rel) = line_text.get(search..)?.find(name) {
@@ -2298,7 +2307,11 @@ fn param_list_end(
     source_map: &SourceMap,
     decl: &AstDecl,
 ) -> Option<LspPosition> {
-    let line = line_slice(text, offsets, decl.line)?;
+    // Same flattened-line projection as `name_end_after`: the search must run
+    // on the document's own line; the span keeps the flattened line for
+    // `span_from_node` to map.
+    let (_, real_line) = source_map.locate(decl.line);
+    let line = line_slice(text, offsets, real_line as usize)?;
     let name = decl.name.as_deref()?;
     let name_at = line.find(name)?;
     let open = line[name_at + name.len()..].find('(')? + name_at + name.len();
@@ -2810,6 +2823,11 @@ struct BodyWalk<'a> {
     layouts: &'a HashMap<String, jeti_layout::StructLayout>,
     source_map: &'a SourceMap,
     text: &'a str,
+    /// VarRefs that must stay hint-free: the direct base of a member access
+    /// (`r.hi`) or a subscript (`arr[i]`). A use-site hint after the base
+    /// splits the chain visually (`r⟨ -> T⟩.hi`) and says nothing the
+    /// declaration doesn't already spell.
+    chain_bases: HashSet<(usize, usize)>,
 }
 
 impl BodyWalk<'_> {
@@ -2823,6 +2841,15 @@ impl BodyWalk<'_> {
 
     fn expr_range(&self, expr: &AstExpr) -> Option<LspRange> {
         self.range(expr.line, expr.col, expr.end_line, expr.end_col)
+    }
+
+    /// Remember a direct chain base — the `r` of `r.hi`, the `arr` of
+    /// `arr[i]`, the `p` of `*p`, a send's named receiver — so the use-site
+    /// hint never inserts between the base and its operator.
+    fn record_chain_base(&mut self, expr: &AstExpr) {
+        if matches!(expr.data, AstExprData::VarRef { .. }) {
+            self.chain_bases.insert((expr.line, expr.col));
+        }
     }
 
     /// The position just past the declarator `name` on the declaration's first
@@ -2865,8 +2892,8 @@ impl BodyWalk<'_> {
                 {
                     self.type_hints.push(InlayHint {
                         position,
-                        label: format!(": {}", ast_type_spell(inferred_ty)),
-                        kind: 2,
+                        label: format!(" -> {}", ast_type_spell(inferred_ty)),
+                        kind: 1,
                     });
                 }
                 if class.is_some() || !protocols.is_empty() {
@@ -2909,7 +2936,7 @@ impl BodyWalk<'_> {
                             self.type_hints.push(InlayHint {
                                 position: range.start,
                                 label: designator,
-                                kind: 2,
+                                kind: 1,
                             });
                         }
                     }
@@ -3070,6 +3097,7 @@ impl BodyWalk<'_> {
                         args: args.iter().filter_map(|arg| self.expr_range(arg)).collect(),
                     });
                 }
+                self.record_chain_base(receiver);
                 self.expr(receiver);
                 for arg in args {
                     self.expr(arg);
@@ -3090,8 +3118,19 @@ impl BodyWalk<'_> {
                     self.expr(arg);
                 }
             }
-            AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => self.expr(obj),
-            AstExprData::Unary { operand, .. } => self.expr(operand),
+            AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => {
+                self.record_chain_base(obj);
+                self.expr(obj);
+            }
+            AstExprData::Unary { operand, is_postfix, .. } => {
+                // A prefix operator glues to its operand (`*carry`, `&x`): a
+                // hint after the operand splits the pair. Postfix ends
+                // cleanly — keep it.
+                if !*is_postfix {
+                    self.record_chain_base(operand);
+                }
+                self.expr(operand);
+            }
             AstExprData::Binary { left, right, .. } => {
                 self.expr(left);
                 self.expr(right);
@@ -3118,6 +3157,7 @@ impl BodyWalk<'_> {
                 }
             }
             AstExprData::Subscript { object, key } => {
+                self.record_chain_base(object);
                 self.expr(object);
                 self.expr(key);
             }
@@ -3159,12 +3199,17 @@ impl BodyWalk<'_> {
             // cannot duplicate the definition.
             AstExprData::VarRef { name, .. } => {
                 if let Some(local) = self.hover_locals.iter().find(|l| &l.name == name) {
-                    if !local.type_spelling.is_empty() {
+                    // A chain base (`r` in `r.hi`) stays hint-free: the hint
+                    // would land inside the chain and read as the *chain
+                    // result's* type.
+                    if !local.type_spelling.is_empty()
+                        && !self.chain_bases.contains(&(expr.line, expr.col))
+                    {
                         if let Some(range) = self.expr_range(expr) {
                             self.type_hints.push(InlayHint {
                                 position: range.end,
-                                label: format!(": {}", local.type_spelling),
-                                kind: 2,
+                                label: format!(" -> {}", local.type_spelling),
+                                kind: 1,
                             });
                         }
                     }
@@ -3906,10 +3951,10 @@ int helper(int value, int other) { return helper(1, 2); }
         println!("functions: {:?}", index.functions);
     }
 
-    /// Parameter hints only (kind 1). The type hints (kind 2) are exercised by
+    /// Parameter hints only (kind 2). The type hints (kind 1) are exercised by
     /// their own tests; these cases are about argument labeling.
     fn parameter_hints(hints: Vec<InlayHint>) -> Vec<InlayHint> {
-        hints.into_iter().filter(|h| h.kind == 1).collect()
+        hints.into_iter().filter(|h| h.kind == 2).collect()
     }
 
     #[test]
@@ -3937,12 +3982,12 @@ int f(void) {
         let hints: Vec<InlayHint> = index
             .inlay_hints(&crate::cheader::CSignatures::default())
             .into_iter()
-            .filter(|h| h.kind == 2)
+            .filter(|h| h.kind == 1)
             .collect();
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
         // `f`'s return type, then the three uses (the `int a` / `long i`
         // declarations themselves are not uses).
-        assert_eq!(labels, vec!["-> int", ": int", ": long", ": int"], "{hints:?}");
+        assert_eq!(labels, vec![" -> int", " -> int", " -> long", " -> int"], "{hints:?}");
     }
 
     #[test]
@@ -3968,12 +4013,12 @@ int f(void) {
         let hints: Vec<InlayHint> = index
             .inlay_hints(&crate::cheader::CSignatures::default())
             .into_iter()
-            .filter(|h| h.kind == 2)
+            .filter(|h| h.kind == 1)
             .collect();
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
         // `f`'s return type, then the `__auto_type` definition and the use —
         // both inferred as `int`, never the `__auto_type` marker.
-        assert_eq!(labels, vec!["-> int", ": int", ": int"], "{hints:?}");
+        assert_eq!(labels, vec![" -> int", " -> int", " -> int"], "{hints:?}");
     }
 
     #[test]
@@ -3993,10 +4038,10 @@ int f(void) {
         let hints: Vec<InlayHint> = index
             .inlay_hints(&crate::cheader::CSignatures::default())
             .into_iter()
-            .filter(|h| h.kind == 2)
+            .filter(|h| h.kind == 1)
             .collect();
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
-        assert_eq!(labels, vec![": int", ": int", "-> int"], "{hints:?}");
+        assert_eq!(labels, vec![" -> int", " -> int", " -> int"], "{hints:?}");
     }
 
     #[test]
@@ -4377,5 +4422,97 @@ int use(void) {
             symbol_at(text, LspPosition { line: 1, character: 0 }).as_deref(),
             Some("Player")
         );
+    }
+}
+
+#[cfg(test)]
+mod inlay_anchors {
+    use super::*;
+    use jetic::pipeline::Pipeline;
+
+    /// The user's screenshot, reproduced end to end: hints inserted
+    /// mid-identifier in signatures (`np_u12⟨ -> T⟩8`) and mid-member-chain
+    /// (`r⟨ -> T⟩.hi`) once `#import` expansion shifted the AST's flattened
+    /// line numbers off the document's own. Anchoring must search the
+    /// document's line (after projection) and never split a token or a chain.
+    #[test]
+    fn hints_never_split_a_token_or_a_member_chain() {
+        let real_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../include/Foundation/NPDecimalNumber.jeti"
+        );
+        let real_path = std::fs::canonicalize(real_path).expect("canonicalize");
+        let real_path = real_path.to_str().expect("utf8 path");
+        let src = std::fs::read_to_string(real_path).expect("read NPDecimalNumber.jeti");
+        let mut pipeline = Pipeline::new();
+        // Mirror the editor: compile_flags.txt gives `-I include` from the
+        // workspace root — absolute so the test is cwd-independent.
+        pipeline.search_dirs =
+            vec![concat!(env!("CARGO_MANIFEST_DIR"), "/../../include").to_string()];
+        let analysis = pipeline.analyze_document(&src, real_path);
+        let ast = analysis.ast.as_ref().expect("imports resolve to an AST");
+        let index = SymbolIndex::build(
+            ast,
+            &analysis.source_map,
+            // Faithful to the server: the document's own text for its own
+            // path, disk for imported headers.
+            &|p: &str| {
+                if p == real_path {
+                    Some(src.clone())
+                } else {
+                    std::fs::read_to_string(p).ok()
+                }
+            },
+            real_path,
+        );
+        let hints = index.inlay_hints(&crate::cheader::CSignatures::default());
+        assert!(
+            hints.len() > 500,
+            "the real file yields a full hint set, got {}",
+            hints.len()
+        );
+
+        let offsets = line_offsets(&src);
+        let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+        let bad: Vec<String> = hints
+            .iter()
+            .filter_map(|h| {
+                // `line_slice` is 1-based; a hint's LSP line is 0-based.
+                let line = line_slice(&src, &offsets, h.position.line as usize + 1)?;
+                let mut units = 0usize;
+                let mut before: Option<char> = None;
+                let mut at: Option<char> = None;
+                for (bi, ch) in line.char_indices() {
+                    if units >= h.position.character as usize {
+                        at = Some(ch);
+                        let _ = bi;
+                        break;
+                    }
+                    if units + ch.len_utf16() > h.position.character as usize {
+                        // The anchor falls inside one multi-unit character.
+                        return Some(format!("line {} splits a character", h.position.line));
+                    }
+                    before = Some(ch);
+                    units += ch.len_utf16();
+                }
+                let at = match at {
+                    Some(c) => c,
+                    // End of line: nothing to split.
+                    None => return None,
+                };
+                let before = before.unwrap_or(' ');
+                if is_ident(before) && is_ident(at) {
+                    return Some(format!("line {}: …{before}⟨{}⟩{at}…", h.position.line, h.label));
+                }
+                if is_ident(before) && (at == '.' || at == '[') {
+                    return Some(format!(
+                        "line {}: splits a chain: …{before}⟨{}⟩{at}…",
+                        h.position.line, h.label
+                    ));
+                }
+                None
+            })
+            .collect();
+        assert!(bad.is_empty(), "mis-anchored hints:\n{}", bad.join("\n"));
     }
 }
