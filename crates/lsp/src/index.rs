@@ -216,6 +216,23 @@ pub struct InlayHint {
     pub kind: u8,
 }
 
+/// A member access *use* in a body (`r.lo`, `self->_handle`) whose host
+/// aggregate resolved: the hover surface for fields outside their
+/// declaration region (declarations answer through `field_positions`).
+#[derive(Debug, Clone)]
+pub struct MemberUse {
+    /// The whole chain's extent — any cursor inside it that no narrower
+    /// answer covers reads as this member.
+    pub range: LspRange,
+    pub member: String,
+    /// The host aggregate's key into [`SymbolIndex::layouts`].
+    pub struct_name: String,
+    pub is_union: bool,
+    /// The field's type as the layout spells it, shown by both the hover card
+    /// and the use-site hint.
+    pub type_spelling: String,
+}
+
 /// A member offered after a receiver: a method selector, a property or an ivar.
 #[derive(Debug, Clone)]
 pub struct MemberEntry {
@@ -370,6 +387,10 @@ pub struct SymbolIndex {
     /// Field declaration positions keyed by field name: the hover surface for
     /// struct/union members, which the symbol tree does not index.
     pub field_positions: HashMap<String, Vec<FieldRef>>,
+    /// Member accesses in bodies whose host aggregate resolved, in source
+    /// order: the hover surface for a field *use* (`r.lo`) away from its
+    /// declaration.
+    member_uses: Vec<MemberUse>,
     /// Names the semantic-token scan colors, collected on the same build walk:
     /// enum names and every enum member (flat — member names are matched
     /// wherever written), and file-scope variables.
@@ -445,12 +466,69 @@ impl SymbolIndex {
         let (layouts, typedef_types) = jeti_layout::collect_layouts(&ast.decls);
         index.layouts = layouts;
         index.typedef_types = typedef_types;
+        index.extend_layouts_with_typedef_aggregates(&ast.decls);
         index.roots = index.visit(&ast.decls, None, source_map, document, &mut lookup);
         index.collect_field_positions(&ast.decls, source_map, &mut lookup);
         index.attach_namespaces(ast, source_map, &mut lookup);
         index.read_usings(&ast.usings);
         index.resolve_protocol_inheritance();
         index
+    }
+
+    /// `typedef struct { … } np_u128;` files its body under the typedef, not
+    /// under a named aggregate, so `collect_layouts` has no entry for the alias
+    /// and the hover/member answers would have no table to read. Synthesize the
+    /// aggregate the C tag would have had, keyed by the alias — and by the tag
+    /// name when the typedef spells one (`typedef struct Tag { … } Alias;`),
+    /// because `struct Tag t;` names the same layout.
+    ///
+    /// The parser drops `union` for an anonymous body (the CST keeps only
+    /// `struct_fields`), so an anonymous typedef is taken as a struct — the
+    /// shape the Foundation headers use. A typedef over a *named* tag keeps its
+    /// `TagKind`, `union` included.
+    fn extend_layouts_with_typedef_aggregates(&mut self, decls: &[AstDecl]) {
+        for decl in decls {
+            let AstDeclData::Typedef { struct_fields, aliased_type } = &decl.data else {
+                continue;
+            };
+            self.extend_layouts_with_typedef_aggregates(struct_fields);
+            let (Some(alias), false) = (&decl.name, struct_fields.is_empty()) else {
+                continue;
+            };
+            let tag = aliased_type.as_deref().map(|t| t.tag);
+            let synth = |name: &str| AstDecl {
+                kind: jeti_ast::AstDeclKind::Struct,
+                line: decl.line,
+                col: decl.col,
+                name: Some(name.to_string()),
+                data: AstDeclData::Aggregate {
+                    fields: struct_fields.clone(),
+                    is_union: matches!(tag, Some(jeti_cst::TagKind::Union)),
+                },
+                attributes: Vec::new(),
+                end_line: decl.end_line,
+                end_col: decl.end_col,
+            };
+            // The alias first: a bare `np_u128 r;` spells the alias, and the
+            // tag (if any) is what `struct Tag r;` spells.
+            let tag_name = aliased_type.as_deref().and_then(|t| t.name.clone());
+            let mut names = vec![alias.clone()];
+            if let Some(tag_name) = tag_name.filter(|n| n != alias) {
+                names.push(tag_name);
+            }
+            for name in names {
+                if self.layouts.contains_key(&name) {
+                    continue;
+                }
+                if let Some(layout) =
+                    jeti_layout::layout_of(&synth(&name), &self.layouts, &self.typedef_types)
+                {
+                    if !layout.name.is_empty() {
+                        self.layouts.insert(name, layout);
+                    }
+                }
+            }
+        }
     }
 
     /// Parent protocols' selectors become members of the child, ObjC-style:
@@ -662,6 +740,23 @@ impl SymbolIndex {
                 (
                     f.range.end.line.saturating_sub(f.range.start.line),
                     f.range.end.character.saturating_sub(f.range.start.character),
+                )
+            })
+    }
+
+    /// The member access at `position` whose host aggregate resolved — the
+    /// hover answer for a field *use* (`r.lo` in a body), which
+    /// `field_positions` cannot give because the declaration is elsewhere. The
+    /// narrowest match wins: an inner ring's own extent beats the whole
+    /// chain's.
+    pub fn member_use_at(&self, name: &str, position: LspPosition) -> Option<&MemberUse> {
+        self.member_uses
+            .iter()
+            .filter(|u| u.member == name && u.range.start <= position && position <= u.range.end)
+            .min_by_key(|u| {
+                (
+                    u.range.end.line.saturating_sub(u.range.start.line),
+                    u.range.end.character.saturating_sub(u.range.start.character),
                 )
             })
     }
@@ -1415,7 +1510,24 @@ impl SymbolIndex {
                     }
                     self.collect_field_positions(fields, source_map, lookup);
                 }
-                AstDeclData::Typedef { struct_fields, .. } => {
+                AstDeclData::Typedef { struct_fields, aliased_type } => {
+                    // The layout engine keys a typedef'd aggregate by its alias
+                    // (`extend_layouts_with_typedef_aggregates` installs that
+                    // entry), so the fields answer under the same name.
+                    if let (Some(name), false) = (&decl.name, struct_fields.is_empty()) {
+                        let is_union = matches!(
+                            aliased_type.as_deref().map(|t| t.tag),
+                            Some(jeti_cst::TagKind::Union)
+                        );
+                        self.record_fields(
+                            struct_fields.iter(),
+                            name,
+                            is_union,
+                            decl,
+                            source_map,
+                            lookup,
+                        );
+                    }
                     self.collect_field_positions(struct_fields, source_map, lookup);
                 }
                 AstDeclData::Class { methods, ivars, impl_vars, .. } => {
@@ -1658,6 +1770,7 @@ impl SymbolIndex {
                 sites: &mut self.sites,
                 calls: &mut self.calls,
                 type_hints: &mut self.type_hints,
+                member_uses: &mut self.member_uses,
                 line_offsets: self.line_offsets.clone(),
                 layouts: &self.layouts,
                 source_map,
@@ -2335,6 +2448,32 @@ fn param_list_end(
     None
 }
 
+/// The aggregate name behind a spelled type: `np_u128 *`, `struct Point` and
+/// `const Foo` all name the same layout. Anything else (a block type, a
+/// function pointer, an array) is not an aggregate — `None`, so callers stay
+/// silent instead of resolving a member against the wrong table.
+fn strip_to_aggregate_name(spelling: &str) -> Option<String> {
+    let mut name = spelling.trim();
+    loop {
+        let mut changed = false;
+        for keyword in ["const ", "volatile ", "struct ", "union ", "enum "] {
+            if let Some(rest) = name.strip_prefix(keyword) {
+                name = rest.trim();
+                changed = true;
+            }
+        }
+        if let Some(rest) = name.strip_suffix('*') {
+            name = rest.trim();
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+    (!name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+        .then(|| name.to_string())
+}
+
 fn ast_type_spell(ty: &AstType) -> String {
     let mut s = String::new();
     if ty.is_const && !ty.is_pointer { s.push_str("const "); }
@@ -2817,16 +2956,19 @@ struct BodyWalk<'a> {
     calls: &'a mut Vec<CallSite>,
     /// Use-site type inlays, collected here (see [`SymbolIndex::type_hints`]).
     type_hints: &'a mut Vec<InlayHint>,
+    /// Member accesses whose host aggregate resolved, in source order: the
+    /// hover surface for a field *use* away from its declaration.
+    member_uses: &'a mut Vec<MemberUse>,
     /// Line-start offsets, shared with the index (see [`SymbolIndex::line_offsets`]).
     line_offsets: std::sync::Arc<Vec<usize>>,
     /// Struct/union layouts, for the field names a designator inlay spells.
     layouts: &'a HashMap<String, jeti_layout::StructLayout>,
     source_map: &'a SourceMap,
     text: &'a str,
-    /// VarRefs that must stay hint-free: the direct base of a member access
-    /// (`r.hi`) or a subscript (`arr[i]`). A use-site hint after the base
-    /// splits the chain visually (`r⟨ -> T⟩.hi`) and says nothing the
-    /// declaration doesn't already spell.
+    /// Expressions that must stay hint-free: the direct base of a member
+    /// access (`r.hi`), a subscript (`arr[i]`) or a prefix operator (`*p`). A
+    /// use-site hint after the base splits the chain visually
+    /// (`r⟨ -> T⟩.hi`) and says nothing the declaration doesn't already spell.
     chain_bases: HashSet<(usize, usize)>,
 }
 
@@ -2844,12 +2986,114 @@ impl BodyWalk<'_> {
     }
 
     /// Remember a direct chain base — the `r` of `r.hi`, the `arr` of
-    /// `arr[i]`, the `p` of `*p`, a send's named receiver — so the use-site
-    /// hint never inserts between the base and its operator.
+    /// `arr[i]`, the `p` of `*p`, a send's named receiver, the `a.b` of
+    /// `a.b.c` — so no hint is inserted between the base and its operator.
     fn record_chain_base(&mut self, expr: &AstExpr) {
-        if matches!(expr.data, AstExprData::VarRef { .. }) {
-            self.chain_bases.insert((expr.line, expr.col));
+        self.chain_bases.insert((expr.line, expr.col));
+    }
+
+    /// A member access whose host aggregate resolved: a [`MemberUse`] so hover
+    /// answers away from the declaration, plus — only for the outermost ring of
+    /// a chain — the clangd-style use-site type hint. An inner ring (`a.b` in
+    /// `a.b.c`, the base of `x.arr[i]`) says nothing: the hint belongs after the
+    /// whole chain, never inside it.
+    fn member_access(
+        &mut self,
+        expr: &AstExpr,
+        member: Option<&str>,
+        cls: Option<&str>,
+        obj: &AstExpr,
+    ) {
+        let Some(member) = member.filter(|m| !m.is_empty()) else {
+            return;
+        };
+        let Some(host) = self.member_host(cls, obj) else {
+            return;
+        };
+        let Some(layout) = self.layouts.get(&host) else {
+            return;
+        };
+        let Some(field) = layout.fields.iter().find(|f| f.name == member) else {
+            return;
+        };
+        let is_union = layout.is_union;
+        let spelling = field.type_spelling.trim().to_string();
+        let Some(range) = self.expr_range(expr) else {
+            return;
+        };
+        self.member_uses.push(MemberUse {
+            range,
+            member: member.to_string(),
+            struct_name: host,
+            is_union,
+            type_spelling: spelling.clone(),
+        });
+        if !spelling.is_empty() && !self.chain_bases.contains(&(expr.line, expr.col)) {
+            self.type_hints.push(InlayHint {
+                position: range.end,
+                label: format!(" -> {spelling}"),
+                kind: 1,
+            });
         }
+    }
+
+    /// The aggregate a member access's base has, when the base's type is
+    /// spelled out (a local, an ivar, another member access). The elaborator
+    /// resolves a class member's class itself, which beats re-deriving it.
+    fn member_host(&self, cls: Option<&str>, obj: &AstExpr) -> Option<String> {
+        match cls {
+            Some(cls) => Some(cls.to_string()),
+            None => self.expr_aggregate(obj),
+        }
+    }
+
+    /// The aggregate name behind an expression's type: `np_u128 *` and
+    /// `struct Point` name layouts too. Anything the walk cannot name (a send
+    /// result, an array element) stays unresolved — the member then says
+    /// nothing rather than guessing.
+    fn expr_aggregate(&self, expr: &AstExpr) -> Option<String> {
+        if let AstExprData::IvarRef { cls: Some(cls), .. }
+        | AstExprData::PropRef { cls: Some(cls), .. } = &expr.data
+        {
+            return Some(cls.clone());
+        }
+        strip_to_aggregate_name(&self.expr_type_spelling(expr)?)
+    }
+
+    /// The spelled type of an expression the walk can name: locals answer from
+    /// the declaration table, member accesses chain through the layouts table.
+    fn expr_type_spelling(&self, expr: &AstExpr) -> Option<String> {
+        match &expr.data {
+            AstExprData::VarRef { name, .. } => self
+                .hover_locals
+                .iter()
+                .find(|l| &l.name == name)
+                .map(|l| l.type_spelling.clone())
+                .filter(|s| !s.is_empty()),
+            AstExprData::IvarRef { ivar, cls, obj } => {
+                let host = self.member_host(cls.as_deref(), obj)?;
+                self.field_spelling(&host, ivar.as_deref()?)
+            }
+            AstExprData::PropRef { prop, name, cls, obj, .. } => {
+                let host = self.member_host(cls.as_deref(), obj)?;
+                self.field_spelling(&host, prop.as_deref().unwrap_or(name.as_str()))
+            }
+            AstExprData::Paren(inner) | AstExprData::Boxed(inner) => self.expr_type_spelling(inner),
+            // `(*p).x` / `p->x`: the pointer's spelling already names the
+            // aggregate once the stars are stripped.
+            AstExprData::Unary { operand, .. } => self.expr_type_spelling(operand),
+            _ => None,
+        }
+    }
+
+    fn field_spelling(&self, host: &str, member: &str) -> Option<String> {
+        self.layouts
+            .get(host)?
+            .fields
+            .iter()
+            .find(|f| f.name == member)
+            .map(|f| f.type_spelling.trim().to_string())
+            .filter(|s| !s.is_empty())
     }
 
     /// The position just past the declarator `name` on the declaration's first
@@ -3118,7 +3362,14 @@ impl BodyWalk<'_> {
                     self.expr(arg);
                 }
             }
-            AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => {
+            AstExprData::IvarRef { ivar, cls, obj } => {
+                self.member_access(expr, ivar.as_deref(), cls.as_deref(), obj);
+                self.record_chain_base(obj);
+                self.expr(obj);
+            }
+            AstExprData::PropRef { prop, name, cls, obj, .. } => {
+                let member = prop.as_deref().unwrap_or(name.as_str());
+                self.member_access(expr, Some(member), cls.as_deref(), obj);
                 self.record_chain_base(obj);
                 self.expr(obj);
             }
@@ -4186,6 +4437,78 @@ int main() {
         assert_eq!(hints[0].label, "fmt: ");
     }
 
+    /// The chain base stays hint-free (that was #11's fix), but the member
+    /// access itself must still say what it is — once, after the *outermost*
+    /// ring (clangd's place). The host aggregate is a `typedef struct { … } T;`
+    /// whose layout the plain collector does not key, so this also pins the
+    /// synthesized entry.
+    #[test]
+    fn member_access_hints_land_after_the_whole_chain() {
+        let src = "\
+typedef struct { int hi; int lo; } np_u128;
+typedef struct { np_u128 full; } Holder;
+int main() {
+    np_u128 r;
+    r.hi = 1;
+    Holder h;
+    h.full.hi = 2;
+    return r.lo + h.full.lo;
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/member.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/member.jeti",
+        );
+        let hints = index.inlay_hints(&crate::cheader::CSignatures::default());
+        let pos_of = |needle: &str, inside: usize| -> LspPosition {
+            let offset = src.find(needle).expect("needle") + inside;
+            let before = &src[..offset];
+            let line = before.matches('\n').count() as u32;
+            let column = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
+            LspPosition { line, character: column }
+        };
+        let labels_at = |needle: &str| -> Vec<&str> {
+            let position = pos_of(needle, needle.len());
+            hints
+                .iter()
+                .filter(|h| h.position == position)
+                .map(|h| h.label.as_str())
+                .collect()
+        };
+        // One hint per statement, sitting past the whole member expression.
+        assert_eq!(labels_at("r.hi"), vec![" -> int"], "{hints:?}");
+        assert_eq!(labels_at("h.full.hi"), vec![" -> int"], "{hints:?}");
+        assert_eq!(labels_at("h.full.lo"), vec![" -> int"], "{hints:?}");
+        // Inner rings stay silent: a hint between `h` and `.full`, or between
+        // `h.full` and `.hi`, would split the chain.
+        assert!(
+            hints.iter().all(|h| h.label != " -> np_u128" && h.label != " -> Holder"),
+            "{hints:?}"
+        );
+
+        // The hover surface for a *use*: the declaration is on another line, so
+        // `field_at` cannot answer — the member walk recorded the host and type.
+        let use_hi = index
+            .member_use_at("hi", pos_of("h.full.hi", 7))
+            .expect("outermost ring resolves");
+        assert_eq!(use_hi.struct_name, "np_u128");
+        assert_eq!(use_hi.type_spelling, "int");
+        let use_full = index
+            .member_use_at("full", pos_of("h.full.hi", 3))
+            .expect("inner ring resolves too");
+        assert_eq!(use_full.struct_name, "Holder");
+
+        // The typedef'd aggregate's own fields answer at their declaration.
+        let declared = index
+            .field_at("lo", pos_of("int lo", 4))
+            .expect("typedef field declaration");
+        assert_eq!(declared.struct_name, "np_u128");
+    }
+
     #[test]
     fn external_c_functions_hint_through_the_header_table() {
         // Note: a string-literal argument gets no hint today — the AST gives
@@ -4473,6 +4796,30 @@ mod inlay_anchors {
         );
 
         let offsets = line_offsets(&src);
+        // The member accesses in the real file resolve through the synthesized
+        // `np_u128` layout: a hint after the whole chain, and a hover surface
+        // for the use. `u128_make` spells both shapes on one line.
+        let doc_line = src
+            .lines()
+            .position(|l| l.contains("r.hi = hi"))
+            .expect("u128_make body");
+        let character = src
+            .lines()
+            .nth(doc_line)
+            .and_then(|l| l.find("r.hi"))
+            .expect("r.hi") as u32
+            + 4;
+        let member = index
+            .member_use_at("hi", LspPosition { line: doc_line as u32, character })
+            .expect("r.hi resolves");
+        assert_eq!(member.struct_name, "np_u128");
+        assert_eq!(member.type_spelling, "uint64_t");
+        assert!(
+            hints
+                .iter()
+                .any(|h| h.position.line == doc_line as u32 && h.label == " -> uint64_t"),
+            "the member chain says its type: {hints:?}"
+        );
         let is_ident = |c: char| c.is_alphanumeric() || c == '_';
         let bad: Vec<String> = hints
             .iter()

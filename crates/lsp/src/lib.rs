@@ -795,6 +795,31 @@ impl Server {
                             }
                         }
                     }
+                    // A field *use* in a body (`r.lo`): the declaration is
+                    // elsewhere, so `field_at` cannot answer — the member walk
+                    // recorded the host aggregate and the field type. Prefer
+                    // the declaration's own card (it adds the declaration line
+                    // and snippet) and fall back to the member-only card when
+                    // that declaration sits in an unreadable file.
+                    if hover.is_null() {
+                        if let Some(word) = word_at(&doc.text, position) {
+                            if let Some(member) = index.member_use_at(&word, position) {
+                                let declared = index
+                                    .field_positions
+                                    .get(&word)
+                                    .and_then(|refs| {
+                                        refs.iter()
+                                            .find(|f| f.struct_name == member.struct_name)
+                                    })
+                                    .and_then(|fref| field_hover_markdown(index, fref, &word, &resolve));
+                                let markdown =
+                                    declared.unwrap_or_else(|| member_use_markdown(member, &word));
+                                hover = json!({
+                                    "contents": { "kind": "markdown", "value": markdown },
+                                });
+                            }
+                        }
+                    }
                     if hover.is_null() {
                     match index.resolve_at(&doc.text, position) {
                         // A namespace is known by what it holds: there is no
@@ -1747,6 +1772,20 @@ fn field_hover_markdown(
         fref.line
     ));
     Some(markdown)
+}
+
+/// Card for a field *use* whose declaration line could not be read (a
+/// typedef'd aggregate in a file the server never opened): names the member,
+/// its host and its type — and says nothing about size rather than inventing
+/// one.
+fn member_use_markdown(member: &index::MemberUse, name: &str) -> String {
+    let kind_word = if member.is_union { "union" } else { "struct" };
+    let mut markdown = format!("**field** `{name}` · in `{kind_word} {}`", member.struct_name);
+    if !member.type_spelling.is_empty() {
+        markdown.push_str(&format!("\n\nType: {}", member.type_spelling));
+    }
+    markdown.push('\n');
+    markdown
 }
 
 /// clangd-parity layout card for a struct/union/typedef symbol: title line,
@@ -3268,6 +3307,44 @@ int main(void) { return 0; }
         let value = hover_at("int laps", 4).expect("ivar hover");
         assert!(value.contains("**field** `laps`"), "{value}");
         assert!(value.contains("Runner"), "{value}");
+    }
+
+    #[test]
+    /// A field *use* in a body (`r.lo`, away from the declaration) answers the
+    /// same card the declaration does. It used to be blank: `field_at` only
+    /// matches the aggregate's own extent, and the use is elsewhere.
+    fn hover_answers_for_a_field_use_in_a_body() {
+        let src = "\
+typedef struct { int hi; int lo; } np_u128;
+int main(void) {
+  np_u128 r;
+  r.lo = 2;
+  return r.lo;
+}
+";
+        let hover_at = |needle: &str, extra: usize| {
+            let pos = position(src, needle, extra);
+            let mut server = Server::new(AnalysisOptions::default());
+            let uri = path_to_uri("/tmp/jeti_lsp_unit/field_use.jeti");
+            server.handle(&json!({
+                "jsonrpc": "2.0", "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": uri, "languageId": "jeti", "version": 1, "text": src,
+                }},
+            }));
+            let out = server.handle(&json!({
+                "jsonrpc": "2.0", "id": 40, "method": "textDocument/hover",
+                "params": { "textDocument": { "uri": uri },
+                            "position": position_json(pos) },
+            }));
+            out[0]["result"]["contents"]["value"].as_str().map(str::to_string)
+        };
+
+        let value = hover_at("r.lo = 2", 2).expect("member use hover");
+        assert!(value.contains("**field** `lo`"), "{value}");
+        assert!(value.contains("in `struct np_u128`"), "{value}");
+        assert!(value.contains("Type: int"), "{value}");
+        assert!(value.contains("Declared in"), "{value}");
     }
 
     #[test]
