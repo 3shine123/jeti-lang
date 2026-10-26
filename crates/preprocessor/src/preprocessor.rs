@@ -440,9 +440,15 @@ fn resolve_source(
 
 /// Predefined macros (target platform/compiler). jetic always emits C that is
 /// compiled by clang (or gcc via zig), so `__clang__`/`__GNUC__` are defined.
+/// `_WIN32`: the preprocessor resolves `#ifdef` at flatten time, before any C
+/// compiler runs — define it when jetic itself runs on Windows, or when the
+/// target is forced there with `JETIC_WINDOWS=1` (zig-cc cross builds, and
+/// local verification of Win32-only source paths).
 fn predefined_macro(name: &str) -> bool {
     matches!(name,
         "__APPLE__" | "__MACH__" | "__LP64__" | "__x86_64__" | "__aarch64__" | "__amd64__")
+        || (name == "_WIN32"
+            && (cfg!(windows) || std::env::var_os("JETIC_WINDOWS").is_some()))
 }
 
 /// Evaluate a `#if`/`#elif` expression. Per the standard (ISO 9899 §6.10.1p4)

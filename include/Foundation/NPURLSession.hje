@@ -1,0 +1,38 @@
+#ifndef NPURLSESSION_NH
+#define NPURLSESSION_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPData.hje>
+#import <Foundation/NPURL.hje>
+
+// NPURLSession —— HTTP 客户端（对应 ObjC 的 NSURLSession 的同步子集）。
+//
+// v1 是**同步 GET**：直接走 socket（hosted，POSIX/Win32 双后端），拿到响应体
+// 就返回。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **只有 http://**：没有 TLS，https:// 直接拒绝（返回 nil，不静默降级成明文）。
+//   需要 https 请由宿主提供 TLS 层（Jeti 运行期不捆绑 TLS）。
+// - **同步、无任务模型**：没有 `NSURLSessionTask` / delegate / 回调；`-dataWithContentsOfURL:`
+//   阻塞到响应结束。协作式单线程运行期里这会挡住整个事件泵。
+// - **无重定向/无 cookie/无认证/无代理**：3xx 原样返回（不跟随）。
+// - 响应体支持 `Content-Length` 与 `Transfer-Encoding: chunked` 两种界定；
+//   两者都没有时按"读到连接关闭"处理。
+// - `-ffreestanding` 下不可用（无 socket）：方法返回 nil，并在 README 的诚实
+//   边界里写明。
+// - 超时是 `SO_RCVTIMEO`/`SO_SNDTIMEO` 级别的秒数（默认 30）。
+@interface NPURLSession : NPObject {
+@public
+    int _timeoutSeconds;
+}
++ (NPURLSession *)sharedSession;
+- (void)setTimeoutSeconds:(int)seconds;
+- (int)timeoutSeconds;
+// 同步 GET；失败（不支持的 scheme、解析/连接/发送/接收失败）返回 nil。
+- (NPData *)dataWithContentsOfURL:(NPURL *)url;
+// 同上，按 UTF-8 解成字符串；失败返回 nil。
+- (NPString *)stringWithContentsOfURL:(NPURL *)url;
+@end
+
+#endif

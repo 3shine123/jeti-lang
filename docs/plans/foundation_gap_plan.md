@@ -127,13 +127,28 @@
 2. **P1 核对补齐已有半成品**：`NPCache` 逐出策略、`NPPredicate` 的
    `NPExpression` 层、`NPNotificationCenter` 的独立 `NPNotification` 对象与
    合并队列、`NPString` 编码 API。
-3. **P2 需运行期能力**：`NPLock`/`NPThread`/`NPOperationQueue`（需真实线程）、
-   `NPRegularExpression`（需引擎）、`NPDateFormatter`/`NPCalendar`（需日历算法）、
-   `NPDecimalNumber`（需大数十进制）。
-4. **P3 大工程**：`NPURLSession`（socket 层）、`NPKeyedArchiver`、
-   `NPAttributedString`（联动 libui）。
+3. **P2 需运行期能力**（已完成）：`NPLock`/`NPRecursiveLock`（`__atomic_*` 自旋，
+   与 runtime.c 的 C11 atomic_flag 同一套机制，**不引入 pthread**）、
+   `NPRegularExpression`（自研回溯引擎，无 ICU）、`NPDateFormatter`/`NPCalendar`/
+   `NPDateComponents`（Hinnant 整数算法）、`NPDecimalNumber`（128 位十进制，
+   38 位精度）。
+   **P2/P3 并发栈已补全**（运行期线程层落地后）：运行期新增
+   `jeti_thread_*/jeti_mutex_*/jeti_cond_*` 双后端原语（Win32 CRITICAL_SECTION +
+   CONDITION_VARIABLE / POSIX pthread，`runtime.h`/`runtime.c`，freestanding 不
+   编译），hosted 引用计数原子化；`NPThread`（真线程 + join）、`NPCondition`
+   （mutex+cond 一体）、`NPOperationQueue`（工作线程池，FIFO/
+   maxConcurrent/waitUntilAll/协作取消）、`NPRunLoop -performBlock:`（线程安全
+   的主队列调度接口，容量 64，满时显式失败）全部实现并有确定性 golden
+   （`tests/golden/13_foundation/31_locks|35_thread|36_condition|37_operation_queue`）。
+   诚实边界随实现记录在各头文件：操作是裸块（无 NSOperation 依赖图/QoS）、
+   cancel 均为协作式、队列容量固定（满时背压）、`-waitUntilDate:` 未做。
+4. **P3 大工程**：`NPURLSession`（socket 层，POSIX/Win32 双后端已完成——
+   Winsock 分支经 mingw 交叉实证）、`NPKeyedArchiver`（已完成）、
+   `NPAttributedString`（v1 单 run 数据层已完成；区间 run 待做）。
 5. **明确不做（诚实边界，写进 README）**：KVO、`NSInvocation` 反射、
    `NSDistributedNotificationCenter`、`NSGarbageCollector`。
+   （`NPThread`/`NPOperationQueue`/`NPCondition` 已从本清单移除——运行期线程层
+   落地后三者均已实现；原"需要线程创建与阻塞原语"的边界不再成立。）
 
 ## 落地纪律（每个新类都要过一遍）
 

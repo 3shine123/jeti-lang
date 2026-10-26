@@ -1,0 +1,309 @@
+#import <Foundation/NPURLSession.hje>
+#import <Foundation/NPString.jeti>
+#import <Foundation/NPData.jeti>
+#import <Foundation/NPURL.jeti>
+#import <Foundation/NPNumber.jeti>
+#import <Foundation/NPObject.jeti>
+
+#include <string.h>
+#include <stdlib.h>
+
+// NPURLSession 实现：hosted 下用 POSIX socket 做同步 HTTP/1.0 GET。
+// http:// only、无 TLS、无重定向：见 .hje 的诚实边界。
+
+#define NP_URLS_DEFAULT_TIMEOUT 30
+
+#ifndef __JETI_FREESTANDING
+
+// socket 层双后端（同 runtime 线程层的 pthread/Win32 划分）：
+// POSIX 用 int 描述符 + ssize_t；Win32 用 SOCKET + int（send/recv 长度参数
+// 是 int，发送前按 INT_MAX 分块）。closesocket/close 由宏统一。
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET np_urls_sock_t;
+#define NP_URLS_SOCK_BAD INVALID_SOCKET
+#define np_urls_close(fd) closesocket(fd)
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/time.h>
+typedef int np_urls_sock_t;
+#define NP_URLS_SOCK_BAD (-1)
+#define np_urls_close(fd) close(fd)
+#endif
+
+// 建到 host:port 的 TCP 连接；失败返回 NP_URLS_SOCK_BAD。
+static np_urls_sock_t np_urls_connect(const char *host, const char *port, int timeout) {
+#ifdef _WIN32
+    // 进程内一次性 WSAStartup。重复调用合法（引用计数），不配对 WSACleanup
+    // 是有意的：库生命周期与进程一致，无需清理路径。
+    static int wsa_ready = 0;
+    if (!wsa_ready) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { return NP_URLS_SOCK_BAD; }
+        wsa_ready = 1;
+    }
+#endif
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = NULL;
+    if (getaddrinfo(host, port, &hints, &res) != 0) { return NP_URLS_SOCK_BAD; }
+    np_urls_sock_t fd = NP_URLS_SOCK_BAD;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+#ifdef _WIN32
+        if (fd == INVALID_SOCKET) { continue; }
+        DWORD tv = (DWORD)timeout * 1000;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof tv);
+#else
+        if (fd < 0) { continue; }
+        struct timeval tv;
+        tv.tv_sec = timeout;
+        tv.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+#endif
+        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) { break; }
+        np_urls_close(fd);
+        fd = NP_URLS_SOCK_BAD;
+    }
+    freeaddrinfo(res);
+    return fd;
+}
+
+static int np_urls_send_all(np_urls_sock_t fd, const char *buf, size_t len) {
+    size_t off = 0;
+    while (off < len) {
+        // Win32 的 send 长度参数是 int：按 1 GiB 分块，POSIX 上无副作用。
+        int chunk = (len - off > 0x40000000) ? 0x40000000 : (int)(len - off);
+#ifdef _WIN32
+        int n = send(fd, buf + off, chunk, 0);
+#else
+        ssize_t n = send(fd, buf + off, (size_t)chunk, 0);
+#endif
+        if (n <= 0) { return 0; }
+        off += (size_t)n;
+    }
+    return 1;
+}
+
+// 读到 EOF；返回堆缓冲（调用方 free），长度写入 *out_len；失败返回 NULL。
+static char *np_urls_read_all(np_urls_sock_t fd, size_t *out_len) {
+    size_t cap = 8192;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { return NULL; }
+    for (;;) {
+        if (len + 4096 + 1 > cap) {
+            size_t ncap = cap * 2;
+            char *nb = (char *)realloc(buf, ncap);
+            if (!nb) { free(buf); return NULL; }
+            buf = nb;
+            cap = ncap;
+        }
+#ifdef _WIN32
+        int n = recv(fd, buf + len, 4096, 0);
+#else
+        ssize_t n = recv(fd, buf + len, 4096, 0);
+#endif
+        if (n <= 0) { break; }
+        len += (size_t)n;
+    }
+    buf[len] = '\0';
+    *out_len = len;
+    return buf;
+}
+
+// 十六进制长度解析（chunk 头）；失败返回 -1。
+static long np_urls_hexlen(const char *p, size_t len, size_t *consumed) {
+    long v = 0;
+    size_t i = 0;
+    int any = 0;
+    while (i < len) {
+        char c = p[i];
+        int d;
+        if (c >= '0' && c <= '9') { d = c - '0'; }
+        else if (c >= 'a' && c <= 'f') { d = c - 'a' + 10; }
+        else if (c >= 'A' && c <= 'F') { d = c - 'A' + 10; }
+        else { break; }
+        v = v * 16 + d;
+        i++;
+        any = 1;
+    }
+    if (!any) { return -1; }
+    // 跳过 chunk 头尾部（;ext 与 CRLF）
+    while (i < len && p[i] != '\n') { i++; }
+    if (i < len) { i++; }
+    *consumed = i;
+    return v;
+}
+
+// chunked 解码；返回堆缓冲（调用方 free）。
+static char *np_urls_dechunk(const char *p, size_t len, size_t *out_len) {
+    char *out = (char *)malloc(len + 1);
+    if (!out) { return NULL; }
+    size_t o = 0;
+    size_t i = 0;
+    while (i < len) {
+        size_t used = 0;
+        long sz = np_urls_hexlen(p + i, len - i, &used);
+        if (sz < 0) { free(out); return NULL; }
+        i += used;
+        if (sz == 0) { break; }                    // 末块
+        if (i + (size_t)sz > len) { free(out); return NULL; }
+        memcpy(out + o, p + i, (size_t)sz);
+        o += (size_t)sz;
+        i += (size_t)sz;
+        while (i < len && p[i] != '\n') { i++; }   // 块尾 CRLF
+        if (i < len) { i++; }
+    }
+    out[o] = '\0';
+    *out_len = o;
+    return out;
+}
+
+// 大小写不敏感的子串查找（响应头解析）。
+static const char *np_urls_find_ci(const char *hay, size_t hay_len, const char *needle) {
+    size_t nl = strlen(needle);
+    if (nl == 0 || hay_len < nl) { return NULL; }
+    for (size_t i = 0; i + nl <= hay_len; i++) {
+        size_t j = 0;
+        while (j < nl) {
+            char a = hay[i + j];
+            char b = needle[j];
+            if (a >= 'A' && a <= 'Z') { a = (char)(a - 'A' + 'a'); }
+            if (b >= 'A' && b <= 'Z') { b = (char)(b - 'A' + 'a'); }
+            if (a != b) { break; }
+            j++;
+        }
+        if (j == nl) { return hay + i; }
+    }
+    return NULL;
+}
+
+#endif  // !__JETI_FREESTANDING
+
+@implementation NPURLSession
+
++ (NPURLSession *)sharedSession {
+    static NPURLSession *shared = NULL;
+    if (!shared) {
+        shared = [[NPURLSession alloc] init];
+        if (shared) { shared->_timeoutSeconds = NP_URLS_DEFAULT_TIMEOUT; }
+    }
+    return shared;
+}
+
+- (void)setTimeoutSeconds:(int)seconds {
+    _timeoutSeconds = seconds > 0 ? seconds : NP_URLS_DEFAULT_TIMEOUT;
+}
+
+- (int)timeoutSeconds {
+    return _timeoutSeconds > 0 ? _timeoutSeconds : NP_URLS_DEFAULT_TIMEOUT;
+}
+
+- (NPData *)dataWithContentsOfURL:(NPURL *)url {
+#ifndef __JETI_FREESTANDING
+    if (!url) { return NULL; }
+    NPString *scheme = [url scheme];
+    if (!scheme || strcmp([scheme UTF8String], "http") != 0) {
+        return NULL;            // 只有 http://（https 不静默降级）
+    }
+    NPString *host = [url host];
+    if (!host) { return NULL; }
+    const char *host_s = [host UTF8String];
+    if (!host_s || host_s[0] == '\0') { return NULL; }
+
+    char port_s[16];
+    NPNumber *port = [url port];
+    if (port && [port intValue] > 0) {
+        snprintf(port_s, sizeof port_s, "%d", [port intValue]);
+    } else {
+        snprintf(port_s, sizeof port_s, "80");
+    }
+
+    // 请求目标 = path[?query]
+    NPString *path = [url path];
+    NPString *query = [url query];
+    char target[2048];
+    const char *path_s = path ? [path UTF8String] : NULL;
+    if (!path_s || path_s[0] == '\0') { path_s = "/"; }
+    if (query && [query UTF8String] && [query UTF8String][0] != '\0') {
+        snprintf(target, sizeof target, "%s?%s", path_s, [query UTF8String]);
+    } else {
+        snprintf(target, sizeof target, "%s", path_s);
+    }
+
+    np_urls_sock_t fd = np_urls_connect(host_s, port_s, [self timeoutSeconds]);
+    if (fd == NP_URLS_SOCK_BAD) { return NULL; }
+
+    char req[4096];
+    int rn = snprintf(req, sizeof req,
+                      "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n"
+                      "User-Agent: jeti-foundation/1.0\r\n\r\n",
+                      target, host_s);
+    if (rn <= 0 || !np_urls_send_all(fd, req, (size_t)rn)) {
+        np_urls_close(fd);
+        return NULL;
+    }
+
+    size_t raw_len = 0;
+    char *raw = np_urls_read_all(fd, &raw_len);
+    np_urls_close(fd);
+    if (!raw) { return NULL; }
+
+    // 头体分离：第一个空行之后是响应体。
+    char *body = NULL;
+    size_t body_len = 0;
+    for (size_t i = 0; i + 3 < raw_len; i++) {
+        if (raw[i] == '\r' && raw[i+1] == '\n' && raw[i+2] == '\r' && raw[i+3] == '\n') {
+            body = raw + i + 4;
+            body_len = raw_len - (i + 4);
+            break;
+        }
+    }
+    if (!body) {
+        free(raw);
+        return NULL;            // 连头都没读完：不是有效响应
+    }
+
+    size_t hdr_len = (size_t)(body - raw);
+    NPData *result = NULL;
+    const char *te = np_urls_find_ci(raw, hdr_len, "transfer-encoding:");
+    const char *cl = np_urls_find_ci(raw, hdr_len, "content-length:");
+    if (te && np_urls_find_ci(te, 64, "chunked")) {
+        size_t out_len = 0;
+        char *dec = np_urls_dechunk(body, body_len, &out_len);
+        if (dec) {
+            result = [NPData dataWithBytes:dec length:out_len];
+            free(dec);
+        }
+    } else if (cl) {
+        long n = strtol(cl + strlen("content-length:"), NULL, 10);
+        if (n >= 0 && (size_t)n <= body_len) { body_len = (size_t)n; }
+        result = [NPData dataWithBytes:body length:body_len];
+    } else {
+        result = [NPData dataWithBytes:body length:body_len];
+    }
+    free(raw);
+    return result;
+#else
+    (void)url;
+    return NULL;                // freestanding 无 socket（见诚实边界）
+#endif
+}
+
+- (NPString *)stringWithContentsOfURL:(NPURL *)url {
+    NPData *d = [self dataWithContentsOfURL:url];
+    if (!d) { return NULL; }
+    size_t n = [d length];
+    return [NPString stringWithUTF8String:(const char *)[d bytes]];   // 体以 NUL 结尾
+}
+
+@end
