@@ -15,9 +15,9 @@
     size_t _capacity;
 }
 
-+ (id)arrayWithObjects:(id *)objs count:(size_t)n;
-+ (id)arrayWithObject:(T)obj;
-+ (id)array;
++ (instancetype)arrayWithObjects:(id *)objs count:(size_t)n;
++ (instancetype)arrayWithObject:(T)obj;
++ (instancetype)array;
 
 - (size_t)count;
 - (T)objectAtIndex:(size_t)index;
@@ -43,7 +43,7 @@
 // compareObject:toObject: (direction already folded in there). A nil/empty
 // descriptor array returns an unsorted copy.
 - (NPArray *)sortedArrayUsingDescriptors:(NPArray *)descriptors;
-- (id)copy;
+- (instancetype)copy;
 - (NPString *)description;
 
 @end

@@ -1,0 +1,412 @@
+#import <Foundation/NPRegularExpression.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPObject.jeti>
+
+#include <string.h>
+
+// NPRegularExpression 实现：自研回溯引擎（无 ICU 依赖，见 .hje 的诚实边界）。
+//
+// 结构：模式文本上的递归下降 —— re_match_here 处理顶层选择 `|`，
+// re_match_seq 处理一条分支上的「原子 + 量词」序列，re_match_atom 匹配单个原子。
+// 量词贪婪（先多吃再回退），回溯步数受 _step_limit 约束：预算耗尽按"不匹配"
+// 处理，绝不挂死。
+
+typedef struct {
+    const char *txt;
+    int tlen;
+    long long steps;
+    long long limit;
+} re_ctx;
+
+#define NP_RE_DEFAULT_STEPS 200000LL
+
+static int re_is_digit(char c) { return c >= '0' && c <= '9'; }
+static int re_is_word(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || re_is_digit(c) || c == '_';
+}
+static int re_is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+// 一个原子在模式中的结束位置（不含量词）；p >= pend 返回 NULL。
+static const char *re_atom_end(const char *p, const char *pend) {
+    if (p >= pend) { return NULL; }
+    char c = *p;
+    if (c == '(') {
+        int depth = 0;
+        const char *q = p;
+        while (q < pend) {
+            if (*q == '\\') { q += 2; continue; }
+            if (*q == '[') {
+                q++;
+                if (q < pend && *q == '^') { q++; }
+                if (q < pend && *q == ']') { q++; }
+                while (q < pend && *q != ']') { if (*q == '\\') { q++; } q++; }
+                if (q < pend) { q++; }
+                continue;
+            }
+            if (*q == '(') { depth++; }
+            else if (*q == ')') { depth--; if (depth == 0) { return q + 1; } }
+            q++;
+        }
+        return NULL;   // 未闭合（编译期已拦，双保险）
+    }
+    if (c == '[') {
+        const char *q = p + 1;
+        if (q < pend && *q == '^') { q++; }
+        if (q < pend && *q == ']') { q++; }
+        while (q < pend && *q != ']') { if (*q == '\\') { q++; } q++; }
+        if (q >= pend) { return NULL; }
+        return q + 1;
+    }
+    if (c == '\\') { return (p + 1 < pend) ? p + 2 : NULL; }
+    return p + 1;
+}
+
+// 字符类 `[...]`：匹配 c 返回 1。p 指向 '['，pend 指向 ']'（不含）。
+static int re_class_match(const char *p, const char *pend, char c) {
+    const char *q = p + 1;
+    int negate = 0;
+    if (q < pend && *q == '^') { negate = 1; q++; }
+    int hit = 0;
+    if (q < pend && *q == ']') {           // 首字符 ']' 按字面量
+        if (c == ']') { hit = 1; }
+        q++;
+    }
+    while (q < pend && !hit) {
+        char lo;
+        if (*q == '\\' && q + 1 < pend) {
+            char e = *(q + 1);
+            if (e == 'd') { if (re_is_digit(c)) { hit = 1; } q += 2; continue; }
+            if (e == 'w') { if (re_is_word(c)) { hit = 1; } q += 2; continue; }
+            if (e == 's') { if (re_is_space(c)) { hit = 1; } q += 2; continue; }
+            if (e == 'D') { if (!re_is_digit(c)) { hit = 1; } q += 2; continue; }
+            if (e == 'W') { if (!re_is_word(c)) { hit = 1; } q += 2; continue; }
+            if (e == 'S') { if (!re_is_space(c)) { hit = 1; } q += 2; continue; }
+            lo = e;
+            q += 2;
+        } else {
+            lo = *q;
+            q++;
+        }
+        if (q + 1 < pend && *q == '-') {
+            char hi = *(q + 1);
+            if (c >= lo && c <= hi) { hit = 1; }
+            q += 2;
+        } else if (c == lo) {
+            hit = 1;
+        }
+    }
+    return negate ? !hit : hit;
+}
+
+// 类转义（原子级 `\d` 等）：匹配 c 返回 1，否则 0；不是类转义返回 -1。
+static int re_escape_class(char e, char c) {
+    if (e == 'd') { return re_is_digit(c); }
+    if (e == 'D') { return !re_is_digit(c); }
+    if (e == 'w') { return re_is_word(c); }
+    if (e == 'W') { return !re_is_word(c); }
+    if (e == 's') { return re_is_space(c); }
+    if (e == 'S') { return !re_is_space(c); }
+    return -1;
+}
+
+static int re_match_here(re_ctx *ctx, const char *p, const char *pend, int pos);
+
+// 匹配单个原子（[p, aend)）；成功把 *end 设为新位置。
+static int re_match_atom(re_ctx *ctx, const char *p, const char *aend, int pos, int *end) {
+    if (ctx->steps++ > ctx->limit) { return 0; }
+    if (p >= aend) { *end = pos; return 1; }
+    char c = *p;
+    if (c == '(') {
+        const char *inner = p + 1;
+        const char *inner_end = aend - 1;      // 去掉 ')'
+        if (inner + 1 < inner_end && inner[0] == '?' && inner[1] == ':') { inner += 2; }
+        int r = re_match_here(ctx, inner, inner_end, pos);
+        if (r < 0) { return 0; }
+        *end = r;
+        return 1;
+    }
+    if (c == '[') {
+        if (pos >= ctx->tlen) { return 0; }
+        if (!re_class_match(p, aend - 1, ctx->txt[pos])) { return 0; }
+        *end = pos + 1;
+        return 1;
+    }
+    if (c == '\\') {
+        char e = *(p + 1);
+        int cls = re_escape_class(e, pos < ctx->tlen ? ctx->txt[pos] : '\0');
+        if (cls >= 0) {
+            if (pos >= ctx->tlen || !cls) { return 0; }
+            *end = pos + 1;
+            return 1;
+        }
+        if (pos >= ctx->tlen || ctx->txt[pos] != e) { return 0; }
+        *end = pos + 1;
+        return 1;
+    }
+    if (c == '^') {
+        if (pos != 0) { return 0; }
+        *end = pos;
+        return 1;
+    }
+    if (c == '$') {
+        if (pos != ctx->tlen) { return 0; }
+        *end = pos;
+        return 1;
+    }
+    if (c == '.') {
+        if (pos >= ctx->tlen || ctx->txt[pos] == '\n') { return 0; }
+        *end = pos + 1;
+        return 1;
+    }
+    if (pos >= ctx->tlen || ctx->txt[pos] != c) { return 0; }
+    *end = pos + 1;
+    return 1;
+}
+
+// 一条分支（无顶层 '|'）的「原子+量词」序列；返回结束位置或 -1。
+static int re_match_seq(re_ctx *ctx, const char *p, const char *pend, int pos) {
+    if (ctx->steps++ > ctx->limit) { return -1; }
+    if (p >= pend) { return pos; }
+    const char *aend = re_atom_end(p, pend);
+    if (!aend) { return -1; }
+    int min = 1;
+    int max = 1;
+    const char *after = aend;
+    if (aend < pend) {
+        char q = *aend;
+        if (q == '*') { min = 0; max = -1; after = aend + 1; }
+        else if (q == '+') { min = 1; max = -1; after = aend + 1; }
+        else if (q == '?') { min = 0; max = 1; after = aend + 1; }
+        else if (q == '{') {
+            const char *r = aend + 1;
+            int lo = 0, hi = -1, got = 0;
+            while (r < pend && re_is_digit(*r)) { lo = lo * 10 + (*r - '0'); r++; got = 1; }
+            if (got && r < pend && *r == ',') {
+                r++;
+                if (r < pend && re_is_digit(*r)) {
+                    hi = 0;
+                    while (r < pend && re_is_digit(*r)) { hi = hi * 10 + (*r - '0'); r++; }
+                }
+            } else if (got) {
+                hi = lo;
+            }
+            if (got && r < pend && *r == '}') {
+                min = lo;
+                max = hi;
+                after = r + 1;
+            }
+        }
+    }
+    // 贪婪：先枚举能匹配的位置序列，再从多到少回退。
+    // 零宽原子（`^` `$` 以及 `(?:)` 形）只计一次、不再增长——否则会死循环；
+    // 但**必须计入**那一次，否则 `^abc` 这种以零宽开头的模式永远匹配不上。
+    int positions[64];
+    positions[0] = pos;
+    int k = 0;
+    int zero_width = 0;
+    while ((max < 0 || k < max) && k < 63) {
+        int nxt = 0;
+        if (!re_match_atom(ctx, p, aend, positions[k], &nxt)) { break; }
+        if (nxt == positions[k]) {
+            zero_width = 1;
+            break;
+        }
+        k++;
+        positions[k] = nxt;
+    }
+    int top = k + zero_width;
+    for (int i = top; i >= min; i--) {
+        int at = (i <= k) ? positions[i] : positions[k];
+        int r = re_match_seq(ctx, after, pend, at);
+        if (r >= 0) { return r; }
+    }
+    return -1;
+}
+
+// 顶层选择：在 [p, pend) 内按深度 0 的 '|' 切分，逐支尝试。
+static int re_match_here(re_ctx *ctx, const char *p, const char *pend, int pos) {
+    if (ctx->steps++ > ctx->limit) { return -1; }
+    const char *branch = p;
+    int depth = 0;
+    const char *q = p;
+    while (q < pend) {
+        char c = *q;
+        if (c == '\\') { q += 2; continue; }
+        if (c == '[') {
+            q++;
+            if (q < pend && *q == '^') { q++; }
+            if (q < pend && *q == ']') { q++; }
+            while (q < pend && *q != ']') { if (*q == '\\') { q++; } q++; }
+            if (q < pend) { q++; }
+            continue;
+        }
+        if (c == '(') { depth++; q++; continue; }
+        if (c == ')') { depth--; q++; continue; }
+        if (c == '|' && depth == 0) {
+            int r = re_match_seq(ctx, branch, q, pos);
+            if (r >= 0) { return r; }
+            branch = q + 1;
+        }
+        q++;
+    }
+    return re_match_seq(ctx, branch, pend, pos);
+}
+
+// 编译期校验：括号配对、字符类闭合、量词区间合法、不支持的构造直接拒绝。
+static int re_validate(const char *p, int len, int *ngroups) {
+    int depth = 0;
+    int groups = 0;
+    for (int i = 0; i < len; i++) {
+        char c = p[i];
+        if (c == '\\') {
+            if (i + 1 >= len) { return 0; }
+            char e = p[i + 1];
+            if (e >= '1' && e <= '9') { return 0; }   // 反向引用不支持
+            i++;
+            continue;
+        }
+        if (c == '[') {
+            i++;
+            if (i < len && p[i] == '^') { i++; }
+            if (i < len && p[i] == ']') { i++; }
+            int closed = 0;
+            while (i < len) {
+                if (p[i] == '\\') { i += 2; continue; }
+                if (p[i] == ']') { closed = 1; break; }
+                i++;
+            }
+            if (!closed) { return 0; }
+            continue;
+        }
+        if (c == '(') {
+            if (i + 2 < len && p[i + 1] == '?' && p[i + 2] == ':') {
+                i += 2;
+            } else if (i + 1 < len && p[i + 1] == '?') {
+                return 0;                              // 环视/命名组/内联标志不支持
+            } else {
+                groups++;
+            }
+            depth++;
+            continue;
+        }
+        if (c == ')') {
+            if (depth == 0) { return 0; }
+            depth--;
+            continue;
+        }
+        if ((c == '*' || c == '+' || c == '?') && i + 1 < len && p[i + 1] == '?') {
+            return 0;                                  // 惰性量词不支持
+        }
+        if (c == '{') {
+            int j = i + 1;
+            int lo = 0, got = 0;
+            while (j < len && re_is_digit(p[j])) { lo = lo * 10 + (p[j] - '0'); j++; got = 1; }
+            if (!got) { continue; }                    // `{` 按字面量
+            int hi = lo;
+            if (j < len && p[j] == ',') {
+                j++;
+                hi = -1;
+                if (j < len && re_is_digit(p[j])) {
+                    hi = 0;
+                    while (j < len && re_is_digit(p[j])) { hi = hi * 10 + (p[j] - '0'); j++; }
+                }
+            }
+            if (j >= len || p[j] != '}') { continue; }  // 非区间形，按字面量
+            if (hi >= 0 && hi < lo) { return 0; }
+            i = j;
+        }
+    }
+    if (depth != 0) { return 0; }
+    *ngroups = groups;
+    return 1;
+}
+
+@implementation NPRegularExpression
+
++ (NPRegularExpression *)regularExpressionWithPattern:(NPString *)pattern {
+    if (!pattern) { return NULL; }
+    const char *p = [pattern UTF8String];
+    if (!p) { return NULL; }
+    int len = (int)strlen(p);
+    int cap = (int)sizeof(((NPRegularExpression *)0)->_pattern);
+    if (len >= cap) { return NULL; }   // 超长模式拒绝，不截断
+    int groups = 0;
+    if (!re_validate(p, len, &groups)) { return NULL; }
+    NPRegularExpression *re = [[NPRegularExpression alloc] init];
+    if (!re) { return NULL; }
+    strcpy(re->_pattern, p);
+    re->_ngroups = groups;
+    re->_valid = 1;
+    re->_step_limit = NP_RE_DEFAULT_STEPS;
+    return re;
+}
+
+- (int)numberOfCaptureGroups {
+    return _ngroups;
+}
+
+// 在 pos 起寻找匹配；成功写入长度并返回起始位置，失败返回 -1。
+- (int)re_searchFrom:(const char *)txt len:(int)len pos:(int)pos length:(int *)out_len {
+    for (int start = pos; start <= len; start++) {
+        re_ctx ctx;
+        ctx.txt = txt;
+        ctx.tlen = len;
+        ctx.steps = 0;
+        ctx.limit = _step_limit;
+        int r = re_match_here(&ctx, _pattern, _pattern + strlen(_pattern), start);
+        if (r >= 0) {
+            *out_len = r - start;
+            return start;
+        }
+    }
+    return -1;
+}
+
+- (BOOL)isMatchInString:(NPString *)str {
+    if (!str) { return 0; }
+    const char *txt = [str UTF8String];
+    if (!txt) { return 0; }
+    int len = (int)strlen(txt);
+    int out = 0;
+    return (BOOL)([self re_searchFrom:txt len:len pos:0 length:&out] >= 0);
+}
+
+- (int)firstMatchLocationInString:(NPString *)str {
+    if (!str) { return -1; }
+    const char *txt = [str UTF8String];
+    if (!txt) { return -1; }
+    int len = (int)strlen(txt);
+    int out = 0;
+    return [self re_searchFrom:txt len:len pos:0 length:&out];
+}
+
+- (int)firstMatchLengthInString:(NPString *)str {
+    if (!str) { return -1; }
+    const char *txt = [str UTF8String];
+    if (!txt) { return -1; }
+    int len = (int)strlen(txt);
+    int out = 0;
+    int loc = [self re_searchFrom:txt len:len pos:0 length:&out];
+    return loc < 0 ? -1 : out;
+}
+
+- (int)numberOfMatchesInString:(NPString *)str {
+    if (!str) { return 0; }
+    const char *txt = [str UTF8String];
+    if (!txt) { return 0; }
+    int len = (int)strlen(txt);
+    int count = 0;
+    int pos = 0;
+    while (pos <= len) {
+        int out = 0;
+        int loc = [self re_searchFrom:txt len:len pos:pos length:&out];
+        if (loc < 0) { break; }
+        count++;
+        pos = (out == 0) ? loc + 1 : loc + out;   // 空匹配推进一位，避免死循环
+    }
+    return count;
+}
+
+@end

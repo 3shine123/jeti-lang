@@ -1,0 +1,45 @@
+#import <Foundation/NPDateComponents.hje>
+#import <Foundation/NPObject.jeti>
+
+// NPDateComponents 实现：纯值对象 + 每分量"是否设置"位掩码。
+// 位序与 .hje 的 _has 注释一致。
+
+#define NP_DC_YEAR    1
+#define NP_DC_MONTH   2
+#define NP_DC_DAY     4
+#define NP_DC_HOUR    8
+#define NP_DC_MINUTE  16
+#define NP_DC_SECOND  32
+#define NP_DC_WEEKDAY 64
+
+@implementation NPDateComponents
+
++ (NPDateComponents *)components {
+    return [[NPDateComponents alloc] init];
+}
+
+- (void)setYear:(int)value   { _year = value;   _has |= NP_DC_YEAR; }
+- (void)setMonth:(int)value  { _month = value;  _has |= NP_DC_MONTH; }
+- (void)setDay:(int)value    { _day = value;    _has |= NP_DC_DAY; }
+- (void)setHour:(int)value   { _hour = value;   _has |= NP_DC_HOUR; }
+- (void)setMinute:(int)value { _minute = value; _has |= NP_DC_MINUTE; }
+- (void)setSecond:(int)value { _second = value; _has |= NP_DC_SECOND; }
+- (void)setWeekday:(int)value { _weekday = value; _has |= NP_DC_WEEKDAY; }
+
+- (int)year    { return _year; }
+- (int)month   { return _month; }
+- (int)day     { return _day; }
+- (int)hour    { return _hour; }
+- (int)minute  { return _minute; }
+- (int)second  { return _second; }
+- (int)weekday { return _weekday; }
+
+- (BOOL)hasYear    { return (BOOL)((_has & NP_DC_YEAR) != 0); }
+- (BOOL)hasMonth   { return (BOOL)((_has & NP_DC_MONTH) != 0); }
+- (BOOL)hasDay     { return (BOOL)((_has & NP_DC_DAY) != 0); }
+- (BOOL)hasHour    { return (BOOL)((_has & NP_DC_HOUR) != 0); }
+- (BOOL)hasMinute  { return (BOOL)((_has & NP_DC_MINUTE) != 0); }
+- (BOOL)hasSecond  { return (BOOL)((_has & NP_DC_SECOND) != 0); }
+- (BOOL)hasWeekday { return (BOOL)((_has & NP_DC_WEEKDAY) != 0); }
+
+@end

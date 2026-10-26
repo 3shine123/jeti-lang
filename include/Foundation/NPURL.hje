@@ -31,7 +31,7 @@
 }
 // 解析；非法输入（缺 :// 或空 host）返回 nil（ObjC 对齐）。
 + (NPURL *)URLWithString:(NPString *)str;
-- (id)initWithString:(NPString *)str;
+- (instancetype)initWithString:(NPString *)str;
 
 // 组件（缺失 → nil）。absoluteString 是重建的规范拼装。
 - (NPString *)scheme;

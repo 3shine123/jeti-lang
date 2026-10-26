@@ -1,0 +1,280 @@
+#import <Foundation/NPDateFormatter.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPDate.jeti>
+#import <Foundation/NPObject.jeti>
+
+#include <stdio.h>
+#include <string.h>
+
+// NPDateFormatter 实现：epoch 秒 ↔ 公历分解（Hinnant 的整数算法，无浮点误差），
+// 再按样式/pattern 拼装。时区只有 UTC 与固定偏移（见 .hje 的诚实边界）。
+
+#define NP_DF_ISO8601   0
+#define NP_DF_DATE_ONLY 1
+#define NP_DF_TIME_ONLY 2
+#define NP_DF_CUSTOM    3
+
+// 公历 → 自 1970-01-01 的天数（proleptic Gregorian）。
+static long long np_df_days_from_civil(long long y, int m, int d) {
+    long long yy = y - (m <= 2 ? 1 : 0);
+    long long era = (yy >= 0 ? yy : yy - 399) / 400;
+    long long yoe = yy - era * 400;                                  // [0, 399]
+    long long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;  // [0, 365]
+    long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;           // [0, 146096]
+    return era * 146097 + doe - 719468;
+}
+
+// 自 1970-01-01 的天数 → 公历。
+static void np_df_civil_from_days(long long z, long long *yy, int *mm, int *dd) {
+    long long zz = z + 719468;
+    long long era = (zz >= 0 ? zz : zz - 146096) / 146097;
+    long long doe = zz - era * 146097;                                          // [0, 146096]
+    long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;      // [0, 399]
+    long long y = yoe + era * 400;
+    long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);                    // [0, 365]
+    long long mp = (5 * doy + 2) / 153;                                         // [0, 11]
+    long long d = doy - (153 * mp + 2) / 5 + 1;                                 // [1, 31]
+    long long m = mp + (mp < 10 ? 3 : -9);                                      // [1, 12]
+    *yy = y + (m <= 2 ? 1 : 0);
+    *mm = (int)m;
+    *dd = (int)d;
+}
+
+// 带偏移的秒 → 分量。offset 已含在 total 里，分解按规范非负余数。
+static void np_df_split(long long total, long long *y, int *mo, int *d,
+                        int *hh, int *mi, int *ss) {
+    long long days = total / 86400;
+    long long rem = total % 86400;
+    if (rem < 0) { rem += 86400; days -= 1; }
+    np_df_civil_from_days(days, y, mo, d);
+    *hh = (int)(rem / 3600);
+    *mi = (int)((rem % 3600) / 60);
+    *ss = (int)(rem % 60);
+}
+
+// 读固定位数的十进制数；位数不符或非数字返回 0。
+static int np_df_read_uint(const char **p, int digits, int *out) {
+    int v = 0;
+    for (int i = 0; i < digits; i++) {
+        char c = **p;
+        if (c < '0' || c > '9') { return 0; }
+        v = v * 10 + (c - '0');
+        (*p)++;
+    }
+    *out = v;
+    return 1;
+}
+
+static int np_df_valid_ymd(long long y, int mo, int d) {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) { return 0; }
+    return 1;
+}
+
+static int np_df_valid_hms(int hh, int mi, int ss) {
+    return hh >= 0 && hh <= 23 && mi >= 0 && mi <= 59 && ss >= 0 && ss <= 60;   // 60 = 闰秒
+}
+
+// 偏移（分钟）→ `Z` 或 `±HH:MM` 后缀。
+static void np_df_offset_suffix(int minutes, char *out, int cap) {
+    if (minutes == 0) { snprintf(out, (size_t)cap, "Z"); return; }
+    int sign = minutes < 0 ? -1 : 1;
+    int a = minutes < 0 ? -minutes : minutes;
+    snprintf(out, (size_t)cap, "%c%02d:%02d", sign < 0 ? '-' : '+', a / 60, a % 60);
+}
+
+// 解析 `Z` / `±HH:MM` 后缀；成功返回 1 并写入分钟数。
+static int np_df_parse_offset(const char **p, int *out) {
+    const char *s = *p;
+    if (*s == 'Z') { *p = s + 1; *out = 0; return 1; }
+    if (*s != '+' && *s != '-') { return 0; }
+    int sign = (*s == '-') ? -1 : 1;
+    s++;
+    int hh = 0, mm = 0;
+    if (!np_df_read_uint(&s, 2, &hh)) { return 0; }
+    if (*s != ':') { return 0; }
+    s++;
+    if (!np_df_read_uint(&s, 2, &mm)) { return 0; }
+    *p = s;
+    *out = sign * (hh * 60 + mm);
+    return 1;
+}
+
+@implementation NPDateFormatter
+
++ (NPDateFormatter *)iso8601Formatter {
+    NPDateFormatter *f = [[NPDateFormatter alloc] init];
+    if (f) { f->_style = NP_DF_ISO8601; }
+    return f;
+}
+
++ (NPDateFormatter *)dateOnlyFormatter {
+    NPDateFormatter *f = [[NPDateFormatter alloc] init];
+    if (f) { f->_style = NP_DF_DATE_ONLY; }
+    return f;
+}
+
++ (NPDateFormatter *)timeOnlyFormatter {
+    NPDateFormatter *f = [[NPDateFormatter alloc] init];
+    if (f) { f->_style = NP_DF_TIME_ONLY; }
+    return f;
+}
+
++ (NPDateFormatter *)formatterWithPattern:(NPString *)pattern {
+    NPDateFormatter *f = [[NPDateFormatter alloc] init];
+    if (!f) { return NULL; }
+    const char *p = [pattern UTF8String];
+    if (!p) { return NULL; }
+    size_t n = strlen(p);
+    if (n >= sizeof f->_pattern) { return NULL; }   // 超长 pattern 拒绝，不截断
+    strcpy(f->_pattern, p);
+    f->_style = NP_DF_CUSTOM;
+    return f;
+}
+
+- (void)setUTCOffsetMinutes:(int)minutes {
+    _utcOffsetMinutes = minutes;
+}
+
+- (int)utcOffsetMinutes {
+    return _utcOffsetMinutes;
+}
+
+- (NPString *)stringFromDate:(NPDate *)date {
+    if (!date) { return NULL; }
+    long long total = (long long)[date timeIntervalSince1970] + (long long)_utcOffsetMinutes * 60;
+    long long y = 0;
+    int mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
+    np_df_split(total, &y, &mo, &d, &hh, &mi, &ss);
+    char buf[128];
+    if (_style == NP_DF_ISO8601) {
+        char suf[16];
+        np_df_offset_suffix(_utcOffsetMinutes, suf, (int)sizeof suf);
+        snprintf(buf, sizeof buf, "%04lld-%02d-%02dT%02d:%02d:%02d%s",
+                 y, mo, d, hh, mi, ss, suf);
+    } else if (_style == NP_DF_DATE_ONLY) {
+        snprintf(buf, sizeof buf, "%04lld-%02d-%02d", y, mo, d);
+    } else if (_style == NP_DF_TIME_ONLY) {
+        snprintf(buf, sizeof buf, "%02d:%02d:%02d", hh, mi, ss);
+    } else {
+        // 自定义 pattern：token 子集（yyyy/MM/dd/HH/mm/ss），其余原样输出。
+        int pos = 0;
+        const char *p = _pattern;
+        while (*p && pos < (int)sizeof buf - 1) {
+            if (p[0] == 'y' && p[1] == 'y' && p[2] == 'y' && p[3] == 'y') {
+                pos += snprintf(buf + pos, sizeof buf - (size_t)pos, "%04lld", y);
+                p += 4;
+            } else if (p[0] == 'M' && p[1] == 'M') {
+                pos += snprintf(buf + pos, sizeof buf - (size_t)pos, "%02d", mo);
+                p += 2;
+            } else if (p[0] == 'd' && p[1] == 'd') {
+                pos += snprintf(buf + pos, sizeof buf - (size_t)pos, "%02d", d);
+                p += 2;
+            } else if (p[0] == 'H' && p[1] == 'H') {
+                pos += snprintf(buf + pos, sizeof buf - (size_t)pos, "%02d", hh);
+                p += 2;
+            } else if (p[0] == 'm' && p[1] == 'm') {
+                pos += snprintf(buf + pos, sizeof buf - (size_t)pos, "%02d", mi);
+                p += 2;
+            } else if (p[0] == 's' && p[1] == 's') {
+                pos += snprintf(buf + pos, sizeof buf - (size_t)pos, "%02d", ss);
+                p += 2;
+            } else {
+                buf[pos++] = *p;
+                p++;
+            }
+        }
+        buf[pos] = '\0';
+    }
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (NPDate *)dateFromString:(NPString *)str {
+    if (!str) { return NULL; }
+    const char *s = [str UTF8String];
+    if (!s) { return NULL; }
+    long long y = 1970;
+    int mo = 1, d = 1, hh = 0, mi = 0, ss = 0;
+    int off = 0;
+
+    if (_style == NP_DF_ISO8601) {
+        if (!np_df_read_uint(&s, 4, (int *)&y)) { return NULL; }
+        if (*s != '-') { return NULL; }
+        s++;
+        if (!np_df_read_uint(&s, 2, &mo)) { return NULL; }
+        if (*s != '-') { return NULL; }
+        s++;
+        if (!np_df_read_uint(&s, 2, &d)) { return NULL; }
+        if (*s == 'T' || *s == ' ') {
+            s++;
+            if (!np_df_read_uint(&s, 2, &hh)) { return NULL; }
+            if (*s != ':') { return NULL; }
+            s++;
+            if (!np_df_read_uint(&s, 2, &mi)) { return NULL; }
+            if (*s != ':') { return NULL; }
+            s++;
+            if (!np_df_read_uint(&s, 2, &ss)) { return NULL; }
+            if (*s == '.') {                      // 小数秒：读入后截断
+                s++;
+                while (*s >= '0' && *s <= '9') { s++; }
+            }
+        }
+        if (*s != '\0') {
+            if (!np_df_parse_offset(&s, &off)) { return NULL; }
+        }
+    } else if (_style == NP_DF_DATE_ONLY) {
+        if (!np_df_read_uint(&s, 4, (int *)&y)) { return NULL; }
+        if (*s != '-') { return NULL; }
+        s++;
+        if (!np_df_read_uint(&s, 2, &mo)) { return NULL; }
+        if (*s != '-') { return NULL; }
+        s++;
+        if (!np_df_read_uint(&s, 2, &d)) { return NULL; }
+    } else if (_style == NP_DF_TIME_ONLY) {
+        if (!np_df_read_uint(&s, 2, &hh)) { return NULL; }
+        if (*s != ':') { return NULL; }
+        s++;
+        if (!np_df_read_uint(&s, 2, &mi)) { return NULL; }
+        if (*s != ':') { return NULL; }
+        s++;
+        if (!np_df_read_uint(&s, 2, &ss)) { return NULL; }
+    } else {
+        // 自定义 pattern：按 token 逐个读；字面量必须原样匹配。
+        const char *p = _pattern;
+        while (*p) {
+            if (p[0] == 'y' && p[1] == 'y' && p[2] == 'y' && p[3] == 'y') {
+                int yv = 0;
+                if (!np_df_read_uint(&s, 4, &yv)) { return NULL; }
+                y = yv;
+                p += 4;
+            } else if (p[0] == 'M' && p[1] == 'M') {
+                if (!np_df_read_uint(&s, 2, &mo)) { return NULL; }
+                p += 2;
+            } else if (p[0] == 'd' && p[1] == 'd') {
+                if (!np_df_read_uint(&s, 2, &d)) { return NULL; }
+                p += 2;
+            } else if (p[0] == 'H' && p[1] == 'H') {
+                if (!np_df_read_uint(&s, 2, &hh)) { return NULL; }
+                p += 2;
+            } else if (p[0] == 'm' && p[1] == 'm') {
+                if (!np_df_read_uint(&s, 2, &mi)) { return NULL; }
+                p += 2;
+            } else if (p[0] == 's' && p[1] == 's') {
+                if (!np_df_read_uint(&s, 2, &ss)) { return NULL; }
+                p += 2;
+            } else {
+                if (*s != *p) { return NULL; }
+                s++;
+                p++;
+            }
+        }
+    }
+    if (*s != '\0') { return NULL; }               // 尾部有残留
+    if (!np_df_valid_ymd(y, mo, d)) { return NULL; }
+    if (!np_df_valid_hms(hh, mi, ss)) { return NULL; }
+    long long days = np_df_days_from_civil(y, mo, d);
+    long long secs = days * 86400 + (long long)hh * 3600 + (long long)mi * 60 + ss;
+    secs -= (long long)off * 60;                   // 偏移还原成 UTC
+    return [NPDate dateWithTimeIntervalSince1970:(double)secs];
+}
+
+@end

@@ -25,7 +25,7 @@
     NPCharacterSet *_skipSet; // 每次扫描前跳过的字符；NULL = 不跳
 }
 + (NPScanner *)scannerWithString:(NPString *)str;
-- (id)initWithString:(NPString *)str;
+- (instancetype)initWithString:(NPString *)str;
 
 // Internal primitives (implementation helpers; declared so the same-TU
 // checker sees them — not part of the ObjC surface).

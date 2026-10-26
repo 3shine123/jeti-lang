@@ -1,0 +1,76 @@
+#import <Foundation/NPAttributedString.hje>
+#import <Foundation/NPString.jeti>
+#import <Foundation/NPDictionary.jeti>
+#import <Foundation/NPObject.jeti>
+
+// NPAttributedString 实现：v1 纯数据层，整串一份属性字典（单 run）。
+//
+// 文本与属性都在 init 时 copy（对齐 ObjC：之后改原对象不影响本对象），
+// 析构时 release（沿用 NPNotification 的 ivar 管理写法）。
+
+@implementation NPAttributedString
+
++ (NPAttributedString *)attributedStringWithString:(NPString *)str {
+    @noarc {
+        return [[[self alloc] initWithString:str] autorelease];
+    }
+}
+
++ (NPAttributedString *)attributedStringWithString:(NPString *)str attributes:(NPDictionary *)attrs {
+    @noarc {
+        return [[[self alloc] initWithString:str attributes:attrs] autorelease];
+    }
+}
+
+- (NPAttributedString *)initWithString:(NPString *)str {
+    return [self initWithString:str attributes:NULL];
+}
+
+- (NPAttributedString *)initWithString:(NPString *)str attributes:(NPDictionary *)attrs {
+    self = [super init];
+    if (!self) { return NULL; }
+    // 文本与属性都 copy：ObjC 的 NSAttributedString 也持有自己的副本，
+    // 调用方之后改原对象不会回头改动本对象。
+    _string = str ? [str copy] : NULL;
+    _attrs = attrs ? [attrs copy] : NULL;
+    return self;
+}
+
+- (void)dealloc {
+    if (_string) { jeti_release(_string); _string = NULL; }
+    if (_attrs) { jeti_release(_attrs); _attrs = NULL; }
+    [super dealloc];
+}
+
+- (NPString *)string {
+    return _string;
+}
+
+- (size_t)length {
+    return _string ? [_string length] : 0;
+}
+
+- (NPDictionary *)attributes {
+    return _attrs ? [_attrs copy] : NULL;
+}
+
+- (BOOL)isValidIndex:(size_t)index {
+    return (BOOL)(index < [self length]);
+}
+
+- (NPDictionary *)attributesAtIndex:(size_t)index {
+    if (![self isValidIndex:index]) { return NULL; }   // 越界：nil（ObjC 抛异常）
+    return _attrs ? [_attrs copy] : NULL;
+}
+
+- (size_t)effectiveRangeLengthAtIndex:(size_t)index {
+    if (![self isValidIndex:index]) { return 0; }
+    return [self length];                              // v1：单 run，整串同属性
+}
+
+- (id)attribute:(NPString *)name atIndex:(size_t)index {
+    if (![self isValidIndex:index] || !_attrs || !name) { return NULL; }
+    return [_attrs objectForKey:name];
+}
+
+@end

@@ -1,0 +1,47 @@
+#ifndef NPREGULAREXPRESSION_NH
+#define NPREGULAREXPRESSION_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPRegularExpression —— 正则匹配（对应 ObjC 的 NSRegularExpression）。
+//
+// v1 是**自研回溯引擎**，不依赖 ICU（见诚实边界）；模式在编译期校验，非法模式
+// 返回 nil。
+//
+// 支持：
+//   - 字面量、`.`（除换行外任意字符）
+//   - 字符类 `[abc]`、`[a-z]`、`[^...]`（含 `\\d \\w \\s` 与其大写反集）
+//   - 锚点 `^`（串首）与 `$`（串尾）
+//   - 量词 `*` `+` `?` 与 `{n}` `{n,}` `{n,m}`
+//   - 选择 `|`、分组 `(...)`（捕获）与 `(?:...)`（非捕获）
+//   - 转义 `\\.` `\\*` `\\\\` 等
+//
+// 诚实边界（不支持，遇到即编译失败或按字面量处理——不静默降级）：
+//   - 反向引用 `\1`、环视 `(?=...)` `(?!...)`、命名组 `(?<name>...)`
+//   - 惰性量词 `*?` `+?`（v1 一律贪婪）
+//   - Unicode 属性类 `\p{...}`、`\b` 词边界、内联标志 `(?i)`
+//   - 回溯步数有上限（`_step_limit`）：灾难性回溯的模式在预算耗尽后判定为
+//     **不匹配**而不是挂死（宁可不匹配，不静默给错结果）
+//   - 捕获组只统计数量（`-numberOfCaptureGroups`），v1 不暴露各组文本
+@interface NPRegularExpression : NPObject {
+@public
+    char _pattern[256];    // 模式原文（编译期已校验）
+    int  _ngroups;         // 捕获组个数
+    int  _valid;           // 0 = 非法模式（工厂方法此时返回 nil）
+    long long _step_limit; // 回溯步数上限
+}
+// 编译模式；非法返回 nil（ObjC 对齐）。
++ (NPRegularExpression *)regularExpressionWithPattern:(NPString *)pattern;
+// 捕获组个数（`(?:...)` 不计）。
+- (int)numberOfCaptureGroups;
+// 串中是否**存在**匹配。
+- (BOOL)isMatchInString:(NPString *)str;
+// 首个匹配的位置；无匹配返回 -1。
+- (int)firstMatchLocationInString:(NPString *)str;
+// 首个匹配的长度；无匹配返回 -1。
+- (int)firstMatchLengthInString:(NPString *)str;
+// 匹配个数（空匹配也会推进一位，不会死循环）。
+- (int)numberOfMatchesInString:(NPString *)str;
+@end
+
+#endif

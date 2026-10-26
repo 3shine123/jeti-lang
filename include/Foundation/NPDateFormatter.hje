@@ -1,0 +1,47 @@
+#ifndef NPDATEFORMATTER_NH
+#define NPDATEFORMATTER_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPDate.hje>
+
+// NPDateFormatter —— 日期/时间与字符串的互转（对应 ObjC 的 NSDateFormatter）。
+//
+// v1 覆盖：ISO 8601、日期/时间常用形，以及一个 token 子集的自定义 pattern；
+// 时区只做 UTC 与固定偏移。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **无 tzdata**：时区只有 UTC（`Z`）与固定偏移（`±HH:MM`），没有夏令时与
+//   历史时区数据库；`-setUTCOffsetMinutes:` 是唯一时区入口。需要真实时区的
+//   程序须自备偏移。
+// - **无 locale**：月份/星期名、AM/PM、本地化数字一律不做（ObjC 依赖 ICU）。
+//   `+dateFormatFromTemplate:options:locale:` 等模板 API 不在 v1 范围。
+// - **pattern 是 token 子集**：`yyyy`/`MM`/`dd`/`HH`/`mm`/`ss` 与字面量
+//   （单引号内原样）；未识别的字母按字面量输出，不静默当 token。
+// - 解析接受 ISO 8601 的 `T`/空格分隔、可选的 `Z` 或 `±HH:MM`、可选的小数秒
+//   （读取后截断到整秒）；非法输入返回 nil（ObjC 对齐）。
+// - 格式化用整秒（NPDate 的 `double` 秒截断向零），不做亚秒输出。
+@interface NPDateFormatter : NPObject {
+@public
+    int  _style;              // NPDateStyle 之一
+    char _pattern[64];        // 自定义 pattern（_style == NPDateStyleCustom 时有效）
+    int  _utcOffsetMinutes;   // 时区偏移（分钟）；0 = UTC
+}
+// 样式（内部使用，落在 _style）。
+// ISO 8601：`2026-10-25T12:34:56Z`（偏移非 0 时是 `+08:00` 形）。
++ (NPDateFormatter *)iso8601Formatter;
+// `2026-10-25`
++ (NPDateFormatter *)dateOnlyFormatter;
+// `12:34:56`
++ (NPDateFormatter *)timeOnlyFormatter;
+// 自定义 pattern（见头部的 token 子集）。
++ (NPDateFormatter *)formatterWithPattern:(NPString *)pattern;
+// 固定时区偏移（分钟，东八区 = 480）；影响格式化与解析。
+- (void)setUTCOffsetMinutes:(int)minutes;
+- (int)utcOffsetMinutes;
+// 按当前样式/pattern 格式化；date 为 nil 时返回 nil。
+- (NPString *)stringFromDate:(NPDate *)date;
+// 按当前样式/pattern 解析；失败返回 nil（ObjC 对齐）。
+- (NPDate *)dateFromString:(NPString *)str;
+@end
+
+#endif

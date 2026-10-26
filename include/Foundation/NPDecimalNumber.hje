@@ -1,0 +1,63 @@
+#ifndef NPDECIMALNUMBER_NH
+#define NPDECIMALNUMBER_NH
+
+#include <stdint.h>
+
+#import <Foundation/NPObject.hje>
+
+// NPDecimalNumber —— 十进制精确运算（对应 ObjC 的 NSDecimalNumber）。
+//
+// 表示沿用 NSDecimal 的形状：128 位无符号有效数字 + 十进制指数 + 符号，
+// 即 value = (-1)^sign * significand * 10^exp。有效数字上限 38 位十进制
+// （2^128 ≈ 3.4e38），与 NSDecimal 一致。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 精度上限 38 位有效数字（NSDecimal 同）。**溢出/下溢不抛异常**：ObjC 在
+//   NSDecimalOverflow 时抛 NSDecimalNumberOverflowException，Jeti 的运行期
+//   没有异常式算术，因此溢出把结果置为 notANumber 并置 _flags 的 overflow
+//   位——调用方须用 -isNotANumber 检查，不会静默截断。
+// - 除法：最多保留 38 位有效数字，余数按"四舍五入"（NSRoundPlain 对齐），
+//   除以零得 notANumber（ObjC 抛 NSDecimalNumberDivideByZeroException）。
+// - `+decimalNumberWithDouble:` 走**十进制最短往返拼写**（如 0.1 → "0.1"），
+//   与 ObjC 的 NSDecimalNumber 一致；不会把二进制展开的 0.10000000000000001
+//   带进来。因此 0.1 + 0.2 精确等于 0.3，这是本类存在的意义。
+// - 舍入策略（NSDecimalNumberHandler）、比较谓词、`-decimalNumberByRaisingToPower:`
+//   等尚未实现，见 README 的诚实边界。
+@interface NPDecimalNumber : NPObject {
+@public
+    uint64_t _hi;      // 有效数字高 64 位
+    uint64_t _lo;      // 有效数字低 64 位
+    int      _exp;     // 十进制指数：value = sign * (hi:lo) * 10^exp
+    int      _flags;   // 位 0：负号；位 1：not a number；位 2：溢出/下溢
+}
+// 0 / 1 / 非法值（ObjC 对齐）。
++ (NPDecimalNumber *)zero;
++ (NPDecimalNumber *)one;
++ (NPDecimalNumber *)notANumber;
+// 解析十进制字面量：可选符号、数字、单个小数点、可选 e 指数。
+// 非法输入返回 notANumber（ObjC -initWithString: 对齐）。
++ (NPDecimalNumber *)decimalNumberWithString:(NPString *)str;
++ (NPDecimalNumber *)decimalNumberWithInt:(int)value;
++ (NPDecimalNumber *)decimalNumberWithLongLong:(long long)value;
+// 按十进制最短往返拼写转换（见诚实边界）。
++ (NPDecimalNumber *)decimalNumberWithDouble:(double)value;
+// 是否 not a number（含解析失败与溢出结果）。
+- (BOOL)isNotANumber;
+// 按数值相等比较（对齐 ObjC -isEqualToNumber:）；NaN 与任何值都不相等。
+- (BOOL)isEqualToNumber:(NPDecimalNumber *)other;
+// 数值序：-1 / 0 / 1；任一为 NaN 时返回 0（无法定序，诚实边界）。
+- (int)compare:(NPDecimalNumber *)other;
+- (NPDecimalNumber *)decimalNumberByAdding:(NPDecimalNumber *)other;
+- (NPDecimalNumber *)decimalNumberBySubtracting:(NPDecimalNumber *)other;
+- (NPDecimalNumber *)decimalNumberByMultiplyingBy:(NPDecimalNumber *)other;
+- (NPDecimalNumber *)decimalNumberByDividingBy:(NPDecimalNumber *)other;
+// 取负（-1 倍）。
+- (NPDecimalNumber *)decimalNumberByNegating;
+- (double)doubleValue;
+- (long long)longLongValue;
+// 规范十进制字符串：无指数、无多余前导/尾随零；负号前置；NaN 输出 "NaN"。
+- (NPString *)stringValue;
+- (NPString *)description;
+@end
+
+#endif

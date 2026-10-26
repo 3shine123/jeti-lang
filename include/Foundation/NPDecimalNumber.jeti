@@ -1,0 +1,653 @@
+#import <Foundation/NPDecimalNumber.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPObject.jeti>
+
+#include <stdio.h>
+#include <string.h>
+
+// NPDecimalNumber 实现：128 位无符号有效数字 + 十进制指数 + 符号/状态位。
+//
+// 有效数字上限 38 位十进制（2^128 ≈ 3.4e38），与 NSDecimal 一致。所有超出
+// 精度/范围的结果都不静默截断：置 notANumber 或置对应的状态位，调用方可用
+// -isNotANumber / _flags 检查（见 .hje 的诚实边界）。
+
+#define NP_DEC_NEG  1   // 负号
+#define NP_DEC_NAN  2   // not a number
+#define NP_DEC_OVF  4   // 溢出/下溢
+#define NP_DEC_RND  8   // 发生过精度截断（对齐 NSDecimal 的 loss-of-precision）
+
+#define NP_DEC_MAX_DIGITS 38
+
+// 多声明符（`uint64_t hi, lo;`）曾把第二个字段的类型发射成 `int`，解析器修好后
+// 这里恢复紧凑写法，同时充当该修复的活体回归（见 probes/p2_decimal）。
+typedef struct { uint64_t hi, lo; } np_u128;
+
+static np_u128 u128_make(uint64_t hi, uint64_t lo) {
+    np_u128 r; r.hi = hi; r.lo = lo; return r;
+}
+
+static int u128_is_zero(np_u128 a) { return a.hi == 0 && a.lo == 0; }
+
+static int u128_cmp(np_u128 a, np_u128 b) {
+    if (a.hi != b.hi) { return a.hi < b.hi ? -1 : 1; }
+    if (a.lo != b.lo) { return a.lo < b.lo ? -1 : 1; }
+    return 0;
+}
+
+static np_u128 u128_add(np_u128 a, np_u128 b, int *carry) {
+    np_u128 r;
+    r.lo = a.lo + b.lo;
+    uint64_t c = (r.lo < a.lo) ? 1 : 0;
+    r.hi = a.hi + b.hi;
+    uint64_t c2 = (r.hi < a.hi) ? 1 : 0;
+    uint64_t hi2 = r.hi + c;
+    if (hi2 < r.hi) { c2 = 1; }
+    r.hi = hi2;
+    if (carry) { *carry = (int)c2; }
+    return r;
+}
+
+static np_u128 u128_sub(np_u128 a, np_u128 b) {
+    // 调用方保证 a >= b。
+    np_u128 r;
+    r.lo = a.lo - b.lo;
+    uint64_t borrow = (a.lo < b.lo) ? 1 : 0;
+    r.hi = a.hi - b.hi - borrow;
+    return r;
+}
+
+// 64x64 → 128 的教科书乘法（32 位分半，避免依赖 __int128）。
+static void mul64(uint64_t a, uint64_t b, uint64_t *hi, uint64_t *lo) {
+    uint64_t a0 = a & 0xFFFFFFFFull, a1 = a >> 32;
+    uint64_t b0 = b & 0xFFFFFFFFull, b1 = b >> 32;
+    uint64_t p00 = a0 * b0;
+    uint64_t p01 = a0 * b1;
+    uint64_t p10 = a1 * b0;
+    uint64_t p11 = a1 * b1;
+    uint64_t mid = (p00 >> 32) + (p01 & 0xFFFFFFFFull) + (p10 & 0xFFFFFFFFull);
+    *lo = (p00 & 0xFFFFFFFFull) | (mid << 32);
+    *hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+}
+
+// 128x128 → 低 128 位；超出 128 位时返回 0（调用方置溢出位）。
+static int u128_mul(np_u128 a, np_u128 b, np_u128 *out) {
+    uint64_t h0, l0, h1, l1, h2, l2, h3, l3;
+    mul64(a.lo, b.lo, &h0, &l0);
+    mul64(a.lo, b.hi, &h1, &l1);
+    mul64(a.hi, b.lo, &h2, &l2);
+    mul64(a.hi, b.hi, &h3, &l3);
+    // a = ah*2^64 + al, b = bh*2^64 + bl：
+    //   a*b = ah*bh*2^128 + (ah*bl + al*bh)*2^64 + al*bl
+    // 结果低 128 位 = lo(l0) + 高半(l1 + l2)<<64；任何更高位都算溢出。
+    if (h1 != 0 || h2 != 0 || h3 != 0 || l3 != 0) { return 0; }
+    uint64_t mid = l1 + l2;
+    uint64_t carry = (mid < l1) ? 1 : 0;
+    uint64_t hi = h0 + mid;
+    uint64_t carry2 = (hi < h0) ? 1 : 0;
+    if (carry || carry2) { return 0; }
+    *out = u128_make(hi, l0);
+    return 1;
+}
+
+// x10（含溢出检测）。
+static int u128_mul10(np_u128 a, np_u128 *out) {
+    return u128_mul(a, u128_make(0, 10), out);
+}
+
+// 128 / 10：商与余数（余数 < 10）。32 位分半做 128/10 长除，避免 128 位除法。
+static np_u128 u128_div10(np_u128 a, int *rem_out) {
+    np_u128 q;
+    uint64_t q_hi = a.hi / 10;
+    uint64_t r = a.hi % 10;
+    uint64_t hi32 = a.lo >> 32;
+    uint64_t lo32 = a.lo & 0xFFFFFFFFull;
+    r = r * 0x100000000ull + hi32;
+    uint64_t q1 = r / 10;
+    r = r % 10;
+    r = r * 0x100000000ull + lo32;
+    uint64_t q2 = r / 10;
+    r = r % 10;
+    q.hi = q_hi;
+    q.lo = (q1 << 32) | q2;
+    if (rem_out) { *rem_out = (int)r; }
+    return q;
+}
+
+// 有效数字的十进制位数（0 → 0 位）。
+static int u128_digits(np_u128 a) {
+    int n = 0;
+    np_u128 t = a;
+    while (!u128_is_zero(t)) {
+        int r = 0;
+        t = u128_div10(t, &r);
+        n++;
+    }
+    return n;
+}
+
+// 128 位 → 十进制数字串（最高位在前，不含符号），返回位数。
+// buf 至少 40 字节。
+static int u128_to_digits(np_u128 a, char *buf) {
+    char tmp[40];
+    int n = 0;
+    np_u128 t = a;
+    while (!u128_is_zero(t)) {
+        int r = 0;
+        t = u128_div10(t, &r);
+        tmp[n++] = (char)('0' + r);
+    }
+    if (n == 0) { buf[0] = '0'; return 1; }
+    for (int i = 0; i < n; i++) { buf[i] = tmp[n - 1 - i]; }
+    return n;
+}
+
+// 十进制数字串 → 128 位；超出 128 位范围返回 0。
+static int digits_to_u128(const char *d, int n, np_u128 *out) {
+    np_u128 acc = u128_make(0, 0);
+    for (int i = 0; i < n; i++) {
+        np_u128 t;
+        if (!u128_mul10(acc, &t)) { return 0; }
+        int carry = 0;
+        np_u128 t2 = u128_add(t, u128_make(0, (uint64_t)(d[i] - '0')), &carry);
+        if (carry) { return 0; }
+        acc = t2;
+    }
+    *out = acc;
+    return 1;
+}
+
+// —— 十进制层：有效数字 + 指数 + 状态位 ——
+// 值 = (-1)^NEG * sig * 10^exp。
+
+typedef struct { np_u128 sig; int exp; int flags; } np_dec;
+
+static np_dec dec_make(np_u128 sig, int exp, int flags) {
+    np_dec r; r.sig = sig; r.exp = exp; r.flags = flags; return r;
+}
+
+static np_dec dec_nan(void) { return dec_make(u128_make(0, 0), 0, NP_DEC_NAN); }
+
+static int dec_is_nan(np_dec a) { return (a.flags & NP_DEC_NAN) != 0; }
+static int dec_is_zero(np_dec a) { return !dec_is_nan(a) && u128_is_zero(a.sig); }
+static int dec_is_neg(np_dec a) { return (a.flags & NP_DEC_NEG) != 0; }
+
+// 规范化：有效数字尾部每去掉一个 10 因子就并入指数；零是规范零（无符号、指数 0）。
+static np_dec dec_normalize(np_dec a) {
+    if (dec_is_nan(a)) { return a; }
+    if (u128_is_zero(a.sig)) {
+        a.exp = 0;
+        a.flags &= ~NP_DEC_NEG;
+        return a;
+    }
+    for (;;) {
+        int r = 0;
+        np_u128 q = u128_div10(a.sig, &r);
+        if (r != 0) { break; }
+        a.sig = q;
+        a.exp++;
+    }
+    return a;
+}
+
+// 按 38 位有效数字上限四舍五入（NSRoundPlain 对齐）；截断时置 RND。
+static np_dec dec_round_limit(np_dec a) {
+    if (dec_is_nan(a)) { return a; }
+    int n = u128_digits(a.sig);
+    if (n <= NP_DEC_MAX_DIGITS) { return a; }
+    int drop = n - NP_DEC_MAX_DIGITS;
+    int round_up = 0;
+    for (int i = 0; i < drop; i++) {
+        int r = 0;
+        np_u128 q = u128_div10(a.sig, &r);
+        if (i == drop - 1 && r >= 5) { round_up = 1; }
+        a.sig = q;
+        a.exp++;
+    }
+    if (round_up) {
+        int carry = 0;
+        a.sig = u128_add(a.sig, u128_make(0, 1), &carry);
+        if (carry) { return dec_nan(); }   // 进位后又超范围
+        int n2 = u128_digits(a.sig);
+        if (n2 > NP_DEC_MAX_DIGITS) { return dec_nan(); }
+    }
+    a.flags |= NP_DEC_RND;
+    return a;
+}
+
+// 把有效数字放大 10^k（指数相应减小）；超出 128 位返回 0。
+static int dec_scale_up(np_dec *a, int k) {
+    np_u128 s = a->sig;
+    for (int i = 0; i < k; i++) {
+        np_u128 t;
+        if (!u128_mul10(s, &t)) { return 0; }
+        s = t;
+    }
+    a->sig = s;
+    a->exp -= k;
+    return 1;
+}
+
+// 加/减：subtract_b 非零时做 a - b。
+static np_dec dec_add(np_dec a, np_dec b, int subtract_b) {
+    if (dec_is_nan(a) || dec_is_nan(b)) { return dec_nan(); }
+    if (subtract_b) { b.flags ^= NP_DEC_NEG; }
+    if (u128_is_zero(b.sig)) { return dec_normalize(a); }
+    if (u128_is_zero(a.sig)) { return dec_normalize(b); }
+
+    // 对齐到较小指数：放大指数较大的一方。放不下说明相差超过 38 位精度，
+    // 小项被舍去（置 RND，对齐 NSDecimal 的 loss-of-precision）。
+    int e = a.exp < b.exp ? a.exp : b.exp;
+    if (a.exp != e) {
+        if (!dec_scale_up(&a, a.exp - e)) {
+            np_dec r = dec_normalize(b);
+            r.flags |= NP_DEC_RND;
+            return r;
+        }
+    }
+    if (b.exp != e) {
+        if (!dec_scale_up(&b, b.exp - e)) {
+            np_dec r = dec_normalize(a);
+            r.flags |= NP_DEC_RND;
+            return r;
+        }
+    }
+
+    int sa = dec_is_neg(a) ? -1 : 1;
+    int sb = dec_is_neg(b) ? -1 : 1;
+    np_dec r;
+    if (sa == sb) {
+        int carry = 0;
+        np_u128 s = u128_add(a.sig, b.sig, &carry);
+        if (carry) { return dec_nan(); }   // 有效数字超 128 位
+        r = dec_make(s, e, sa < 0 ? NP_DEC_NEG : 0);
+    } else {
+        int cmp = u128_cmp(a.sig, b.sig);
+        if (cmp == 0) { return dec_make(u128_make(0, 0), 0, 0); }
+        if (cmp > 0) {
+            r = dec_make(u128_sub(a.sig, b.sig), e, sa < 0 ? NP_DEC_NEG : 0);
+        } else {
+            r = dec_make(u128_sub(b.sig, a.sig), e, sb < 0 ? NP_DEC_NEG : 0);
+        }
+    }
+    r = dec_normalize(r);
+    return dec_round_limit(r);
+}
+
+static np_dec dec_mul(np_dec a, np_dec b) {
+    if (dec_is_nan(a) || dec_is_nan(b)) { return dec_nan(); }
+    if (u128_is_zero(a.sig) || u128_is_zero(b.sig)) { return dec_make(u128_make(0, 0), 0, 0); }
+    np_u128 s;
+    if (!u128_mul(a.sig, b.sig, &s)) {
+        np_dec r = dec_nan();
+        r.flags |= NP_DEC_OVF;
+        return r;
+    }
+    int sign = (dec_is_neg(a) != dec_is_neg(b)) ? NP_DEC_NEG : 0;
+    np_dec r = dec_make(s, a.exp + b.exp, sign);
+    r = dec_normalize(r);
+    return dec_round_limit(r);
+}
+
+static np_dec dec_div(np_dec a, np_dec b) {
+    if (dec_is_nan(a) || dec_is_nan(b)) { return dec_nan(); }
+    if (u128_is_zero(b.sig)) { return dec_nan(); }   // 除零：ObjC 抛异常，这里置 NaN
+    if (u128_is_zero(a.sig)) { return dec_make(u128_make(0, 0), 0, 0); }
+
+    int sign = (dec_is_neg(a) != dec_is_neg(b)) ? NP_DEC_NEG : 0;
+    np_u128 num = a.sig;
+    np_u128 den = b.sig;
+    int exp = a.exp - b.exp;
+    int shifts = 0;
+
+    // 先放大到 num >= den，让整数部分成为首位数字。
+    while (u128_cmp(num, den) < 0) {
+        np_u128 t;
+        if (!u128_mul10(num, &t)) { break; }
+        num = t;
+        shifts++;
+        if (shifts > 4000) { break; }
+    }
+
+    // 逐位长除，最多取 NP_DEC_MAX_DIGITS 位；余数用于四舍五入。
+    char q[48];
+    int qn = 0;
+    np_u128 rem = num;
+    while (qn < NP_DEC_MAX_DIGITS + 1) {
+        int d = 0;
+        while (u128_cmp(rem, den) >= 0) {
+            rem = u128_sub(rem, den);
+            d++;
+        }
+        q[qn++] = (char)d;
+        if (qn >= NP_DEC_MAX_DIGITS + 1) { break; }
+        np_u128 t;
+        if (!u128_mul10(rem, &t)) { break; }
+        rem = t;
+        shifts++;
+    }
+    exp -= shifts;
+
+    // 第 39 位做四舍五入。
+    int round_up = 0;
+    if (qn > NP_DEC_MAX_DIGITS) {
+        int drop = qn - NP_DEC_MAX_DIGITS;
+        if (q[NP_DEC_MAX_DIGITS] >= 5) { round_up = 1; }
+        qn = NP_DEC_MAX_DIGITS;
+        // 丢掉低位 drop 位后，指数必须补回同样多——否则结果小 10^drop
+        // （`10/4` 曾算成 0.25）。
+        exp += drop;
+    }
+    // 压缩数字串为 128 位。
+    np_u128 s = u128_make(0, 0);
+    for (int i = 0; i < qn; i++) {
+        np_u128 t;
+        if (!u128_mul10(s, &t)) { return dec_nan(); }
+        int carry = 0;
+        np_u128 t2 = u128_add(t, u128_make(0, (uint64_t)q[i]), &carry);
+        if (carry) { return dec_nan(); }
+        s = t2;
+    }
+    if (round_up) {
+        int carry = 0;
+        s = u128_add(s, u128_make(0, 1), &carry);
+        if (carry) { return dec_nan(); }
+    }
+    np_dec r = dec_make(s, exp, sign);
+    r = dec_normalize(r);
+    return dec_round_limit(r);
+}
+
+// 比较：-1 / 0 / 1；任一为 NaN 返回 0（无法定序）。
+static int dec_cmp(np_dec a, np_dec b) {
+    if (dec_is_nan(a) || dec_is_nan(b)) { return 0; }
+    int az = u128_is_zero(a.sig), bz = u128_is_zero(b.sig);
+    if (az && bz) { return 0; }
+    int an = dec_is_neg(a), bn = dec_is_neg(b);
+    if (az) { return bn ? 1 : -1; }
+    if (bz) { return an ? -1 : 1; }
+    if (an != bn) { return an ? -1 : 1; }
+    int mag;
+    // 十进制数量级 = exp + 位数 - 1；不同则大者大，无需放大（避免 128 位溢出）。
+    int oa = a.exp + u128_digits(a.sig) - 1;
+    int ob = b.exp + u128_digits(b.sig) - 1;
+    if (oa != ob) {
+        mag = oa < ob ? -1 : 1;
+    } else {
+        // 同数量级：逐位比较十进制数字（短者右侧补零）。
+        char da[48], db[48];
+        int na = u128_to_digits(a.sig, da);
+        int nb = u128_to_digits(b.sig, db);
+        int n = na > nb ? na : nb;
+        mag = 0;
+        for (int i = 0; i < n; i++) {
+            char ca = i < na ? da[i] : '0';
+            char cb = i < nb ? db[i] : '0';
+            if (ca != cb) { mag = ca < cb ? -1 : 1; break; }
+        }
+    }
+    if (mag == 0) { return 0; }
+    return an ? -mag : mag;
+}
+
+// —— 解析与输出 ——
+
+// 解析十进制字面量：[+-]?digits[.digits][(e|E)[+-]?digits]。
+// 先导零不占 38 位有效数字预算；超出预算的尾数被舍去并置 RND；非法返回 0。
+static int dec_parse(const char *s, np_dec *out) {
+    if (!s) { return 0; }
+    int i = 0;
+    int neg = 0;
+    if (s[i] == '+' || s[i] == '-') { neg = (s[i] == '-'); i++; }
+    char digits[64];
+    int nd = 0;
+    int frac = 0;
+    int dropped = 0;
+    int seen_digit = 0;
+    int seen_dot = 0;
+    for (; s[i] != '\0'; i++) {
+        char c = s[i];
+        if (c >= '0' && c <= '9') {
+            seen_digit = 1;
+            if (nd == 0 && c == '0') {
+                // 先导零：只影响小数位数（frac），不占有效数字预算。
+                if (seen_dot) { frac++; }
+                continue;
+            }
+            if (seen_dot) { frac++; }
+            if (nd < NP_DEC_MAX_DIGITS) {
+                digits[nd++] = c;
+            } else {
+                dropped++;
+            }
+        } else if (c == '.' && !seen_dot) {
+            seen_dot = 1;
+        } else {
+            break;
+        }
+    }
+    if (!seen_digit) { return 0; }
+    int exp10 = 0;
+    if (s[i] == 'e' || s[i] == 'E') {
+        i++;
+        int eneg = 0;
+        if (s[i] == '+' || s[i] == '-') { eneg = (s[i] == '-'); i++; }
+        int ed = 0;
+        int en = 0;
+        while (s[i] >= '0' && s[i] <= '9') {
+            if (en < 6) { ed = ed * 10 + (s[i] - '0'); en++; }
+            i++;
+        }
+        if (en == 0) { return 0; }
+        exp10 = eneg ? -ed : ed;
+    }
+    if (s[i] != '\0') { return 0; }
+    if (nd == 0) {
+        *out = dec_make(u128_make(0, 0), 0, 0);   // 全零
+        return 1;
+    }
+    np_u128 sig;
+    if (!digits_to_u128(digits, nd, &sig)) { return 0; }
+    np_dec r = dec_make(sig, exp10 - frac + dropped, neg ? NP_DEC_NEG : 0);
+    if (dropped) { r.flags |= NP_DEC_RND; }
+    *out = dec_normalize(r);
+    return 1;
+}
+
+// 规范十进制字符串：无指数、无多余零；NaN → "NaN"。
+static void dec_to_string(np_dec a, char *out, int cap) {
+    if (dec_is_nan(a)) { snprintf(out, (size_t)cap, "NaN"); return; }
+    if (u128_is_zero(a.sig)) { snprintf(out, (size_t)cap, "0"); return; }
+    char d[48];
+    int n = u128_to_digits(a.sig, d);
+    int pos = 0;
+    if (dec_is_neg(a)) { out[pos++] = '-'; }
+    if (a.exp >= 0) {
+        for (int i = 0; i < n && pos < cap - 1; i++) { out[pos++] = d[i]; }
+        for (int i = 0; i < a.exp && pos < cap - 1; i++) { out[pos++] = '0'; }
+    } else {
+        int point = n + a.exp;   // 小数点在数字串中的位置
+        if (point > 0) {
+            for (int i = 0; i < n && pos < cap - 1; i++) {
+                if (i == point) { out[pos++] = '.'; }
+                out[pos++] = d[i];
+            }
+        } else {
+            out[pos++] = '0';
+            if (pos < cap - 1) { out[pos++] = '.'; }
+            for (int i = 0; i < -point && pos < cap - 1; i++) { out[pos++] = '0'; }
+            for (int i = 0; i < n && pos < cap - 1; i++) { out[pos++] = d[i]; }
+        }
+    }
+    out[pos] = '\0';
+}
+
+static double dec_to_double(np_dec a) {
+    if (dec_is_nan(a)) { return 0.0 / 0.0; }   // NaN（未开 -ffast-math，不会被折叠）
+    char d[48];
+    int n = u128_to_digits(a.sig, d);
+    double v = 0.0;
+    for (int i = 0; i < n; i++) { v = v * 10.0 + (double)(d[i] - '0'); }
+    int e = a.exp;
+    while (e > 0) { v *= 10.0; e--; }
+    while (e < 0) { v /= 10.0; e++; }
+    return dec_is_neg(a) ? -v : v;
+}
+
+// 截断向零（C 语义）；超出 long long 范围时饱和并置 OVF（诚实边界，不静默回绕）。
+static long long dec_to_ll(np_dec a, int *ovf) {
+    if (ovf) { *ovf = 0; }
+    if (dec_is_nan(a)) { return 0; }
+    char d[48];
+    int n = u128_to_digits(a.sig, d);
+    char buf[96];
+    int pos = 0;
+    if (dec_is_neg(a)) { buf[pos++] = '-'; }
+    if (a.exp >= 0) {
+        if (n + a.exp > 18) {
+            if (ovf) { *ovf = 1; }
+            return dec_is_neg(a) ? (-9223372036854775807LL - 1) : 9223372036854775807LL;
+        }
+        for (int i = 0; i < n; i++) { buf[pos++] = d[i]; }
+        for (int i = 0; i < a.exp; i++) { buf[pos++] = '0'; }
+    } else {
+        int keep = n + a.exp;
+        if (keep <= 0) { return 0; }
+        for (int i = 0; i < keep; i++) { buf[pos++] = d[i]; }
+    }
+    buf[pos] = '\0';
+    return strtoll(buf, NULL, 10);
+}
+
+// —— 对象与 np_dec 的互转 ——
+
+static NPDecimalNumber *np_dec_wrap(np_dec d) {
+    NPDecimalNumber *n = [[NPDecimalNumber alloc] init];
+    if (!n) { return NULL; }
+    n->_hi = d.sig.hi;
+    n->_lo = d.sig.lo;
+    n->_exp = d.exp;
+    n->_flags = d.flags;
+    return n;
+}
+
+static np_dec np_dec_unwrap(NPDecimalNumber *n) {
+    np_dec d;
+    d.sig.hi = n->_hi;
+    d.sig.lo = n->_lo;
+    d.exp = n->_exp;
+    d.flags = n->_flags;
+    return d;
+}
+
+@implementation NPDecimalNumber
+
++ (NPDecimalNumber *)zero {
+    return np_dec_wrap(dec_make(u128_make(0, 0), 0, 0));
+}
+
++ (NPDecimalNumber *)one {
+    return np_dec_wrap(dec_make(u128_make(0, 1), 0, 0));
+}
+
++ (NPDecimalNumber *)notANumber {
+    return np_dec_wrap(dec_nan());
+}
+
++ (NPDecimalNumber *)decimalNumberWithString:(NPString *)str {
+    if (!str) { return [NPDecimalNumber notANumber]; }
+    np_dec d;
+    if (!dec_parse([str UTF8String], &d)) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(d);
+}
+
++ (NPDecimalNumber *)decimalNumberWithInt:(int)value {
+    return [NPDecimalNumber decimalNumberWithLongLong:(long long)value];
+}
+
++ (NPDecimalNumber *)decimalNumberWithLongLong:(long long)value {
+    char buf[32];
+    snprintf(buf, sizeof buf, "%lld", value);
+    np_dec d;
+    if (!dec_parse(buf, &d)) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(d);
+}
+
++ (NPDecimalNumber *)decimalNumberWithDouble:(double)value {
+    // 十进制最短往返拼写（对齐 ObjC：0.1 进来就是 0.1，不是 0.10000000000000001）。
+    char buf[64];
+    snprintf(buf, sizeof buf, "%.15g", value);
+    if (strtod(buf, NULL) != value) {
+        snprintf(buf, sizeof buf, "%.16g", value);
+        if (strtod(buf, NULL) != value) {
+            snprintf(buf, sizeof buf, "%.17g", value);
+        }
+    }
+    np_dec d;
+    if (!dec_parse(buf, &d)) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(d);
+}
+
+- (BOOL)isNotANumber {
+    return (BOOL)((_flags & NP_DEC_NAN) != 0);
+}
+
+- (BOOL)isEqualToNumber:(NPDecimalNumber *)other {
+    if (!other) { return 0; }
+    if ([self isNotANumber] || [other isNotANumber]) { return 0; }   // NaN 不与任何值相等
+    return (BOOL)(dec_cmp(np_dec_unwrap(self), np_dec_unwrap(other)) == 0);
+}
+
+- (int)compare:(NPDecimalNumber *)other {
+    if (!other) { return 0; }
+    return dec_cmp(np_dec_unwrap(self), np_dec_unwrap(other));
+}
+
+- (NPDecimalNumber *)decimalNumberByAdding:(NPDecimalNumber *)other {
+    if (!other) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(dec_add(np_dec_unwrap(self), np_dec_unwrap(other), 0));
+}
+
+- (NPDecimalNumber *)decimalNumberBySubtracting:(NPDecimalNumber *)other {
+    if (!other) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(dec_add(np_dec_unwrap(self), np_dec_unwrap(other), 1));
+}
+
+- (NPDecimalNumber *)decimalNumberByMultiplyingBy:(NPDecimalNumber *)other {
+    if (!other) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(dec_mul(np_dec_unwrap(self), np_dec_unwrap(other)));
+}
+
+- (NPDecimalNumber *)decimalNumberByDividingBy:(NPDecimalNumber *)other {
+    if (!other) { return [NPDecimalNumber notANumber]; }
+    return np_dec_wrap(dec_div(np_dec_unwrap(self), np_dec_unwrap(other)));
+}
+
+- (NPDecimalNumber *)decimalNumberByNegating {
+    np_dec d = np_dec_unwrap(self);
+    if (dec_is_nan(d)) { return np_dec_wrap(d); }
+    if (u128_is_zero(d.sig)) { return np_dec_wrap(d); }
+    d.flags ^= NP_DEC_NEG;
+    return np_dec_wrap(d);
+}
+
+- (double)doubleValue {
+    return dec_to_double(np_dec_unwrap(self));
+}
+
+- (long long)longLongValue {
+    return dec_to_ll(np_dec_unwrap(self), NULL);
+}
+
+- (NPString *)stringValue {
+    char buf[128];
+    dec_to_string(np_dec_unwrap(self), buf, (int)sizeof buf);
+    return [NPString stringWithUTF8String:buf];
+}
+
+- (NPString *)description {
+    return [self stringValue];
+}
+
+@end
+
+

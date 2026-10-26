@@ -63,7 +63,7 @@
 // NSObject's identity comparison.
 - (BOOL)isEqual:(id)object;
 
-- (id)copy;
+- (instancetype)copy;
 - (NPString *)description;
 
 @end

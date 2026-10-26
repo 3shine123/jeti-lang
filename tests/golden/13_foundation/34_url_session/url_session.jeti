@@ -1,0 +1,43 @@
+/* NPURLSession golden（声明伞头 + 预编译库）。
+ *
+ * 只覆盖**离线确定性**的部分：真网络路径（对本地服务器 GET 200/body）由
+ * probes/p3_urlsession/probe_urlsession.jeti 验证——golden 不能依赖网络。
+ *
+ * 语义对齐 ObjC 的 NSURLSession 同步子集；边界见 .hje：
+ *   H1  +sharedSession 是同一实例；超时默认 30，设置可往返，<=0 回落默认
+ *   H2  https:// 被拒绝（返回 nil，**不**静默降级成明文 http）
+ *   H3  不支持的 scheme（ftp://）→ nil
+ *   H4  nil URL → nil
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   H1 ok … H4 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+int main(void) {
+    NPURLSession *s1 = [NPURLSession sharedSession];
+    NPURLSession *s2 = [NPURLSession sharedSession];
+
+    // H1：单例与超时语义
+    int h1 = (s1 == s2) && [s1 timeoutSeconds] == 30;
+    [s1 setTimeoutSeconds:5];
+    h1 = h1 && [s1 timeoutSeconds] == 5;
+    [s1 setTimeoutSeconds:0];                 // 非正数回落默认
+    h1 = h1 && [s1 timeoutSeconds] == 30;
+    printf("%s\n", h1 ? "H1 ok" : "H1 FAIL");
+
+    // H2：https 必须拒绝（无 TLS，不静默降级）
+    NPURL *https = [NPURL URLWithString:S("https://example.com/")];
+    printf("%s\n", (https && [s1 dataWithContentsOfURL:https] == NULL) ? "H2 ok" : "H2 FAIL");
+
+    // H3：不支持的 scheme
+    NPURL *ftp = [NPURL URLWithString:S("ftp://example.com/x")];
+    printf("%s\n", (ftp && [s1 dataWithContentsOfURL:ftp] == NULL) ? "H3 ok" : "H3 FAIL");
+
+    // H4：nil URL
+    printf("%s\n", [s1 dataWithContentsOfURL:NULL] == NULL ? "H4 ok" : "H4 FAIL");
+    return 0;
+}

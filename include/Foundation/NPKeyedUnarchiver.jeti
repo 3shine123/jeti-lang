@@ -1,0 +1,63 @@
+#import <Foundation/NPKeyedUnarchiver.hje>
+#import <Foundation/NPString.jeti>
+#import <Foundation/NPData.jeti>
+#import <Foundation/NPDictionary.jeti>
+#import <Foundation/NPNumber.jeti>
+#import <Foundation/NPJSONSerialization.jeti>
+#import <Foundation/NPObject.jeti>
+
+// NPKeyedUnarchiver 实现：JSON 字节 → 键值树 → 按类型取值。
+// 类型不符返回零值、不做类名还原：见 .hje 的诚实边界。
+
+@implementation NPKeyedUnarchiver
+
++ (id)unarchiveObjectWithData:(NPData *)data {
+    if (!data) { return NULL; }
+    return [NPJSONSerialization JSONObjectWithData:data];
+}
+
+- (NPKeyedUnarchiver *)initForReadingWithData:(NPData *)data {
+    self = [super init];
+    if (!self) { return NULL; }
+    id root = [NPJSONSerialization JSONObjectWithData:data];
+    // 归档根必须是一棵键值树；否则视为坏归档（返回 nil，ObjC 抛异常）。
+    if (!root || ![root isKindOfClass:[NPDictionary class]]) {
+        return NULL;
+    }
+    _root = (NPDictionary *)jeti_retain(root);
+    return self;
+}
+
+- (void)dealloc {
+    if (_root) { jeti_release(_root); _root = NULL; }
+    [super dealloc];
+}
+
+- (id)decodeObjectForKey:(NPString *)key {
+    if (!_root || !key) { return NULL; }
+    return [_root objectForKey:key];
+}
+
+- (int)decodeIntForKey:(NPString *)key {
+    id v = [self decodeObjectForKey:key];
+    if (!v || ![v isKindOfClass:[NPNumber class]]) { return 0; }
+    return [(NPNumber *)v intValue];
+}
+
+- (double)decodeDoubleForKey:(NPString *)key {
+    id v = [self decodeObjectForKey:key];
+    if (!v || ![v isKindOfClass:[NPNumber class]]) { return 0.0; }
+    return [(NPNumber *)v doubleValue];
+}
+
+- (BOOL)decodeBoolForKey:(NPString *)key {
+    id v = [self decodeObjectForKey:key];
+    if (!v || ![v isKindOfClass:[NPNumber class]]) { return 0; }
+    return (BOOL)([(NPNumber *)v boolValue] != 0);
+}
+
+- (BOOL)containsValueForKey:(NPString *)key {
+    return (BOOL)([self decodeObjectForKey:key] != NULL);
+}
+
+@end

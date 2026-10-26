@@ -1,0 +1,124 @@
+/* NPDecimalNumber golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * 语义对齐 ObjC 的 NSDecimalNumber（128 位有效数字 + 十进制指数，38 位精度）：
+ *   A1  0.1 + 0.2 精确等于 0.3（本类存在的意义：避开二进制浮点误差）
+ *   A2  +decimalNumberWithDouble: 走十进制最短往返拼写（0.1 → "0.1"）
+ *   A3  乘法/除法：1.1 × 3 = 3.3；10 ÷ 4 = 2.5
+ *   A4  除法精度上限：1 ÷ 3 给出 38 位 3（四舍五入后仍全 3）
+ *   A5  38 位大数加法：12345678901234567890123456789012345678 + 1
+ *   A6  比较与取负
+ *   A7  非法输入与除零 → notANumber（诚实边界：不抛异常）
+ *   A8  转换：doubleValue / longLongValue（截断向零）
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   A1 ok … A8 ok
+ *
+ * 注意：接收者一律用变量或嵌套消息发送（`[recv sel]` 与 `[[X alloc] init]`）；
+ * 函数调用型接收者（`[f(x) sel]`）在 jetic 里按下标解析，是既有限制。
+ */
+#import <Foundation/Foundation.hje>
+#import <Foundation/NPDecimalNumber.hje>
+#include <stdio.h>
+#include <string.h>
+
+static const char *sv(NPDecimalNumber *n) { return [[n stringValue] UTF8String]; }
+
+static NPDecimalNumber *dec(const char *s) {
+    return [NPDecimalNumber decimalNumberWithString:[NPString stringWithUTF8String:s]];
+}
+
+int main(void) {
+    // A1：0.1 + 0.2 == 0.3（逐字比较字符串，确认不是 0.30000000000000004）
+    NPDecimalNumber *p1 = dec("0.1");
+    NPDecimalNumber *p2 = dec("0.2");
+    NPDecimalNumber *p3 = dec("0.3");
+    NPDecimalNumber *sum = [p1 decimalNumberByAdding:p2];
+    if (strcmp(sv(sum), "0.3") == 0 && [sum isEqualToNumber:p3]) {
+        printf("A1 ok\n");
+    } else {
+        printf("A1 FAIL %s\n", sv(sum));
+    }
+
+    // A2：double 入口走十进制最短拼写
+    NPDecimalNumber *d1 = [NPDecimalNumber decimalNumberWithDouble:0.1];
+    NPDecimalNumber *d2 = [NPDecimalNumber decimalNumberWithDouble:1.5];
+    if (strcmp(sv(d1), "0.1") == 0 && strcmp(sv(d2), "1.5") == 0) {
+        printf("A2 ok\n");
+    } else {
+        printf("A2 FAIL %s %s\n", sv(d1), sv(d2));
+    }
+
+    // A3：乘法与除法
+    NPDecimalNumber *f1 = dec("1.1");
+    NPDecimalNumber *three = [NPDecimalNumber decimalNumberWithInt:3];
+    NPDecimalNumber *prod = [f1 decimalNumberByMultiplyingBy:three];
+    NPDecimalNumber *ten = [NPDecimalNumber decimalNumberWithInt:10];
+    NPDecimalNumber *four = [NPDecimalNumber decimalNumberWithInt:4];
+    NPDecimalNumber *quot = [ten decimalNumberByDividingBy:four];
+    if (strcmp(sv(prod), "3.3") == 0 && strcmp(sv(quot), "2.5") == 0) {
+        printf("A3 ok\n");
+    } else {
+        printf("A3 FAIL %s %s\n", sv(prod), sv(quot));
+    }
+
+    // A4：1/3 → 38 位 3（精度上限，四舍五入）
+    NPDecimalNumber *one = [NPDecimalNumber one];
+    NPDecimalNumber *third_n = [one decimalNumberByDividingBy:three];
+    const char *third = sv(third_n);
+    int ok4 = strlen(third) == 40 && third[0] == '0' && third[1] == '.';
+    for (int i = 2; ok4 && i < 40; i++) {
+        if (third[i] != '3') { ok4 = 0; }
+    }
+    if (ok4) { printf("A4 ok\n"); } else { printf("A4 FAIL %s\n", third); }
+
+    // A5：38 位大数 + 1
+    NPDecimalNumber *big = dec("12345678901234567890123456789012345678");
+    NPDecimalNumber *big1 = [big decimalNumberByAdding:one];
+    if (strcmp(sv(big1), "12345678901234567890123456789012345679") == 0) {
+        printf("A5 ok\n");
+    } else {
+        printf("A5 FAIL %s\n", sv(big1));
+    }
+
+    // A6：比较与取负
+    NPDecimalNumber *q1 = dec("0.3");
+    NPDecimalNumber *q2 = dec("0.25");
+    NPDecimalNumber *q3 = dec("-1");
+    NPDecimalNumber *q4 = dec("1");
+    NPDecimalNumber *q5 = dec("2");
+    NPDecimalNumber *q6 = dec("2");
+    int c1 = [q1 compare:q2];
+    int c2 = [q3 compare:q4];
+    int c3 = [q5 compare:q6];
+    NPDecimalNumber *five = [NPDecimalNumber decimalNumberWithInt:5];
+    NPDecimalNumber *neg = [five decimalNumberByNegating];
+    if (c1 == 1 && c2 == -1 && c3 == 0 && strcmp(sv(neg), "-5") == 0) {
+        printf("A6 ok\n");
+    } else {
+        printf("A6 FAIL %d %d %d %s\n", c1, c2, c3, sv(neg));
+    }
+
+    // A7：非法输入 / 除零 / NaN 不相等
+    NPDecimalNumber *badn = dec("12x");
+    int bad = [badn isNotANumber];
+    NPDecimalNumber *zero = [NPDecimalNumber zero];
+    NPDecimalNumber *dz_n = [one decimalNumberByDividingBy:zero];
+    int dz = [dz_n isNotANumber];
+    NPDecimalNumber *nan1 = [NPDecimalNumber notANumber];
+    NPDecimalNumber *nan2 = [NPDecimalNumber notANumber];
+    int nan_eq = [nan1 isEqualToNumber:nan2];
+    if (bad && dz && !nan_eq) { printf("A7 ok\n"); } else { printf("A7 FAIL %d %d %d\n", bad, dz, nan_eq); }
+
+    // A8：转换
+    NPDecimalNumber *h1 = dec("0.1");
+    NPDecimalNumber *h2 = dec("3.9");
+    NPDecimalNumber *h3 = dec("-3.9");
+    double dv = [h1 doubleValue];
+    long long ll = [h2 longLongValue];
+    long long nl = [h3 longLongValue];
+    if (dv == 0.1 && ll == 3 && nl == -3) {
+        printf("A8 ok\n");
+    } else {
+        printf("A8 FAIL %.17g %lld %lld\n", dv, ll, nl);
+    }
+    return 0;
+}

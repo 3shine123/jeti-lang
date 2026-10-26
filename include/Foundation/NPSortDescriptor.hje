@@ -35,7 +35,7 @@
 + (NPSortDescriptor *)sortDescriptorWithKey:(NPString *)key ascending:(int)ascending;
 // Jeti 形态：key 标签 + 方向 + 比较块（比较语义的真正来源）。
 + (NPSortDescriptor *)sortDescriptorWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp;
-- (id)initWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp;
+- (instancetype)initWithKey:(NPString *)key ascending:(int)ascending comparator:(int (^)(id, id))cmp;
 
 - (NPString *)key;
 - (int)ascending;

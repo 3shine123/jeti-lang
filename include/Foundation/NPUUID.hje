@@ -26,11 +26,11 @@
 // 新的随机 v4 UUID（ObjC +uuid 对齐）。
 + (NPUUID *)UUID;
 // 新的随机 v4 UUID（ObjC -init 对齐：alloc init 即随机）。
-- (id)init;
+- (instancetype)init;
 // 解析 36 字符规范形；非法输入返回 nil（ObjC -initWithUUIDString: 对齐）。
-- (id)initWithUUIDString:(NPString *)str;
+- (instancetype)initWithUUIDString:(NPString *)str;
 // 大写规范形字符串。
-- (id)UUIDString;
+- (NPString *)UUIDString;
 @end
 
 #endif

@@ -1,0 +1,39 @@
+#ifndef NPKEYEDARCHIVER_NH
+#define NPKEYEDARCHIVER_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPData.hje>
+#import <Foundation/NPDictionary.hje>
+
+// NPKeyedArchiver —— 键控归档（对应 ObjC 的 NSKeyedArchiver）。
+//
+// v1 的承载格式是 **JSON**（复用 NPJSONSerialization）：`-encode*:forKey:`
+// 往一个键值树里写，`-finishEncoding` 把它编码成 NPData。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **与 ObjC 的 NSKeyedArchiver 二进制格式不兼容**：ObjC 的归档是带类名/
+//   引用表的二进制 plist，v1 是 JSON——两边互不识别。跨语言交换请用
+//   NPJSONSerialization。
+// - **只有 JSON 可表示的值能往返**：NPString / NPNumber / NPArray /
+//   NPDictionary / NPNull。其它对象（NPDate、NPData、自定义类）须由调用方
+//   自行编码（例如日期存 `-timeIntervalSince1970` 的 NPNumber）。
+// - 不做 `NPCoding` 协议式的对象图（`-encodeObject:` 不会自动展开对象的
+//   ivars，也不会维护引用共享/环检测）。
+@interface NPKeyedArchiver : NPObject {
+@public
+    NPMutableDictionary *_root;   // 键值树
+    int _finished;                // finishEncoding 后置 1（再编码返回 nil）
+}
+// 直接把一个 JSON 可表示的根对象编码成归档字节（ObjC +archivedDataWithRootObject: 对齐）。
++ (NPData *)archivedDataWithRootObject:(id)root;
+- (NPKeyedArchiver *)init;
+- (void)encodeObject:(id)value forKey:(NPString *)key;
+- (void)encodeInt:(int)value forKey:(NPString *)key;
+- (void)encodeDouble:(double)value forKey:(NPString *)key;
+- (void)encodeBool:(BOOL)value forKey:(NPString *)key;
+// 结束编码：返回 JSON 字节；已结束或树为空返回 nil。
+- (NPData *)finishEncoding;
+@end
+
+#endif

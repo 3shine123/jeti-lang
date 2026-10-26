@@ -1,0 +1,77 @@
+/* NPKeyedArchiver + NPKeyedUnarchiver golden（声明伞头 + 预编译库）。
+ *
+ * v1 承载格式是 JSON（复用 NPJSONSerialization）；与 ObjC 二进制归档不兼容、
+ * 只支持 JSON 可表示的值：见两个 .hje 的诚实边界。
+ *   G1  类型化编码往返：object / int / double / bool
+ *   G2  finishEncoding 只允许一次
+ *   G3  缺键：containsValueForKey 为 NO，取值给零值
+ *   G4  类型不符（字符串当整数读）→ 0
+ *   G5  根对象归档：+archivedDataWithRootObject: → +unarchiveObjectWithData: 往返
+ *   G6  坏归档（根不是键值树）→ nil
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   G1 ok … G6 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+int main(void) {
+    NPKeyedArchiver *a = [[NPKeyedArchiver alloc] init];
+    [a encodeObject:S("jim") forKey:S("name")];
+    [a encodeInt:42 forKey:S("age")];
+    [a encodeDouble:1.5 forKey:S("score")];
+    [a encodeBool:1 forKey:S("ok")];
+    NPData *d = [a finishEncoding];
+    if (!d) { printf("G0 FAIL no data\n"); return 0; }
+
+    NPKeyedUnarchiver *u = [[NPKeyedUnarchiver alloc] initForReadingWithData:d];
+    if (!u) { printf("G0 FAIL no unarchiver\n"); return 0; }
+
+    // G1：类型化往返
+    NPString *name = [u decodeObjectForKey:S("name")];
+    if (name && strcmp([name UTF8String], "jim") == 0
+        && [u decodeIntForKey:S("age")] == 42
+        && [u decodeDoubleForKey:S("score")] == 1.5
+        && [u decodeBoolForKey:S("ok")] == 1) {
+        printf("G1 ok\n");
+    } else {
+        printf("G1 FAIL\n");
+    }
+
+    // G2：finishEncoding 只允许一次
+    if ([a finishEncoding] == NULL) { printf("G2 ok\n"); } else { printf("G2 FAIL\n"); }
+
+    // G3：缺键 → NO + 零值
+    if (![u containsValueForKey:S("nope")] && [u decodeIntForKey:S("nope")] == 0
+        && [u decodeObjectForKey:S("nope")] == NULL) {
+        printf("G3 ok\n");
+    } else {
+        printf("G3 FAIL\n");
+    }
+
+    // G4：类型不符 → 0
+    if ([u decodeIntForKey:S("name")] == 0 && [u decodeBoolForKey:S("name")] == 0) {
+        printf("G4 ok\n");
+    } else {
+        printf("G4 FAIL\n");
+    }
+
+    // G5：根对象归档往返
+    NPMutableDictionary *root = [[NPMutableDictionary alloc] init];
+    [root setObject:S("v") forKey:S("k")];
+    NPData *d2 = [NPKeyedArchiver archivedDataWithRootObject:root];
+    id back = [NPKeyedUnarchiver unarchiveObjectWithData:d2];
+    if (back && [back isKindOfClass:[NPDictionary class]]) {
+        printf("G5 ok\n");
+    } else {
+        printf("G5 FAIL\n");
+    }
+
+    // G6：坏归档（根是数组，不是键值树）→ nil
+    NPData *bad = [NPData dataWithBytes:"[1,2,3]" length:7];
+    NPKeyedUnarchiver *badu = [[NPKeyedUnarchiver alloc] initForReadingWithData:bad];
+    if (badu == NULL) { printf("G6 ok\n"); } else { printf("G6 FAIL\n"); }
+    return 0;
+}

@@ -1,0 +1,53 @@
+#ifndef NPDATECOMPONENTS_NH
+#define NPDATECOMPONENTS_NH
+
+#import <Foundation/NPObject.hje>
+
+// NPDateComponents —— 日期分量（对应 ObjC 的 NSDateComponents）。
+//
+// 每个分量独立"是否已设置"（_has 位掩码），未设置的分量在构造日期时取默认值
+// （月/日 = 1，时/分/秒 = 0）——与 ObjC 的 NSDateComponents 语义一致。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 只做公历字段：year/month/day/hour/minute/second/weekday。era、quarter、
+//   weekOfYear、nanosecond、calendar/timeZone 关联等 ObjC 字段不做。
+// - `weekday` 采用 ObjC 默认的 1=周日 … 7=周六（`NPCalendar` 的
+//   `-dayOfWeekFromDate:` 同口径）。
+@interface NPDateComponents : NPObject {
+@public
+    int _year;
+    int _month;
+    int _day;
+    int _hour;
+    int _minute;
+    int _second;
+    int _weekday;
+    int _has;      // 位掩码：1 年 / 2 月 / 4 日 / 8 时 / 16 分 / 32 秒 / 64 周几
+}
+// 全部分量未设置的空对象。
++ (NPDateComponents *)components;
+- (void)setYear:(int)value;
+- (void)setMonth:(int)value;
+- (void)setDay:(int)value;
+- (void)setHour:(int)value;
+- (void)setMinute:(int)value;
+- (void)setSecond:(int)value;
+- (void)setWeekday:(int)value;
+- (int)year;
+- (int)month;
+- (int)day;
+- (int)hour;
+- (int)minute;
+- (int)second;
+- (int)weekday;
+// 该分量是否被显式设置过。
+- (BOOL)hasYear;
+- (BOOL)hasMonth;
+- (BOOL)hasDay;
+- (BOOL)hasHour;
+- (BOOL)hasMinute;
+- (BOOL)hasSecond;
+- (BOOL)hasWeekday;
+@end
+
+#endif

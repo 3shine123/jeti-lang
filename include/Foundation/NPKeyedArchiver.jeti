@@ -1,0 +1,67 @@
+#import <Foundation/NPKeyedArchiver.hje>
+#import <Foundation/NPString.jeti>
+#import <Foundation/NPData.jeti>
+#import <Foundation/NPMutableDictionary.jeti>
+#import <Foundation/NPNumber.jeti>
+#import <Foundation/NPJSONSerialization.jeti>
+#import <Foundation/NPObject.jeti>
+
+#include <string.h>
+
+// NPKeyedArchiver 实现：键值树 → JSON 字节（复用 NPJSONSerialization）。
+// 与 ObjC 二进制归档不兼容、只支持 JSON 可表示的值：见 .hje 的诚实边界。
+
+@implementation NPKeyedArchiver
+
++ (NPData *)archivedDataWithRootObject:(id)root {
+    if (!root) { return NULL; }
+    NPString *json = [NPJSONSerialization stringWithJSONObject:root];
+    if (!json) { return NULL; }
+    const char *bytes = [json UTF8String];
+    if (!bytes) { return NULL; }
+    return [NPData dataWithBytes:bytes length:strlen(bytes)];
+}
+
+- (NPKeyedArchiver *)init {
+    self = [super init];
+    if (!self) { return NULL; }
+    _root = [[NPMutableDictionary alloc] init];   // alloc 即持有
+    _finished = 0;
+    return self;
+}
+
+- (void)dealloc {
+    if (_root) { jeti_release(_root); _root = NULL; }
+    [super dealloc];
+}
+
+- (void)encodeObject:(id)value forKey:(NPString *)key {
+    // nil 不编码（ObjC 的 -encodeObject:forKey: 对 nil 是 no-op）；
+    // 编码已结束或树缺失时静默忽略——它们只可能来自调用方误用。
+    if (_finished || !key || !_root || !value) { return; }
+    [_root setObject:value forKey:key];
+}
+
+- (void)encodeInt:(int)value forKey:(NPString *)key {
+    [self encodeObject:[NPNumber numberWithInt:value] forKey:key];
+}
+
+- (void)encodeDouble:(double)value forKey:(NPString *)key {
+    [self encodeObject:[NPNumber numberWithDouble:value] forKey:key];
+}
+
+- (void)encodeBool:(BOOL)value forKey:(NPString *)key {
+    [self encodeObject:[NPNumber numberWithBool:(int)value] forKey:key];
+}
+
+- (NPData *)finishEncoding {
+    if (_finished || !_root) { return NULL; }
+    _finished = 1;                                // 只允许结束一次
+    NPString *json = [NPJSONSerialization stringWithJSONObject:_root];
+    if (!json) { return NULL; }
+    const char *bytes = [json UTF8String];
+    if (!bytes) { return NULL; }
+    return [NPData dataWithBytes:bytes length:strlen(bytes)];
+}
+
+@end

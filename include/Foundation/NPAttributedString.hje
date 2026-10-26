@@ -1,0 +1,46 @@
+#ifndef NPATTRIBUTEDSTRING_NH
+#define NPATTRIBUTEDSTRING_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPDictionary.hje>
+
+// NPAttributedString —— 带属性的字符串（对应 ObjC 的 NSAttributedString）。
+//
+// **v1 是纯数据层**：整串共用一份属性字典（单 run），不做区间属性、不做渲染。
+// GUI 渲染留给 libui（见 .hje 的诚实边界）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **单 run**：v1 的 `-attributesAtIndex:` 对任何合法下标都返回整串那份字典，
+//   `-effectiveRangeLengthAtIndex:` 返回整串长度。NSAttributedString 的
+//   区间属性（同一串不同段不同样式）尚未实现——区间 run 需要可增长的 run 数组
+//   （ivars 是定长布局），是后续批次。
+// - 属性名是 `NPString`，值是任意对象（对齐 ObjC 的 `NSAttributedStringKey` /
+//   `id`）；不提供 `NSAttributedStringKey` 常量表（用到哪个由调用方自定）。
+// - 不做 `-initWithAttributedString:`（拷贝构造）、`-dataFromRange:`（归档）、
+//   `NSParagraphStyle` 等语义类型。
+@interface NPAttributedString : NPObject {
+@public
+    NPString     *_string;   // 文本（非 nil）
+    NPDictionary *_attrs;    // 整串属性（可为空字典）
+}
++ (NPAttributedString *)attributedStringWithString:(NPString *)str;
++ (NPAttributedString *)attributedStringWithString:(NPString *)str attributes:(NPDictionary *)attrs;
+- (NPAttributedString *)initWithString:(NPString *)str;
+- (NPAttributedString *)initWithString:(NPString *)str attributes:(NPDictionary *)attrs;
+// 文本内容与长度。
+- (NPString *)string;
+- (size_t)length;
+// 整串属性字典（拷贝；调用方改动不影响本对象）。
+- (NPDictionary *)attributes;
+// 下标处生效的属性；下标越界返回 nil（ObjC 抛异常，这里返回 nil 并在
+// -isValidIndex: 里给出判定）。
+- (NPDictionary *)attributesAtIndex:(size_t)index;
+// 下标处生效属性的长度（v1 = 整串长度）；越界返回 0。
+- (size_t)effectiveRangeLengthAtIndex:(size_t)index;
+// 单个属性值；不存在返回 nil。
+- (id)attribute:(NPString *)name atIndex:(size_t)index;
+- (BOOL)isValidIndex:(size_t)index;
+@end
+
+#endif

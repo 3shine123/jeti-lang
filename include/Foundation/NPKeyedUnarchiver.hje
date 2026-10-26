@@ -1,0 +1,36 @@
+#ifndef NPKEYEDUNARCHIVER_NH
+#define NPKEYEDUNARCHIVER_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPString.hje>
+#import <Foundation/NPData.hje>
+#import <Foundation/NPDictionary.hje>
+
+// NPKeyedUnarchiver —— 键控反归档（对应 ObjC 的 NSKeyedUnarchiver）。
+//
+// 读 NPKeyedArchiver 产出的 JSON 归档（见其诚实边界：与 ObjC 二进制归档不兼容）。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - 键不存在或类型不符时返回**零值**（0 / 0.0 / NO / nil）而不是抛异常——
+//   与 ObjC 的 NSKeyedUnarchiver 行为不同（它抛 NSInvalidUnarchiveOperation），
+//   调用方须用 `-containsValueForKey:` 先判定。
+// - 不做类名还原（JSON 里没有类信息）；自定义类请自行从 NPArray/NPDictionary
+//   重建。
+@interface NPKeyedUnarchiver : NPObject {
+@public
+    NPDictionary *_root;   // 解析出的键值树（nil = 解析失败）
+}
+// 解析归档字节为根对象树；失败返回 nil。
++ (id)unarchiveObjectWithData:(NPData *)data;
+// 以数据构造读取器；解析失败返回 nil。
+- (NPKeyedUnarchiver *)initForReadingWithData:(NPData *)data;
+// 按键取值（NPString/NPNumber/NPArray/NPDictionary/NPNull 之一）；无键返回 nil。
+- (id)decodeObjectForKey:(NPString *)key;
+- (int)decodeIntForKey:(NPString *)key;
+- (double)decodeDoubleForKey:(NPString *)key;
+- (BOOL)decodeBoolForKey:(NPString *)key;
+// 键是否存在（非 nil）。
+- (BOOL)containsValueForKey:(NPString *)key;
+@end
+
+#endif

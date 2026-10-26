@@ -1,0 +1,42 @@
+#ifndef NPCALENDAR_NH
+#define NPCALENDAR_NH
+
+#import <Foundation/NPObject.hje>
+#import <Foundation/NPDate.hje>
+#import <Foundation/NPDateComponents.hje>
+
+// NPCalendar —— 公历运算（对应 ObjC 的 NSCalendar）。
+//
+// v1 覆盖公历（Gregorian）的分解与构造：日期 ↔ 分量、星期几、某月天数、
+// 加减天数。
+//
+// 与 ObjC 的对应与差异（诚实边界）：
+// - **只有公历**：NSCalendar 支持多种 calendarIdentifier（佛历、农历、希伯来
+//   历…），v1 只做 Gregorian（含 proleptic 扩展：1582 年前的日期按前推公历算）。
+// - **无 tzdata**：时区只有固定偏移（`-setUTCOffsetMinutes:`），没有夏令时与
+//   历史时区数据库；`+currentCalendar` 因此是 UTC 日历。
+// - **无 locale**：`firstWeekday` 固定为 ObjC 默认的周日（1），不做区域偏好。
+// - 加减只做天（`-dateByAddingDays:toDate:`）；月/年的加减需要"溢出日"策略
+//   （1 月 31 日 + 1 月 = ?），ObjC 用 `NSCalendarOptions` 表达，v1 不做。
+@interface NPCalendar : NPObject {
+@public
+    int _utcOffsetMinutes;
+}
+// UTC 日历（无 tzdata，见诚实边界）。
++ (NPCalendar *)currentCalendar;
++ (NPCalendar *)calendarWithUTCOffsetMinutes:(int)minutes;
+- (void)setUTCOffsetMinutes:(int)minutes;
+- (int)utcOffsetMinutes;
+// 分解：未设置的分量由实现填满（weekday 为 1=周日 … 7=周六，ObjC 默认）。
+- (NPDateComponents *)componentsFromDate:(NPDate *)date;
+// 构造：分量越界（月 0/13、日 32、时 24…）返回 nil（ObjC 对非法分量抛异常）。
+- (NPDate *)dateFromComponents:(NPDateComponents *)c;
+// 星期几：1=周日 … 7=周六（ObjC 默认口径）。
+- (int)dayOfWeekFromDate:(NPDate *)date;
+// 某年某月的天数（month 1..12）。
+- (int)daysInMonth:(int)month year:(int)year;
+// 加减天数（可为负）。
+- (NPDate *)dateByAddingDays:(long long)days toDate:(NPDate *)date;
+@end
+
+#endif

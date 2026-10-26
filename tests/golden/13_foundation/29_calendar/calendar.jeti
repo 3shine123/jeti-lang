@@ -1,0 +1,118 @@
+/* NPCalendar + NPDateComponents golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * 语义对齐 ObjC 的 NSCalendar/NSDateComponents（v1 子集：公历分解/构造、星期几、
+ * 某月天数、加减天数；时区只做固定偏移，见 .hje 的诚实边界）：
+ *   C1  分解：0 → 1970-01-01 00:00:00 wd=5（周四）；-1 → 1969-12-31 23:59:59 wd=4
+ *   C2  分解：1792931696 → 2026-10-25 12:34:56 wd=1（周日）
+ *   C3  构造往返：2026-10-25 12:34:56 → 1792931696
+ *   C4  某月天数与闰年规则：2024-02=29、2025-02=28、2000-02=29、1900-02=28
+ *   C5  星期几（1=周日 … 7=周六）
+ *   C6  加减天数：+7 → 2026-11-01、-1 → 2026-10-24 wd=7
+ *   C7  固定偏移 +480：0 → 1970-01-01 08:00:00
+ *   C8  非法分量 → nil：month=13、2025-02-29、缺年份
+ *   C9  NPDateComponents 的 has 位掩码（set 过才算设置）
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   C1 ok … C9 ok
+ *
+ * 全部换算已用 Python 的 datetime 独立交叉核对。
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static void stamp(NPCalendar *cal, double secs, char *out, int cap) {
+    NPDate *d = [NPDate dateWithTimeIntervalSince1970:secs];
+    NPDateComponents *c = [cal componentsFromDate:d];
+    if (!c) { snprintf(out, (size_t)cap, "nil"); return; }
+    snprintf(out, (size_t)cap, "%04d-%02d-%02d %02d:%02d:%02d wd=%d",
+             [c year], [c month], [c day], [c hour], [c minute], [c second], [c weekday]);
+}
+
+int main(void) {
+    NPCalendar *cal = [NPCalendar currentCalendar];
+    char buf[64];
+
+    // C1：负 epoch 与零点
+    stamp(cal, 0, buf, (int)sizeof buf);
+    int c1a = strcmp(buf, "1970-01-01 00:00:00 wd=5") == 0;
+    stamp(cal, -1, buf, (int)sizeof buf);
+    int c1b = strcmp(buf, "1969-12-31 23:59:59 wd=4") == 0;
+    if (c1a && c1b) { printf("C1 ok\n"); } else { printf("C1 FAIL %d %d\n", c1a, c1b); }
+
+    // C2：一个已知时刻
+    stamp(cal, 1792931696, buf, (int)sizeof buf);
+    if (strcmp(buf, "2026-10-25 12:34:56 wd=1") == 0) { printf("C2 ok\n"); } else { printf("C2 FAIL %s\n", buf); }
+
+    // C3：构造往返
+    NPDateComponents *c3 = [NPDateComponents components];
+    [c3 setYear:2026]; [c3 setMonth:10]; [c3 setDay:25];
+    [c3 setHour:12]; [c3 setMinute:34]; [c3 setSecond:56];
+    NPDate *d3 = [cal dateFromComponents:c3];
+    if (d3 && (long long)[d3 timeIntervalSince1970] == 1792931696) {
+        printf("C3 ok\n");
+    } else {
+        printf("C3 FAIL %.0f\n", d3 ? [d3 timeIntervalSince1970] : -1.0);
+    }
+
+    // C4：某月天数与闰年规则（含世纪规则）
+    if ([cal daysInMonth:2 year:2024] == 29 && [cal daysInMonth:2 year:2025] == 28
+        && [cal daysInMonth:2 year:2000] == 29 && [cal daysInMonth:2 year:1900] == 28
+        && [cal daysInMonth:10 year:2026] == 31) {
+        printf("C4 ok\n");
+    } else {
+        printf("C4 FAIL %d %d %d %d\n", [cal daysInMonth:2 year:2024], [cal daysInMonth:2 year:2025],
+               [cal daysInMonth:2 year:2000], [cal daysInMonth:2 year:1900]);
+    }
+
+    // C5：星期几
+    NPDate *e0 = [NPDate dateWithTimeIntervalSince1970:0];
+    NPDate *e1 = [NPDate dateWithTimeIntervalSince1970:1792886400];
+    if ([cal dayOfWeekFromDate:e0] == 5 && [cal dayOfWeekFromDate:e1] == 1) {
+        printf("C5 ok\n");
+    } else {
+        printf("C5 FAIL %d %d\n", [cal dayOfWeekFromDate:e0], [cal dayOfWeekFromDate:e1]);
+    }
+
+    // C6：加减天数
+    NPDate *plus = [cal dateByAddingDays:7 toDate:e1];
+    NPDate *minus = [cal dateByAddingDays:-1 toDate:e1];
+    char pb[64];
+    char mb[64];
+    stamp(cal, [plus timeIntervalSince1970], pb, (int)sizeof pb);
+    stamp(cal, [minus timeIntervalSince1970], mb, (int)sizeof mb);
+    if (strcmp(pb, "2026-11-01 00:00:00 wd=1") == 0 && strcmp(mb, "2026-10-24 00:00:00 wd=7") == 0) {
+        printf("C6 ok\n");
+    } else {
+        printf("C6 FAIL %s | %s\n", pb, mb);
+    }
+
+    // C7：固定偏移
+    NPCalendar *off = [NPCalendar calendarWithUTCOffsetMinutes:480];
+    stamp(off, 0, buf, (int)sizeof buf);
+    if ([off utcOffsetMinutes] == 480 && strcmp(buf, "1970-01-01 08:00:00 wd=5") == 0) {
+        printf("C7 ok\n");
+    } else {
+        printf("C7 FAIL %s\n", buf);
+    }
+
+    // C8：非法分量 → nil
+    NPDateComponents *b1 = [NPDateComponents components];
+    [b1 setYear:2026]; [b1 setMonth:13]; [b1 setDay:1];
+    NPDateComponents *b2 = [NPDateComponents components];
+    [b2 setYear:2025]; [b2 setMonth:2]; [b2 setDay:29];
+    NPDateComponents *b3 = [NPDateComponents components];
+    [b3 setMonth:10];
+    if (![cal dateFromComponents:b1] && ![cal dateFromComponents:b2] && ![cal dateFromComponents:b3]) {
+        printf("C8 ok\n");
+    } else {
+        printf("C8 FAIL\n");
+    }
+
+    // C9：has 位掩码
+    NPDateComponents *c9 = [NPDateComponents components];
+    int before = ![c9 hasYear] && ![c9 hasDay];
+    [c9 setYear:2026];
+    int after = [c9 hasYear] && ![c9 hasDay] && [c9 year] == 2026;
+    if (before && after) { printf("C9 ok\n"); } else { printf("C9 FAIL %d %d\n", before, after); }
+    return 0;
+}

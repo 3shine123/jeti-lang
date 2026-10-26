@@ -1,0 +1,138 @@
+#import <Foundation/NPCalendar.hje>
+#import <Foundation/NPDate.jeti>
+#import <Foundation/NPDateComponents.jeti>
+#import <Foundation/NPObject.jeti>
+
+// NPCalendar 实现：公历分解/构造。换算用 Hinnant 的整数算法（无浮点误差），
+// 时区只做固定偏移（见 .hje 的诚实边界）。
+
+// 公历 → 自 1970-01-01 的天数。
+static long long np_cal_days_from_civil(long long y, int m, int d) {
+    long long yy = y - (m <= 2 ? 1 : 0);
+    long long era = (yy >= 0 ? yy : yy - 399) / 400;
+    long long yoe = yy - era * 400;
+    long long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+// 自 1970-01-01 的天数 → 公历。
+static void np_cal_civil_from_days(long long z, long long *yy, int *mm, int *dd) {
+    long long zz = z + 719468;
+    long long era = (zz >= 0 ? zz : zz - 146096) / 146097;
+    long long doe = zz - era * 146097;
+    long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long y = yoe + era * 400;
+    long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    long long mp = (5 * doy + 2) / 153;
+    long long d = doy - (153 * mp + 2) / 5 + 1;
+    long long m = mp + (mp < 10 ? 3 : -9);
+    *yy = y + (m <= 2 ? 1 : 0);
+    *mm = (int)m;
+    *dd = (int)d;
+}
+
+static int np_cal_is_leap(long long y) {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+// 1=周日 … 7=周六（ObjC 默认口径；1970-01-01 是周四 = 5）。
+static int np_cal_weekday_from_days(long long days) {
+    long long w = ((days + 4) % 7 + 7) % 7;   // 0 = 周日
+    return (int)w + 1;
+}
+
+// 含偏移的秒 → 分量（非负余数分解，负 epoch 也正确）。
+static void np_cal_split(long long total, long long *y, int *mo, int *d,
+                         int *hh, int *mi, int *ss) {
+    long long days = total / 86400;
+    long long rem = total % 86400;
+    if (rem < 0) { rem += 86400; days -= 1; }
+    np_cal_civil_from_days(days, y, mo, d);
+    *hh = (int)(rem / 3600);
+    *mi = (int)((rem % 3600) / 60);
+    *ss = (int)(rem % 60);
+}
+
+@implementation NPCalendar
+
++ (NPCalendar *)currentCalendar {
+    return [[NPCalendar alloc] init];   // 无 tzdata：UTC（见诚实边界）
+}
+
++ (NPCalendar *)calendarWithUTCOffsetMinutes:(int)minutes {
+    NPCalendar *c = [[NPCalendar alloc] init];
+    if (c) { c->_utcOffsetMinutes = minutes; }
+    return c;
+}
+
+- (void)setUTCOffsetMinutes:(int)minutes {
+    _utcOffsetMinutes = minutes;
+}
+
+- (int)utcOffsetMinutes {
+    return _utcOffsetMinutes;
+}
+
+- (NPDateComponents *)componentsFromDate:(NPDate *)date {
+    if (!date) { return NULL; }
+    long long total = (long long)[date timeIntervalSince1970] + (long long)_utcOffsetMinutes * 60;
+    long long days = total / 86400;
+    long long rem = total % 86400;
+    if (rem < 0) { rem += 86400; days -= 1; }
+    long long y = 0;
+    int mo = 0, d = 0, hh = 0, mi = 0, ss = 0;
+    np_cal_split(total, &y, &mo, &d, &hh, &mi, &ss);
+    NPDateComponents *c = [[NPDateComponents alloc] init];
+    if (!c) { return NULL; }
+    [c setYear:(int)y];
+    [c setMonth:mo];
+    [c setDay:d];
+    [c setHour:hh];
+    [c setMinute:mi];
+    [c setSecond:ss];
+    [c setWeekday:np_cal_weekday_from_days(days)];
+    return c;
+}
+
+- (NPDate *)dateFromComponents:(NPDateComponents *)c {
+    if (!c) { return NULL; }
+    if (![c hasYear]) { return NULL; }        // 年份是必需分量（见诚实边界）
+    long long y = (long long)[c year];
+    int mo = [c hasMonth] ? [c month] : 1;
+    int d = [c hasDay] ? [c day] : 1;
+    int hh = [c hasHour] ? [c hour] : 0;
+    int mi = [c hasMinute] ? [c minute] : 0;
+    int ss = [c hasSecond] ? [c second] : 0;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) { return NULL; }
+    if (hh < 0 || hh > 23 || mi < 0 || mi > 59 || ss < 0 || ss > 60) { return NULL; }
+    if (d > [self daysInMonth:mo year:(int)y]) { return NULL; }
+    long long days = np_cal_days_from_civil(y, mo, d);
+    long long secs = days * 86400 + (long long)hh * 3600 + (long long)mi * 60 + ss;
+    secs -= (long long)_utcOffsetMinutes * 60;
+    return [NPDate dateWithTimeIntervalSince1970:(double)secs];
+}
+
+- (int)dayOfWeekFromDate:(NPDate *)date {
+    if (!date) { return 0; }
+    long long total = (long long)[date timeIntervalSince1970] + (long long)_utcOffsetMinutes * 60;
+    long long days = total / 86400;
+    long long rem = total % 86400;
+    if (rem < 0) { days -= 1; }
+    return np_cal_weekday_from_days(days);
+}
+
+- (int)daysInMonth:(int)month year:(int)year {
+    if (month < 1 || month > 12) { return 0; }
+    if (month == 2) { return np_cal_is_leap((long long)year) ? 29 : 28; }
+    if (month == 4 || month == 6 || month == 9 || month == 11) { return 30; }
+    return 31;
+}
+
+- (NPDate *)dateByAddingDays:(long long)days toDate:(NPDate *)date {
+    if (!date) { return NULL; }
+    double base = [date timeIntervalSince1970];
+    return [NPDate dateWithTimeIntervalSince1970:base + (double)days * 86400.0];
+}
+
+@end

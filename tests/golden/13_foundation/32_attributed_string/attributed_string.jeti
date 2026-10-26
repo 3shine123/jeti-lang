@@ -1,0 +1,80 @@
+/* NPAttributedString golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * v1 是纯数据层（单 run：整串一份属性字典），范围与不做项见 .hje 的诚实边界：
+ *   F1  构造与读取：length / string
+ *   F2  下标有效性：0..len-1 有效，len 越界
+ *   F3  属性读取：按名下取值；缺名返回 nil；越界返回 nil
+ *   F4  effectiveRangeLength（v1 单 run = 整串长度）
+ *   F5  无属性构造：attributes 为 nil
+ *   F6  拷贝语义：构造后改原字典不影响本对象
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   F1 ok … F6 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+int main(void) {
+    NPString *txt = S("hello");
+    NPString *kColor = S("color");
+    NPString *kFont = S("font");
+
+    NPMutableDictionary *attrs = [[NPMutableDictionary alloc] init];
+    [attrs setObject:S("red") forKey:kColor];
+    [attrs setObject:S("mono") forKey:kFont];
+
+    NPAttributedString *as = [NPAttributedString attributedStringWithString:txt attributes:attrs];
+
+    // F1：构造与读取
+    if ([as length] == 5 && strcmp([[as string] UTF8String], "hello") == 0) {
+        printf("F1 ok\n");
+    } else {
+        printf("F1 FAIL len=%zu\n", [as length]);
+    }
+
+    // F2：下标有效性
+    if ([as isValidIndex:0] && [as isValidIndex:4] && ![as isValidIndex:5]) {
+        printf("F2 ok\n");
+    } else {
+        printf("F2 FAIL\n");
+    }
+
+    // F3：属性读取（命中 / 缺名 / 越界）
+    NPString *color = [as attribute:kColor atIndex:0];
+    NPString *missing = [as attribute:S("nope") atIndex:0];
+    int oob = [as attributesAtIndex:9] == NULL;
+    if (color && strcmp([color UTF8String], "red") == 0
+        && [[as attribute:kFont atIndex:4] UTF8String][0] == 'm'
+        && missing == NULL && oob) {
+        printf("F3 ok\n");
+    } else {
+        printf("F3 FAIL\n");
+    }
+
+    // F4：单 run 的有效范围长度 = 整串
+    if ([as effectiveRangeLengthAtIndex:0] == 5 && [as effectiveRangeLengthAtIndex:2] == 5) {
+        printf("F4 ok\n");
+    } else {
+        printf("F4 FAIL\n");
+    }
+
+    // F5：无属性构造
+    NPAttributedString *bare = [NPAttributedString attributedStringWithString:txt];
+    if ([bare length] == 5 && [bare attributesAtIndex:0] == NULL) {
+        printf("F5 ok\n");
+    } else {
+        printf("F5 FAIL\n");
+    }
+
+    // F6：拷贝语义（构造后改原字典，本对象不受影响）
+    [attrs setObject:S("blue") forKey:kColor];
+    NPString *after = [as attribute:kColor atIndex:0];
+    if (after && strcmp([after UTF8String], "red") == 0) {
+        printf("F6 ok\n");
+    } else {
+        printf("F6 FAIL %s\n", after ? [after UTF8String] : "(nil)");
+    }
+    return 0;
+}

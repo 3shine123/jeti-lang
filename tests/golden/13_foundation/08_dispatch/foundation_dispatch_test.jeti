@@ -45,9 +45,11 @@ int main() {
         printf("eq same=%d eq other=%d eq str-content=%d\n",
                [a isEqual:a], [a isEqual:b], [a isEqualToString:b]);
 
-        // the guarded idiom this trio enables
+        // the guarded idiom this trio enables. The send itself must name the
+        // declaring class — `NPObject *` does not promise `speak` (ObjC makes
+        // the same demand: "no visible @interface"), so cast after the guard.
         if ([o respondsToSelector:@selector(speak)]) {
-            [o speak];
+            [(Dog *)o speak];
         }
         if ([o isKindOfClass:[Dog class]]) {
             printf("dispatch via isKindOfClass OK\n");

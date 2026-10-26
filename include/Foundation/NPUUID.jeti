@@ -120,13 +120,13 @@ static int np_uuid_parse_canonical(const char *s, uint64_t *hi, uint64_t *lo) {
     return self;
 }
 
-- (id)UUIDString {
+- (NPString *)UUIDString {
     char buf[37];
     np_uuid_format(_hi, _lo, buf);
     return [NPString stringWithUTF8String:buf];
 }
 
-- (id)description {
+- (NPString *)description {
     return [self UUIDString];
 }
 

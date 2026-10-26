@@ -205,6 +205,34 @@ jetic app.jeti -o app               # the library is found and linked automatica
 
 Under the hood: in self-contained mode the inlined implementations are not their TU's main file, so their class metadata is weak (duplicated per TU and merged). In library mode each Foundation `.jeti` is compiled as its own TU, so its `@implementation` owns the metadata and emits it strong — one copy in the archive. Full owner/strong/weak rules: `docs/plans/architecture.md`.
 
+### Foundation: Honest Boundaries
+
+Some ObjC APIs cannot be ported faithfully onto this runtime, and the project's
+rule is to say so rather than ship an implementation that silently behaves
+differently (`docs/plans/foundation_gap_plan.md`).
+
+- **Real threads, since the runtime thread layer.** Jeti's runtime provides
+  `jeti_thread_*` / `jeti_mutex_*` / `jeti_cond_*` primitives with dual
+  backends — Win32 (`CRITICAL_SECTION` + `CONDITION_VARIABLE` + `_beginthreadex`)
+  and POSIX pthreads — and hosted builds use atomic reference counting, so
+  objects are safe to share across threads (`include/jeti/runtime.h`). On top
+  of that: **`NPThread`** (real threads, cooperative `-cancel`, `-join` added
+  beyond NSThread's surface), **`NPCondition`** (built-in mutex + condition
+  variable, `wait` re-check predicates in a `while`), **`NPOperationQueue`**
+  (worker pool; `maxConcurrentOperationCount` is the pool width, 1 = serial),
+  and **`NPRunLoop -performBlock:`** (thread-safe main-queue scheduling, fixed
+  capacity 64, full queue fails explicitly). `NPLock` / `NPRecursiveLock` are
+  atomic spin locks (correct under real threads). Remaining boundaries: bare
+  blocks only (no `NSOperation` dependency graph, no per-operation completion,
+  no QoS), cooperative cancellation everywhere, fixed queue capacities with
+  backpressure, no `-waitUntilDate:`, and none of this exists under
+  `-ffreestanding` (bare metal has no concurrency).
+- **No tzdata / locale** in `NPDateFormatter` / `NPCalendar` (UTC and fixed
+  offsets only; no month or weekday names), **no ICU** in
+  `NPRegularExpression` (a self-contained backtracking engine with a documented
+  subset), and **no entropy source** in `NPUUID` under `-ffreestanding`.
+  Each class header lists its own boundaries.
+
 ### Shell Completion (Tab autocomplete)
 
 `jetic` ships with generated completion scripts for **zsh**, **bash** and **fish**, built with
@@ -1523,7 +1551,7 @@ Positional entries continue from the last designated field (form 3 puts `7` in `
 
 ### C99 `_Complex` Passthrough
 
-`float _Complex` / `double _Complex` declarations, typedefs, and parameters pass through untouched, and imaginary literals (`2.0i`, `1e3j`) are emitted **raw** — the imaginary part used to be silently dropped (`2.0i` → `2.0f`).
+`float _Complex` / `double _Complex` declarations, typedefs, and parameters pass through untouched, and imaginary literals (`2.0i`, `1e3j`) are emitted **raw** — the imaginary part used to be silently dropped (`2.0i` → `2.0`).
 
 ```jeti
 #include <complex.h>

@@ -31,7 +31,7 @@
 + (NPCharacterSet *)characterSetWithCharactersInString:(NPString *)str;
 + (NPCharacterSet *)characterSetWithRange:(NPRange)range;
 
-- (id)init;
+- (instancetype)init;
 - (BOOL)characterIsMember:(char)c;
 
 // 内部原语（子类复用）。

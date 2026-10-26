@@ -1,0 +1,97 @@
+/* NPRegularExpression golden（.hje 多 TU 正规流程：声明伞头 + 预编译库）。
+ *
+ * 自研回溯引擎（无 ICU 依赖），支持范围与不支持项见 .hje 的诚实边界：
+ *   D1  字面量 / `.` / 字符类（含取反）
+ *   D2  转义类 \d \w \s
+ *   D3  锚点 ^ $（零宽原子，含 ^abc$ 全串锚定）
+ *   D4  量词 * + ? {n} {n,m}（贪婪）
+ *   D5  选择 | 与分组 (…) (?:…)，捕获组计数
+ *   D6  非法模式 → nil（未闭合括号/字符类、{2,1}、反向引用、环视、惰性量词）
+ * 期望输出（逐行 GOLDEN-MATCH）：
+ *   D1 ok … D6 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+// 匹配位置/长度/个数三元组是否与期望一致。
+static int m_is(const char *pat, const char *txt, int loc, int len, int count) {
+    NPRegularExpression *re = [NPRegularExpression regularExpressionWithPattern:S(pat)];
+    if (!re) { return 0; }
+    return [re firstMatchLocationInString:S(txt)] == loc
+        && [re firstMatchLengthInString:S(txt)] == len
+        && [re numberOfMatchesInString:S(txt)] == count;
+}
+
+static int is_bad(const char *pat) {
+    return [NPRegularExpression regularExpressionWithPattern:S(pat)] == NULL;
+}
+
+int main(void) {
+    // D1：字面量 / 点 / 类
+    if (m_is("abc", "xxabcxx", 2, 3, 1)
+        && m_is("a.c", "abc", 0, 3, 1)
+        && m_is("[a-z]+", "12abc34", 2, 3, 1)
+        && m_is("[^0-9]+", "12abc34", 2, 3, 1)) {
+        printf("D1 ok\n");
+    } else {
+        printf("D1 FAIL\n");
+    }
+
+    // D2：转义类
+    if (m_is("\\d+", "ab123cd", 2, 3, 1)
+        && m_is("\\w+", "  hi_1  ", 2, 4, 1)
+        && m_is("\\s", "a b", 1, 1, 1)) {
+        printf("D2 ok\n");
+    } else {
+        printf("D2 FAIL\n");
+    }
+
+    // D3：锚点（零宽）
+    if (m_is("^abc", "abcx", 0, 3, 1)
+        && m_is("^abc", "xabc", -1, -1, 0)
+        && m_is("abc$", "xabc", 1, 3, 1)
+        && m_is("^abc$", "abc", 0, 3, 1)) {
+        printf("D3 ok\n");
+    } else {
+        printf("D3 FAIL\n");
+    }
+
+    // D4：量词（贪婪）
+    if (m_is("ab*", "a", 0, 1, 1)
+        && m_is("ab+", "abbb", 0, 4, 1)
+        && m_is("ab?", "a", 0, 1, 1)
+        && m_is("a{2,3}", "aaaa", 0, 3, 1)
+        && m_is("a{2}", "aaaa", 0, 2, 2)) {
+        printf("D4 ok\n");
+    } else {
+        printf("D4 FAIL\n");
+    }
+
+    // D5：选择 / 分组 / 捕获组计数
+    NPRegularExpression *g1 = [NPRegularExpression regularExpressionWithPattern:S("(ab)+")];
+    NPRegularExpression *g2 = [NPRegularExpression regularExpressionWithPattern:S("(?:ab)+")];
+    NPRegularExpression *g3 = [NPRegularExpression regularExpressionWithPattern:S("(a|b)+c")];
+    if (m_is("cat|dog", "a dog", 2, 3, 1)
+        && m_is("(ab)+", "ababab", 0, 6, 1)
+        && m_is("(?:ab)+", "abab", 0, 4, 1)
+        && g1 && [g1 numberOfCaptureGroups] == 1
+        && g2 && [g2 numberOfCaptureGroups] == 0
+        && g3 && [g3 numberOfCaptureGroups] == 1
+        && m_is("(a|b)+c", "abac", 0, 4, 1)) {
+        printf("D5 ok\n");
+    } else {
+        printf("D5 FAIL\n");
+    }
+
+    // D6：非法模式 → nil（不静默降级）
+    if (is_bad("(") && is_bad("[a") && is_bad("a{2,1}")
+        && is_bad("\\1") && is_bad("(?=x)") && is_bad("a*?")) {
+        printf("D6 ok\n");
+    } else {
+        printf("D6 FAIL\n");
+    }
+    return 0;
+}

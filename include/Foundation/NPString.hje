@@ -39,6 +39,10 @@ enum {
 #define NO 0
 #endif
 
+// 前向声明必须在文件作用域：`@class` 写在 `@interface` 内时 jetic 不会发射
+// C 前向声明，单独包含本头文件（不经伞头）就会撞上 "unknown type name"。
+@class NPData;
+
 @interface NPString : NPObject {
 @public
     char        *_cstr;
@@ -92,7 +96,6 @@ enum {
 //   - initWithData:/initWithBytes: 显式端序变体**不剥 BOM**（BOM 变成一个
 //     U+FEFF 字符）；主机端序变体剥 BOM 并用它定序，**无 BOM 时按大端解**。
 //   - 非法字节序列（截断的 UTF-8、孤立的代理项、越界码点）一律 nil。
-@class NPData;
 
 - (NPData *)dataUsingEncoding:(NPStringEncoding)encoding;
 - (size_t)lengthOfBytesUsingEncoding:(NPStringEncoding)encoding;
