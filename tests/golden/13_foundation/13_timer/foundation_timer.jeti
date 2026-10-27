@@ -78,6 +78,16 @@ int main() {
         [idle fire];
         printf("A4 idle valid=%d manual-still=%d\n", [idle isValid], g_manual_fired);
 
+        /* A5: tolerance —— 只记录许可值（调度器仍在 deadline 触发），负值归零 */
+        NPTimer *tol = [NPTimer timerWithTimeInterval:0.01 repeats:0 block:^(NPTimer *t) {
+        }];
+        double t_default = [tol tolerance];
+        [tol setTolerance:0.25];
+        double t_set = [tol tolerance];
+        [tol setTolerance:-1.5];
+        double t_clamped = [tol tolerance];
+        printf("A5 tolerance default=%.2f set=%.2f clamp=%.2f\n", t_default, t_set, t_clamped);
+
         /* 回到真实时钟，B 部分验证阻塞泵（排空即返回） */
         probe_restore_clock();   /* NULL = 恢复 hosted 默认单调时钟 */
         [NPTimer scheduledTimerWithTimeInterval:0.05 repeats:0 block:^(NPTimer *t) {

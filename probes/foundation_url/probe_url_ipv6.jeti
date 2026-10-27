@@ -1,0 +1,50 @@
+#import <Foundation/Foundation.jeti>
+#include <stdio.h>
+#include <string.h>
+
+// 探针：NPURL 的 IPv6 字面量（方括号）解析与重建。
+static int fails = 0;
+static void ck(int cond, const char *what) {
+    printf("%s %s\n", cond ? "PASS" : "FAIL", what);
+    if (!cond) { fails++; }
+}
+
+static int streq(NPString *s, const char *want) {
+    return s != NULL && strcmp([s UTF8String], want) == 0;
+}
+
+static NPURL *U(const char *u) { return [NPURL URLWithString:[NPString stringWithUTF8String:u]]; }
+
+int main(void) {
+    @noarc {
+        NPURL *a = U("http://[::1]:8080/x?q=1#f");
+        ck(a != NULL, "bracketed IPv6 parses");
+        ck(streq([a host], "::1"), "host is the bare address (brackets stripped)");
+        ck([[a port] intValue] == 8080, "port after the closing bracket");
+        ck(streq([a path], "/x"), "path still parses");
+        ck(streq([a query], "q=1"), "query still parses");
+        ck(streq([a fragment], "f"), "fragment still parses");
+        ck(streq([a absoluteString], "http://[::1]:8080/x?q=1#f"),
+           "absoluteString re-brackets the IPv6 host");
+
+        NPURL *b = U("http://[2001:db8::1]/p");
+        ck(b != NULL && streq([b host], "2001:db8::1"), "full IPv6 literal host");
+        ck([b port] == NULL, "no port -> nil");
+        ck(streq([b absoluteString], "http://[2001:db8::1]/p"), "round-trip without port");
+
+        ck(U("http://[::1") == NULL, "unclosed bracket is rejected");
+        ck(U("http://[::1]x/") == NULL, "junk after the bracket is rejected");
+        ck(U("http://[]/") == NULL, "empty bracket host is rejected");
+
+        NPURL *c = U("http://user:pass@[::1]:9/z");
+        ck(c != NULL && streq([c host], "::1"), "userinfo dropped before bracketed host");
+        ck([[c port] intValue] == 9, "port after bracketed host with userinfo");
+
+        NPURL *d = U("http://example.com:80/p?q#f");
+        ck(streq([d host], "example.com") && [[d port] intValue] == 80,
+           "plain host+port unchanged");
+        ck(streq([d absoluteString], "http://example.com:80/p?q#f"), "plain round-trip unchanged");
+    }
+    printf("%s %d failure(s)\n", fails == 0 ? "PROBE OK" : "PROBE FAILED", fails);
+    return fails == 0 ? 0 : 1;
+}

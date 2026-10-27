@@ -67,5 +67,16 @@ int main(void) {
     NPURL *u6b = [NPURL URLWithString:[NPString stringWithUTF8String:"ftp://h?q=only"]];
     a6 = a6 && [u6b path] == NULL && s_eq([u6b query], "q=only") && [u6b fragment] == NULL;
     printf("A6 %s\n", a6 ? "ok" : "FAIL");
+    /* A7 IPv6 字面量（方括号）：host 裸地址、port 在方括号后、重建补回方括号 */
+    NPURL *u7 = [NPURL URLWithString:[NPString stringWithUTF8String:"http://[::1]:8080/a?b#c"]];
+    int a7 = u7 && s_eq([u7 host], "::1") && [[u7 port] intValue] == 8080
+        && s_eq([u7 path], "/a") && s_eq([u7 query], "b") && s_eq([u7 fragment], "c")
+        && s_eq([u7 absoluteString], "http://[::1]:8080/a?b#c");
+    NPURL *u7b = [NPURL URLWithString:[NPString stringWithUTF8String:"http://[2001:db8::1]/"]];
+    a7 = a7 && u7b && s_eq([u7b host], "2001:db8::1") && [u7b port] == NULL;
+    NPURL *u7c = [NPURL URLWithString:[NPString stringWithUTF8String:"http://[::1"]];
+    NPURL *u7d = [NPURL URLWithString:[NPString stringWithUTF8String:"http://[::1]x/"]];
+    a7 = a7 && u7c == NULL && u7d == NULL;   // 未闭合 / 方括号后有杂质 → 非法
+    printf("A7 %s\n", a7 ? "ok" : "FAIL");
     return 0;
 }

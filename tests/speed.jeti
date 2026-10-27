@@ -1,0 +1,45 @@
+#import <Foundation/Foundation.hje>
+
+#include <stdio.h>
+#include <stdbool.h>
+#include <time.h>
+
+// BOOL is_prime(int n) {
+//     if (n <= 1) return false;
+//     for (int i = 2; i <= n / 2; i++) {
+//         if (n % i == 0) return false;
+//     }
+//     return true;
+// }
+
+@interface PrimeChecker : NPObject
+- (BOOL)isPrime:(int)n;
+@end
+
+@implementation PrimeChecker
+- (BOOL)isPrime:(int)n {
+    if (n <= 1) return false;
+    for (int i = 2; i <= n / 2; i++) {
+        if (n % i == 0) return false;
+    }
+    return true;
+}
+@end
+
+int main(void) {
+    @autoreleasepool {
+        int N = 100000;
+        int primes = 0;
+        clock_t start_time = clock();
+        PrimeChecker *checker = [[PrimeChecker alloc] init];
+        for (int i = 1; i < N; i++) {
+            if ([checker isPrime:i]) {
+                primes++;
+            }
+        }
+        clock_t end_time = clock();
+        double elapsed_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+        NPLog(@"Found %d prime numbers up to %d in %.6f seconds.\n", primes, N, elapsed_time);
+        return 0;
+    }
+}

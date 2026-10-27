@@ -1,0 +1,14 @@
+#import <Foundation/Foundation.jeti>
+
+#include <stdio.h>
+
+static NPString *make_str(const char *s) {
+    return [[NPString alloc] initWithUTF8String:s];
+}
+
+int main(void) {
+    // 调用型接收者：[f(x) sel] —— 函数调用直接当接收者
+    unsigned long n = [make_str("hi") length];
+    printf("len=%lu\n", n);
+    return 0;
+}

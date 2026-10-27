@@ -20,9 +20,16 @@
 //   （NSTimer 的取舍一致）。
 // - 挂钟来源 hosted 有默认（单调时钟）；-ffreestanding 下须注入
 //   jeti_sched_set_clock，未注入时 timer 永不到期。
+// - `-setTolerance:` 只是**放宽许可**，不是「推迟触发」：ObjC 的 NSTimer 允许
+//   系统把触发点推到 `[deadline, deadline + tolerance]` 区间内的任意时刻，从而
+//   聚合同期 timer；本实现的调度器永远在 deadline 精确触发（区间内的最早点，
+//   满足契约），因此 tolerance 被保存并可通过 `-tolerance` 读回，但不改变触发
+//   时刻——不静默降级：需要粗调度聚合的调用方应自行合并 timer。
+// - tolerance 负值按 0 处理（ObjC 抛 NSInvalidArgumentException）。
 @interface NPTimer : NPObject {
 @public
     double _timeInterval;              // 秒（NSTimeInterval 对齐）
+    double _tolerance;                 // 触发宽松度（秒，>= 0）；见诚实边界
     int _repeats;
     // 已知解析器缺口（NPNotificationCenter.hje 同款）：块指针 ivar 形态
     // `void (^)(…)` 会被 codegen 从结构体里丢弃，故存 id、调用点强转
@@ -43,6 +50,10 @@
 - (int)isValid;
 // 排程间隔（秒），与创建时传入的 seconds 一致。
 - (double)timeInterval;
+// 触发宽松度（秒）；默认 0（严格按 deadline 触发）。语义见上方诚实边界：
+// 只记录许可、不推迟触发；负值按 0 处理。
+- (void)setTolerance:(double)seconds;
+- (double)tolerance;
 @end
 
 #endif

@@ -4,39 +4,50 @@
 #import <Foundation/NPObject.hje>
 #import <Foundation/NPString.hje>
 #import <Foundation/NPDictionary.hje>
+#import <Foundation/NPMutableArray.hje>
 
 // NPAttributedString —— 带属性的字符串（对应 ObjC 的 NSAttributedString）。
 //
-// **v1 是纯数据层**：整串共用一份属性字典（单 run），不做区间属性、不做渲染。
-// GUI 渲染留给 libui（见 .hje 的诚实边界）。
+// **纯数据层**：文本 + 一串区间属性（run），不做渲染。GUI 渲染留给 libui。
+// 区间属性的写入形态由子类 `NPMutableAttributedString` 提供
+// （对应 NSMutableAttributedString 的 `setAttributes:range:` 一族）。
+//
+// 存储形状：两个等长并行数组——run 起点（升序，首项恒为 0）与每 run 的属性
+// 字典；run i 覆盖 `[starts[i], starts[i+1])`，最后一个 run 的终点是字符串长度。
+// 空串保留一个长度 0 的 run，写入路径因此无需特判。
 //
 // 与 ObjC 的对应与差异（诚实边界）：
-// - **单 run**：v1 的 `-attributesAtIndex:` 对任何合法下标都返回整串那份字典，
-//   `-effectiveRangeLengthAtIndex:` 返回整串长度。NSAttributedString 的
-//   区间属性（同一串不同段不同样式）尚未实现——区间 run 需要可增长的 run 数组
-//   （ivars 是定长布局），是后续批次。
+// - 下标与区间按 **UTF-8 字节**计（`NPString -length` 同语义），不是 UTF-16
+//   码元——ObjC 用 UTF-16。跨字符边界的区间会被接受，但可能切在多字节字符
+//   中间（与 NPString 的所有下标 API 一致）。
+// - run 数上限不设（可增长数组）；单 run 时 `-attributes` 就是整串属性。
 // - 属性名是 `NPString`，值是任意对象（对齐 ObjC 的 `NSAttributedStringKey` /
 //   `id`）；不提供 `NSAttributedStringKey` 常量表（用到哪个由调用方自定）。
 // - 不做 `-initWithAttributedString:`（拷贝构造）、`-dataFromRange:`（归档）、
 //   `NSParagraphStyle` 等语义类型。
 @interface NPAttributedString : NPObject {
 @public
-    NPString     *_string;   // 文本（非 nil）
-    NPDictionary *_attrs;    // 整串属性（可为空字典）
+    NPString       *_string;     // 文本（非 nil）
+    NPMutableArray *_starts;     // run 起点（升序、首项 0）
+    NPMutableArray *_runAttrs;   // 每 run 的属性字典（与 _starts 等长、非 nil）
 }
 + (NPAttributedString *)attributedStringWithString:(NPString *)str;
 + (NPAttributedString *)attributedStringWithString:(NPString *)str attributes:(NPDictionary *)attrs;
 - (NPAttributedString *)initWithString:(NPString *)str;
 - (NPAttributedString *)initWithString:(NPString *)str attributes:(NPDictionary *)attrs;
-// 文本内容与长度。
+// 文本内容与长度（长度按 UTF-8 字节）。
 - (NPString *)string;
 - (size_t)length;
-// 整串属性字典（拷贝；调用方改动不影响本对象）。
+// run 数（Jeti 扩展，ObjC 无此查询）：单 run 恒为 1，空串同样为 1。
+- (size_t)runCount;
+// 首个 run 的属性字典（拷贝）；单 run 时即整串属性；空属性返回 nil。
 - (NPDictionary *)attributes;
-// 下标处生效的属性；下标越界返回 nil（ObjC 抛异常，这里返回 nil 并在
-// -isValidIndex: 里给出判定）。
+// 下标处生效的属性（拷贝）；下标越界或该 run 无属性返回 nil（ObjC 抛异常/给出
+// 空字典，这里用 nil，并以 -isValidIndex: 区分越界）。
 - (NPDictionary *)attributesAtIndex:(size_t)index;
-// 下标处生效属性的长度（v1 = 整串长度）；越界返回 0。
+// 下标所在 run 的生效区间（值语义区间）；越界返回 {index, 0}。
+- (NPRange)effectiveRangeAtIndex:(size_t)index;
+// 下标所在 run 的长度；越界返回 0。
 - (size_t)effectiveRangeLengthAtIndex:(size_t)index;
 // 单个属性值；不存在返回 nil。
 - (id)attribute:(NPString *)name atIndex:(size_t)index;

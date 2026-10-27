@@ -1,9 +1,6 @@
-#import <Foundation/Foundation.hje>
+#include <stdio.h>
 
-int main(int argc, const char* argv[]) {
-    @autoreleasepool {
-        // Your code here
-        int a = 0;
-    }
+int main(void) {
+    printf("Hello World");
     return 0;
 }

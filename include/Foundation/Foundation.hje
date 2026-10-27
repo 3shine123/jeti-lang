@@ -65,6 +65,7 @@
 #import "NPCondition.hje"
 #import "NPOperationQueue.hje"
 #import "NPAttributedString.hje"
+#import "NPMutableAttributedString.hje"
 #import "NPKeyedArchiver.hje"
 #import "NPKeyedUnarchiver.hje"
 #import "NPURLSession.hje"

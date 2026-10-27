@@ -37,29 +37,47 @@
         }
         const char *hostp = at ? at + 1 : authority;
 
-        // host[:port] — v1 不支持 IPv6 字面量（[::1] 会解析出错误 host，
-        // 头文件诚实边界已注）。
-        const char *colon = NULL;
-        for (const char *p = hostp; p < auth_end; p++) {
-            if (*p == ':') { colon = p; break; }
+        // host[:port] — 方括号形态是 IPv6 字面量（`[::1]`、`[2001:db8::1]:8080`）：
+        // 方括号内的 ':' 属于地址本身，不能当 port 分隔符。`-host` 返回去掉
+        // 方括号的裸地址（ObjC 的 NSURL 同）；重建 absoluteString 时再补回。
+        const char *host_start = hostp;
+        const char *host_end = auth_end;
+        const char *portp = NULL;      // port 起始；NULL = 未显式给出
+        if (hostp < auth_end && *hostp == '[') {
+            const char *close = NULL;
+            for (const char *p = hostp + 1; p < auth_end; p++) {
+                if (*p == ']') { close = p; break; }
+            }
+            if (!close) { return NULL; }            // 方括号未闭合：非法
+            host_start = hostp + 1;
+            host_end = close;
+            if (close + 1 < auth_end) {
+                if (close[1] != ':') { return NULL; }   // `]` 后只允许 ":port"
+                portp = close + 2;
+            }
+        } else {
+            const char *colon = NULL;
+            for (const char *p = hostp; p < auth_end; p++) {
+                if (*p == ':') { colon = p; break; }
+            }
+            host_end = colon ? colon : auth_end;
+            if (colon && colon + 1 < auth_end) { portp = colon + 1; }
         }
-        const char *host_end = colon ? colon : auth_end;
-        size_t host_len = (size_t)(host_end - hostp);
+        size_t host_len = (size_t)(host_end - host_start);
         // port 必须是非空数字拼写，否则按无 port 处理（"host:" → nil）。
-        // 注意 initWithUTF8String: 按 strlen 取串——colon+1 是指向原串中段
-        // 的裸指针，必须先按 auth_end 边界拷贝出来，否则 port 会把后面的
-        // path/query/fragment 全吞进去（"8080" 变 "8080/a/b?…"；A4 的 port
-        // 在串尾所以侥幸没暴露，A1 的中段 port 必炸）。
-        if (colon && colon + 1 < auth_end) {
+        // 注意 initWithUTF8String: 按 strlen 取串——portp 是指向原串中段的裸
+        // 指针，必须先按 auth_end 边界拷贝出来，否则 port 会把后面的
+        // path/query/fragment 全吞进去（"8080" 变 "8080/a/b?…"）。
+        if (portp) {
             int all_digits = 1;
-            for (const char *p = colon + 1; p < auth_end; p++) {
+            for (const char *p = portp; p < auth_end; p++) {
                 if (*p < '0' || *p > '9') { all_digits = 0; break; }
             }
             if (all_digits) {
-                size_t port_len = (size_t)(auth_end - (colon + 1));
+                size_t port_len = (size_t)(auth_end - portp);
                 if (port_len > 0 && port_len < 16) {
                     char pbuf[16];
-                    memcpy(pbuf, colon + 1, port_len);
+                    memcpy(pbuf, portp, port_len);
                     pbuf[port_len] = '\0';
                     _port = [[NPString alloc] initWithUTF8String:pbuf];
                 }
@@ -68,7 +86,7 @@
         if (host_len > 0) {
             char buf[512];
             if (host_len < sizeof(buf)) {
-                memcpy(buf, hostp, host_len);
+                memcpy(buf, host_start, host_len);
                 buf[host_len] = '\0';
                 _host = [[NPString alloc] initWithUTF8String:buf];
             }
@@ -157,7 +175,15 @@
     // 在生成 C 里不可靠，不复用。字面量一律走 *UTF8String: 变体——
     // appendString: 收 NPString *，塞 C 字面量运行期就崩。
     NPString *out = [_scheme stringByAppendingUTF8String:"://"];
-    out = [out stringByAppendingUTF8String:[_host UTF8String]];
+    // IPv6 字面量的 host 裸存（不带方括号），重建时必须补回方括号，
+    // 否则 "http://::1/x" 这种形态会被下一次解析判成非法。
+    if (_host && strchr([_host UTF8String], ':')) {
+        out = [out stringByAppendingUTF8String:"["];
+        out = [out stringByAppendingUTF8String:[_host UTF8String]];
+        out = [out stringByAppendingUTF8String:"]"];
+    } else {
+        out = [out stringByAppendingUTF8String:[_host UTF8String]];
+    }
     if (_port) {
         out = [out stringByAppendingUTF8String:":"];
         out = [out stringByAppendingUTF8String:[_port UTF8String]];

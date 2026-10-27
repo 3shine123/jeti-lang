@@ -22,6 +22,7 @@ static void NPTimer_trampoline(void *user) {
     NPTimer *self = [[NPTimer alloc] init];
     if (self) {
         self->_timeInterval = seconds;
+        self->_tolerance = 0.0;
         self->_repeats = repeats;
         self->_block = (id)_Block_copy((const void *)block);
         self->_handle = 0;
@@ -63,6 +64,16 @@ static void NPTimer_trampoline(void *user) {
 
 - (double)timeInterval {
     return _timeInterval;
+}
+
+// 只保存许可值：调度器始终在 deadline 触发（tolerance 允许区间的最早点），
+// 因此这里不需要重排程——已在排程中的 timer 不受影响（语义见 .hje）。
+- (void)setTolerance:(double)seconds {
+    self->_tolerance = (seconds > 0.0) ? seconds : 0.0;
+}
+
+- (double)tolerance {
+    return _tolerance;
 }
 
 @end

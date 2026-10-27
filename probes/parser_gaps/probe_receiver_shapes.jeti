@@ -1,0 +1,22 @@
+#import <Foundation/Foundation.jeti>
+#include <stdio.h>
+
+static NPString *make_str(const char *s) {
+    return [[NPString alloc] initWithUTF8String:s];
+}
+
+int main(void) {
+    // ① 调用型接收者（本轮已修）
+    printf("a=%lu\n", [make_str("hi") length]);
+    // ② 链式发送接收者
+    printf("b=%lu\n", [[make_str("abc") copy] length]);
+    // ③ 下标接收者（数组对象）
+    NPString *elems[2] = { make_str("x"), make_str("y") };
+    NPArray *arr = [NPArray arrayWithObjects:elems count:2];
+    printf("c=%lu\n", [[arr objectAtIndex:0] length]);
+    // ④ 括号表达式接收者
+    printf("d=%lu\n", [(make_str("hey")) length]);
+    // ⑤ 消息发送接收者嵌套调用实参
+    printf("e=%lu\n", [make_str([make_str("z") UTF8String]) length]);
+    return 0;
+}

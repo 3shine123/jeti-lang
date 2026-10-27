@@ -120,5 +120,23 @@ int main(void) {
     } else {
         printf("A8 FAIL %.17g %lld %lld\n", dv, ll, nl);
     }
+    // A9：整数幂（平方求幂，38 位截断；指数域按 NSDecimal 的 int8 收口）
+    NPDecimalNumber *pw1 = [dec("1.5") decimalNumberByRaisingToPower:3];
+    NPDecimalNumber *pw2 = [dec("-2") decimalNumberByRaisingToPower:3];
+    NPDecimalNumber *pw3 = [dec("7") decimalNumberByRaisingToPower:0];
+    NPDecimalNumber *pw4 = [dec("99999999999999999999") decimalNumberByRaisingToPower:2];
+    NPDecimalNumber *pw5 = [dec("1e100") decimalNumberByRaisingToPower:20];
+    NPDecimalNumber *pw6 = [dec("1e20") decimalNumberByRaisingToPower:2];
+    int pw_ok = strcmp(sv(pw1), "3.375") == 0
+        && strcmp(sv(pw2), "-8") == 0
+        && strcmp(sv(pw3), "1") == 0
+        && [pw4 isNotANumber] && [pw4 hasOverflowed]      // 40 位有效数字：精度溢出
+        && [pw5 isNotANumber] && [pw5 hasOverflowed]      // 1e2000：指数域溢出
+        && ! [pw6 hasOverflowed] && strlen(sv(pw6)) == 41; // 1e40 仍可精确表示
+    if (pw_ok) {
+        printf("A9 ok\n");
+    } else {
+        printf("A9 FAIL %s %s %s\n", sv(pw1), sv(pw2), sv(pw6));
+    }
     return 0;
 }

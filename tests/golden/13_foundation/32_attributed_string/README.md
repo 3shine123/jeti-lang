@@ -1,8 +1,10 @@
 # 32_attributed_string — NPAttributedString
 
 **NPAttributedString** (`include/Foundation/NPAttributedString.hje/.jeti`) is the
-`NSAttributedString` port, **v1 as a pure data layer**: the whole string carries
-one attribute dictionary (a single run), and rendering is left to libui.
+`NSAttributedString` port, a pure data layer: text plus a list of per-range
+attribute runs, with rendering left to libui. This case covers the **immutable**
+side (single-run construction and lookup); range writes live in
+`38_attributed_string_runs` (`NPMutableAttributedString`).
 
 - `+attributedStringWithString:` / `+attributedStringWithString:attributes:`
   (factories; the `autorelease` sits in a `@noarc { }` block, the project's

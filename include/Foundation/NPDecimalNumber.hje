@@ -21,7 +21,8 @@
 // - `+decimalNumberWithDouble:` 走**十进制最短往返拼写**（如 0.1 → "0.1"），
 //   与 ObjC 的 NSDecimalNumber 一致；不会把二进制展开的 0.10000000000000001
 //   带进来。因此 0.1 + 0.2 精确等于 0.3，这是本类存在的意义。
-// - 舍入策略（NSDecimalNumberHandler）、比较谓词、`-decimalNumberByRaisingToPower:`
+// - 整数幂已实现（`-decimalNumberByRaisingToPower:`，平方求幂 + 38 位截断）；
+//   舍入策略（NSDecimalNumberHandler）、比较谓词
 //   等尚未实现，见 README 的诚实边界。
 @interface NPDecimalNumber : NPObject {
 @public
@@ -53,6 +54,12 @@
 - (NPDecimalNumber *)decimalNumberByDividingBy:(NPDecimalNumber *)other;
 // 取负（-1 倍）。
 - (NPDecimalNumber *)decimalNumberByNegating;
+// 非负整数幂（ObjC 的 NSUInteger 对应 size_t）：平方求幂，中间结果同按 38 位
+// 有效数字截断；x^0 = 1；底数为 NaN 时结果为 NaN（含 0 次幂——数学上不定；
+// ObjC 的 NSDecimal 遇 NaN 抛异常，这里按 NaN 传播）；溢出/下溢 → NaN +
+// `-hasOverflowed` 为真（不静默截断）。
+- (NPDecimalNumber *)decimalNumberByRaisingToPower:(size_t)power;
+- (BOOL)hasOverflowed;
 - (double)doubleValue;
 - (long long)longLongValue;
 // 规范十进制字符串：无指数、无多余前导/尾随零；负号前置；NaN 输出 "NaN"。

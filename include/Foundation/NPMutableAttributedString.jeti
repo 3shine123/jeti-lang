@@ -1,0 +1,163 @@
+#import <Foundation/NPMutableAttributedString.hje>
+#import <Foundation/NPString.jeti>
+#import <Foundation/NPDictionary.jeti>
+#import <Foundation/NPMutableDictionary.jeti>
+#import <Foundation/NPMutableArray.jeti>
+#import <Foundation/NPNumber.jeti>
+#import <Foundation/NPObject.jeti>
+
+// NPMutableAttributedString 实现：run 边界改写的全部逻辑都在这里。
+// 基类只读，写入路径（切分 / 覆盖 / 删除 / 文本替换）由本文件独占。
+
+// 包含 index 的 run 序号（与基类同一算法；本 TU 看不到基类的 static 辅助函数，
+// 故就地实现一次——run 数很少，线性扫足够）。
+static size_t np_mattr_run_index_at(NPMutableAttributedString *self, size_t index) {
+    size_t n = [self->_starts count];
+    size_t found = 0;
+    for (size_t i = 0; i < n; i++) {
+        NPNumber *start = [self->_starts objectAtIndex:i];
+        if ((size_t)[start longLongValue] <= index) { found = i; }
+    }
+    return found;
+}
+
+// 在 pos 处切分 run：后续 run 继承被切 run 的属性字典。
+// pos == 0 || pos >= length || pos 已经是边界 → no-op。
+static void np_mattr_split_at(NPMutableAttributedString *self, size_t pos) {
+    size_t len = [self length];
+    if (pos == 0 || pos >= len) { return; }
+    size_t i = np_mattr_run_index_at(self, pos);
+    size_t start = (size_t)[((NPNumber *)[self->_starts objectAtIndex:i]) longLongValue];
+    if (start == pos) { return; }
+    [self->_starts insertObject:[NPNumber numberWithLongLong:(long long)pos] atIndex:i + 1];
+    NPDictionary *inherited = [((NPDictionary *)[self->_runAttrs objectAtIndex:i]) copy];
+    [self->_runAttrs insertObject:inherited atIndex:i + 1];
+}
+
+// 把区间收敛成合法区间：越界夹到文本末尾，起点越界视为空区间。
+static NPRange np_mattr_clamp_range(NPMutableAttributedString *self, NPRange range) {
+    NPRange out;
+    out.location = range.location;
+    out.length = 0;
+    size_t len = [self length];
+    if (range.location >= len || range.length == 0) { return out; }
+    size_t end = range.location + range.length;
+    if (end > len) { end = len; }
+    out.length = end - range.location;
+    return out;
+}
+
+@implementation NPMutableAttributedString
+
++ (NPMutableAttributedString *)attributedStringWithString:(NPString *)str {
+    @noarc {
+        return [[[self alloc] initWithString:str] autorelease];
+    }
+}
+
++ (NPMutableAttributedString *)attributedStringWithString:(NPString *)str attributes:(NPDictionary *)attrs {
+    @noarc {
+        return [[[self alloc] initWithString:str attributes:attrs] autorelease];
+    }
+}
+
+- (NPMutableAttributedString *)initWithString:(NPString *)str {
+    return [self initWithString:str attributes:NULL];
+}
+
+- (NPMutableAttributedString *)initWithString:(NPString *)str attributes:(NPDictionary *)attrs {
+    return [super initWithString:str attributes:attrs];
+}
+
+- (void)setAttributes:(NPDictionary *)attrs range:(NPRange)range {
+    NPRange r = np_mattr_clamp_range(self, range);
+    if (r.length == 0) { return; }
+    size_t end = r.location + r.length;
+    np_mattr_split_at(self, r.location);
+    np_mattr_split_at(self, end);   // end == length 时是 no-op（末尾无需切）
+    size_t n = [self runCount];
+    for (size_t i = 0; i < n; i++) {
+        size_t start = (size_t)[((NPNumber *)[_starts objectAtIndex:i]) longLongValue];
+        if (start < r.location || start >= end) { continue; }
+        NPDictionary *fresh = attrs ? [attrs copy] : [NPMutableDictionary dictionary];
+        [_runAttrs replaceObjectAtIndex:i withObject:fresh];
+    }
+}
+
+- (void)addAttribute:(NPString *)name value:(id)value range:(NPRange)range {
+    if (!name || !value) { return; }
+    NPRange r = np_mattr_clamp_range(self, range);
+    if (r.length == 0) { return; }
+    size_t end = r.location + r.length;
+    np_mattr_split_at(self, r.location);
+    np_mattr_split_at(self, end);
+    size_t n = [self runCount];
+    for (size_t i = 0; i < n; i++) {
+        size_t start = (size_t)[((NPNumber *)[_starts objectAtIndex:i]) longLongValue];
+        if (start < r.location || start >= end) { continue; }
+        NPMutableDictionary *merged =
+            [[NPMutableDictionary alloc] initWithDictionary:(NPDictionary *)[_runAttrs objectAtIndex:i]];
+        [merged setObject:value forKey:name];
+        [_runAttrs replaceObjectAtIndex:i withObject:merged];
+    }
+}
+
+- (void)removeAttribute:(NPString *)name range:(NPRange)range {
+    if (!name) { return; }
+    NPRange r = np_mattr_clamp_range(self, range);
+    if (r.length == 0) { return; }
+    size_t end = r.location + r.length;
+    np_mattr_split_at(self, r.location);
+    np_mattr_split_at(self, end);
+    size_t n = [self runCount];
+    for (size_t i = 0; i < n; i++) {
+        size_t start = (size_t)[((NPNumber *)[_starts objectAtIndex:i]) longLongValue];
+        if (start < r.location || start >= end) { continue; }
+        NPMutableDictionary *trimmed =
+            [[NPMutableDictionary alloc] initWithDictionary:(NPDictionary *)[_runAttrs objectAtIndex:i]];
+        if ([trimmed objectForKey:name]) {
+            [trimmed removeObjectForKey:name];
+            [_runAttrs replaceObjectAtIndex:i withObject:trimmed];
+        }
+    }
+}
+
+- (void)replaceCharactersInRange:(NPRange)range withString:(NPString *)str {
+    size_t len = [self length];
+    if (range.location >= len) { return; }
+    size_t end = range.location + range.length;
+    if (end > len) { end = len; }
+    size_t removed = end - range.location;
+    size_t inserted = str ? [str length] : 0;
+
+    // 文本重建：head + 插入串 + tail（UTF-8 字节拼接）。
+    NPMutableString *built = [[NPMutableString alloc] init];
+    if (range.location > 0) {
+        [built appendString:[_string substringWithRange:(NPRange){ 0, range.location }]];
+    }
+    if (str) { [built appendString:str]; }
+    if (end < len) {
+        [built appendString:[_string substringWithRange:(NPRange){ end, len - end }]];
+    }
+    if (_string) { jeti_release(_string); }
+    _string = [built copy];
+
+    // 边界改写：落在被替换区间内部的边界删除；其后的边界按长度差平移。
+    // range.location 处的边界保留（插入文本继承该 run 的属性）。
+    long long delta = (long long)inserted - (long long)removed;
+    size_t i = 1;
+    while (i < [self runCount]) {
+        size_t start = (size_t)[((NPNumber *)[_starts objectAtIndex:i]) longLongValue];
+        if (start <= range.location) { i++; continue; }
+        if (start < end) {                       // 区间内部：删除该边界
+            [_starts removeObjectAtIndex:i];
+            [_runAttrs removeObjectAtIndex:i];
+            continue;
+        }
+        size_t moved = (size_t)((long long)start + delta);   // 尾部边界平移
+        [_starts replaceObjectAtIndex:i withObject:[NPNumber numberWithLongLong:(long long)moved]];
+        i++;
+    }
+}
+
+@end

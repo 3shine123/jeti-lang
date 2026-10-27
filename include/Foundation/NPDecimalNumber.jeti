@@ -18,6 +18,12 @@
 
 #define NP_DEC_MAX_DIGITS 38
 
+// 指数域对齐 NSDecimal 的 8 位有符号范围（-128..127）。超域不静默保留，
+// 按溢出处理（NaN + OVF 位）——目前只有幂运算显式加这道门（乘加沿用既有
+// 行为，见 .hje 的诚实边界）。
+#define NP_DEC_EXP_MAX  127
+#define NP_DEC_EXP_MIN  (-128)
+
 // 多声明符（`uint64_t hi, lo;`）曾把第二个字段的类型发射成 `int`，解析器修好后
 // 这里恢复紧凑写法，同时充当该修复的活体回归（见 probes/p2_decimal）。
 typedef struct { uint64_t hi, lo; } np_u128;
@@ -34,7 +40,7 @@ static int u128_cmp(np_u128 a, np_u128 b) {
     return 0;
 }
 
-static np_u128 u128_add(np_u128 a, np_u128 b, int *carry) {
+static np_u128 u128_add(np_u128 a, np_u128 b, int * carry) {
     np_u128 r;
     r.lo = a.lo + b.lo;
     uint64_t c = (r.lo < a.lo) ? 1 : 0;
@@ -167,6 +173,13 @@ static np_dec dec_make(np_u128 sig, int exp, int flags) {
 
 static np_dec dec_nan(void) { return dec_make(u128_make(0, 0), 0, NP_DEC_NAN); }
 
+// NaN + OVF 位：精度或指数域越界时的统一结果形态（不静默截断）。
+static np_dec dec_ovf(void) {
+    np_dec r = dec_nan();
+    r.flags |= NP_DEC_OVF;
+    return r;
+}
+
 static int dec_is_nan(np_dec a) { return (a.flags & NP_DEC_NAN) != 0; }
 static int dec_is_zero(np_dec a) { return !dec_is_nan(a) && u128_is_zero(a.sig); }
 static int dec_is_neg(np_dec a) { return (a.flags & NP_DEC_NEG) != 0; }
@@ -286,6 +299,33 @@ static np_dec dec_mul(np_dec a, np_dec b) {
     np_dec r = dec_make(s, a.exp + b.exp, sign);
     r = dec_normalize(r);
     return dec_round_limit(r);
+}
+
+// 非负整数幂（平方求幂）：中间结果每次乘法都按 38 位有效数字截断，
+// 与逐个相乘的结果一致（精度上限一致）。NaN 底数一律返回 NaN（含 0 次幂——
+// 数学上不定；ObjC 的 NSDecimal 遇到 NaN 操作数抛异常，这里按 NaN 传播）。
+static np_dec dec_pow(np_dec a, size_t power) {
+    if (dec_is_nan(a)) { return dec_nan(); }
+    if (power == 0) { return dec_make(u128_make(0, 1), 0, 0); }   // x^0 = 1
+    // 指数域按 NSDecimal 的 int8 范围收口：幂运算最容易把指数推到荒谬范围，
+    // 超过即按溢出处理（NaN + OVF），与精度溢出同一形态。
+    if (a.exp > NP_DEC_EXP_MAX || a.exp < NP_DEC_EXP_MIN) { return dec_ovf(); }
+    np_dec result = dec_make(u128_make(0, 1), 0, 0);
+    np_dec base = a;
+    while (power > 0) {
+        if ((power & 1u) != 0) {
+            result = dec_mul(result, base);
+            if (dec_is_nan(result)) { return result; }             // 溢出/下溢：NaN + OVF 位
+            if (result.exp > NP_DEC_EXP_MAX || result.exp < NP_DEC_EXP_MIN) { return dec_ovf(); }
+        }
+        power >>= 1;
+        if (power > 0) {
+            base = dec_mul(base, base);
+            if (dec_is_nan(base)) { return base; }
+            if (base.exp > NP_DEC_EXP_MAX || base.exp < NP_DEC_EXP_MIN) { return dec_ovf(); }
+        }
+    }
+    return result;
 }
 
 static np_dec dec_div(np_dec a, np_dec b) {
@@ -628,6 +668,14 @@ static np_dec np_dec_unwrap(NPDecimalNumber *n) {
     if (u128_is_zero(d.sig)) { return np_dec_wrap(d); }
     d.flags ^= NP_DEC_NEG;
     return np_dec_wrap(d);
+}
+
+- (NPDecimalNumber *)decimalNumberByRaisingToPower:(size_t)power {
+    return np_dec_wrap(dec_pow(np_dec_unwrap(self), power));
+}
+
+- (BOOL)hasOverflowed {
+    return (BOOL)((self->_flags & NP_DEC_OVF) != 0);
 }
 
 - (double)doubleValue {

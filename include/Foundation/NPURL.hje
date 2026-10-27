@@ -15,8 +15,10 @@
 //   `+URLWithString:` 返回 nil（ObjC 的 NSURL 支持更多 scheme 形态）。
 // - **不做事 percent-decoding/编码**：`path`/`query` 是原始字节段；ObjC 的
 //   `path` 会解码 %41 → A。需要解码时用 NPScanner 自行处理。
-// - **userinfo 被丢弃**（user:pass@host 的 @ 前段不进任何组件）；**无 IPv6
-//   字面量**（[::1] 形态会解析出错误 host——v1 不支持，待需求出现）。
+// - **userinfo 被丢弃**（user:pass@host 的 @ 前段不进任何组件）；**IPv6 字面量
+//   支持方括号形态**（`http://[::1]:8080/x`）：`-host` 返回方括号内的裸地址
+//   `::1`（ObjC 同），`-absoluteString` 重建时补回方括号；方括号未闭合或其
+//   后不是 `:port` 的输入判为非法（返回 nil）。
 // - 无相对 URL 解析（URLWithString:relativeToURL:）、无书签/文件引用 URL、
 //   无网络语义（不做 DNS/连接——那是 NPURLSession 的事，见缺口计划 P3）。
 // - `-port` 返回 NPNumber（ObjC 对齐）；显式空 port（`host:`）→ nil。

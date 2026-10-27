@@ -1,12 +1,27 @@
 #import <Foundation/NPAttributedString.hje>
 #import <Foundation/NPString.jeti>
 #import <Foundation/NPDictionary.jeti>
+#import <Foundation/NPMutableDictionary.jeti>
+#import <Foundation/NPMutableArray.jeti>
+#import <Foundation/NPNumber.jeti>
 #import <Foundation/NPObject.jeti>
 
-// NPAttributedString 实现：v1 纯数据层，整串一份属性字典（单 run）。
+// NPAttributedString 实现：文本 + 区间属性（run）。
 //
 // 文本与属性都在 init 时 copy（对齐 ObjC：之后改原对象不影响本对象），
 // 析构时 release（沿用 NPNotification 的 ivar 管理写法）。
+
+// 包含 index 的 run 序号：起点表升序，取最后一个 <= index 的起点。
+// run 数很少（通常 1、少数几个），线性扫足够，且不引入二分查找的边界坑。
+static size_t np_attr_run_index_at(NPAttributedString *self, size_t index) {
+    size_t n = [self->_starts count];
+    size_t found = 0;
+    for (size_t i = 0; i < n; i++) {
+        NPNumber *start = [self->_starts objectAtIndex:i];
+        if ((size_t)[start longLongValue] <= index) { found = i; }
+    }
+    return found;
+}
 
 @implementation NPAttributedString
 
@@ -32,13 +47,17 @@
     // 文本与属性都 copy：ObjC 的 NSAttributedString 也持有自己的副本，
     // 调用方之后改原对象不会回头改动本对象。
     _string = str ? [str copy] : NULL;
-    _attrs = attrs ? [attrs copy] : NULL;
+    _starts = [[NPMutableArray alloc] init];
+    _runAttrs = [[NPMutableArray alloc] init];
+    [_starts addObject:[NPNumber numberWithLongLong:0]];   // 首个 run 起点恒为 0
+    [_runAttrs addObject:(attrs ? [attrs copy] : [NPMutableDictionary dictionary])];
     return self;
 }
 
 - (void)dealloc {
     if (_string) { jeti_release(_string); _string = NULL; }
-    if (_attrs) { jeti_release(_attrs); _attrs = NULL; }
+    if (_starts) { jeti_release(_starts); _starts = NULL; }
+    if (_runAttrs) { jeti_release(_runAttrs); _runAttrs = NULL; }
     [super dealloc];
 }
 
@@ -50,8 +69,15 @@
     return _string ? [_string length] : 0;
 }
 
+- (size_t)runCount {
+    return [_starts count];
+}
+
 - (NPDictionary *)attributes {
-    return _attrs ? [_attrs copy] : NULL;
+    // v1 起的对外语义：空属性字典按 nil 返回（沿用既有 golden，避免
+    // 「有空字典」/「越界」两种情形在调用点不可区分——两者都表示「没有属性」）。
+    NPDictionary *first = [_runAttrs objectAtIndex:0];
+    return [first count] > 0 ? [first copy] : NULL;
 }
 
 - (BOOL)isValidIndex:(size_t)index {
@@ -60,17 +86,36 @@
 
 - (NPDictionary *)attributesAtIndex:(size_t)index {
     if (![self isValidIndex:index]) { return NULL; }   // 越界：nil（ObjC 抛异常）
-    return _attrs ? [_attrs copy] : NULL;
+    NPDictionary *run = [_runAttrs objectAtIndex:np_attr_run_index_at(self, index)];
+    // 空属性同样按 nil 返回（与 -attributes 一致，见该方法的注记）。
+    return [run count] > 0 ? [run copy] : NULL;
+}
+
+- (NPRange)effectiveRangeAtIndex:(size_t)index {
+    NPRange out;
+    out.location = index;
+    out.length = 0;
+    if (![self isValidIndex:index]) { return out; }
+    size_t i = np_attr_run_index_at(self, index);
+    size_t start = (size_t)[((NPNumber *)[_starts objectAtIndex:i]) longLongValue];
+    size_t end = [self length];
+    if (i + 1 < [self runCount]) {
+        end = (size_t)[((NPNumber *)[_starts objectAtIndex:i + 1]) longLongValue];
+    }
+    out.location = start;
+    out.length = end - start;
+    return out;
 }
 
 - (size_t)effectiveRangeLengthAtIndex:(size_t)index {
-    if (![self isValidIndex:index]) { return 0; }
-    return [self length];                              // v1：单 run，整串同属性
+    return [self effectiveRangeAtIndex:index].length;
 }
 
 - (id)attribute:(NPString *)name atIndex:(size_t)index {
-    if (![self isValidIndex:index] || !_attrs || !name) { return NULL; }
-    return [_attrs objectForKey:name];
+    if (!name) { return NULL; }
+    NPDictionary *attrs = [self attributesAtIndex:index];
+    if (!attrs) { return NULL; }
+    return [attrs objectForKey:name];
 }
 
 @end

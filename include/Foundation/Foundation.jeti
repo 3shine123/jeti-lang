@@ -107,6 +107,8 @@
 #import "NPOperationQueue.jeti"
 #import "NPAttributedString.hje"
 #import "NPAttributedString.jeti"
+#import "NPMutableAttributedString.hje"
+#import "NPMutableAttributedString.jeti"
 #import "NPKeyedArchiver.hje"
 #import "NPKeyedArchiver.jeti"
 #import "NPKeyedUnarchiver.hje"

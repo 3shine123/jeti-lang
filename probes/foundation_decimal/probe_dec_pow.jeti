@@ -1,0 +1,62 @@
+#import <Foundation/Foundation.jeti>
+#include <stdio.h>
+#include <string.h>
+
+// 探针：NPDecimalNumber -decimalNumberByRaisingToPower: 的取值、符号、0 次幂、
+// NaN 传播与溢出位。
+static int fails = 0;
+static void ck(int cond, const char *what) {
+    printf("%s %s\n", cond ? "PASS" : "FAIL", what);
+    if (!cond) { fails++; }
+}
+
+static NPDecimalNumber *D(const char *s) {
+    return [NPDecimalNumber decimalNumberWithString:[NPString stringWithUTF8String:s]];
+}
+static int is_str(NPDecimalNumber *n, const char *want) {
+    return strcmp([[n stringValue] UTF8String], want) == 0;
+}
+
+int main(void) {
+    @noarc {
+        ck(is_str([D("1.5") decimalNumberByRaisingToPower:3], "3.375"), "1.5^3 = 3.375");
+        ck(is_str([D("2") decimalNumberByRaisingToPower:10], "1024"), "2^10 = 1024");
+        ck(is_str([D("0.5") decimalNumberByRaisingToPower:2], "0.25"), "0.5^2 = 0.25");
+        ck(is_str([D("-2") decimalNumberByRaisingToPower:3], "-8"), "(-2)^3 = -8");
+        ck(is_str([D("-2") decimalNumberByRaisingToPower:2], "4"), "(-2)^2 = 4");
+        ck(is_str([D("7") decimalNumberByRaisingToPower:0], "1"), "x^0 = 1");
+        ck(is_str([D("0") decimalNumberByRaisingToPower:0], "1"), "0^0 = 1");
+        ck(is_str([D("0") decimalNumberByRaisingToPower:5], "0"), "0^5 = 0");
+
+        // NaN 传播（含 0 次幂：数学上不定，按 NaN 处理）
+        NPDecimalNumber *nan = [D("abc") decimalNumberByRaisingToPower:2];
+        ck([nan isNotANumber], "NaN base -> NaN");
+        ck([[D("abc") decimalNumberByRaisingToPower:0] isNotANumber], "NaN^0 -> NaN");
+
+        // 1e40 仍可精确表示（sig=1, exp=40），不是溢出。
+        NPDecimalNumber *big = [D("1e20") decimalNumberByRaisingToPower:2];
+        ck(![big isNotANumber] && ![big hasOverflowed], "1e20^2 stays representable (1e40)");
+        ck(strlen([[big stringValue] UTF8String]) == 41, "1e40 stringValue expands fully");
+
+        // 精度溢出：20 个 9 平方 = 40 位有效数字，超出 128 位有效数字上限。
+        NPDecimalNumber *ovf = [D("99999999999999999999") decimalNumberByRaisingToPower:2];
+        ck([ovf isNotANumber], "significand overflow -> NaN");
+        ck([ovf hasOverflowed], "overflow flag is set (not silently truncated)");
+
+        // 指数域溢出：1e100^20 = 1e2000，超出 NSDecimal 的 int8 指数域。
+        NPDecimalNumber *expo = [D("1e100") decimalNumberByRaisingToPower:20];
+        ck([expo isNotANumber], "exponent overflow -> NaN");
+        ck([expo hasOverflowed], "exponent overflow sets the flag too");
+
+        ck(![[D("2") decimalNumberByRaisingToPower:3] hasOverflowed], "normal result has no flag");
+
+        // 与逐个相乘一致（38 位截断点相同）
+        NPDecimalNumber *a = [D("1.0000001") decimalNumberByRaisingToPower:8];
+        NPDecimalNumber *step = D("1.0000001");
+        for (int i = 0; i < 7; i++) { step = [step decimalNumberByMultiplyingBy:D("1.0000001")]; }
+        ck([[a stringValue] isEqualToString:[step stringValue]],
+           "power result equals repeated multiplication");
+    }
+    printf("%s %d failure(s)\n", fails == 0 ? "PROBE OK" : "PROBE FAILED", fails);
+    return fails == 0 ? 0 : 1;
+}

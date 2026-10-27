@@ -1,0 +1,213 @@
+#import <Foundation/Foundation.jeti>
+
+// 探针：验证 NPAttributedString 区间 run 实现所需的全部形状——
+//   ① @public 的 NPMutableArray ivar 存 run 起点与每 run 属性字典；
+//   ② 可变子类原地访问父类 @public ivar，并 insert/replace 到父类数组；
+//   ③ NPRange 作为参数类型、NPNumber 存 size_t 边界、字典 copy 隔离；
+//   ④ 循环内 substringWithRange: 重建文本（replaceCharactersInRange: 的底座）。
+// 只验证形状与算法，不验证最终 API 命名。
+
+@interface ProbeAttrString : NPObject {
+@public
+    NPString       *_text;
+    NPMutableArray *_starts;   // run 起点（升序，首项恒为 0）
+    NPMutableArray *_attrs;    // 每 run 的属性字典（与 _starts 等长）
+}
++ (ProbeAttrString *)attributedStringWithString:(NPString *)s;
+- (ProbeAttrString *)initWithString:(NPString *)s;
+- (size_t)length;
+- (size_t)runCount;
+- (size_t)startOfRun:(size_t)i;
+- (NPDictionary *)attrsOfRun:(size_t)i;
+- (size_t)runIndexAt:(size_t)index;
+- (NPDictionary *)attributesAtIndex:(size_t)index;
+- (size_t)effectiveRangeLengthAtIndex:(size_t)index;
+@end
+
+@implementation ProbeAttrString
+
++ (ProbeAttrString *)attributedStringWithString:(NPString *)s {
+    @noarc {
+        return [[[self alloc] initWithString:s] autorelease];
+    }
+}
+
+- (ProbeAttrString *)initWithString:(NPString *)s {
+    self = [super init];
+    if (!self) { return NULL; }
+    _text = s ? [s copy] : NULL;
+    _starts = [[NPMutableArray alloc] init];
+    _attrs = [[NPMutableArray alloc] init];
+    [_starts addObject:[NPNumber numberWithLongLong:0]];
+    [_attrs addObject:[NPMutableDictionary dictionary]];
+    return self;
+}
+
+- (size_t)length {
+    return _text ? [_text length] : 0;
+}
+
+- (size_t)runCount {
+    return [_starts count];
+}
+
+- (size_t)startOfRun:(size_t)i {
+    return (size_t)[[_starts objectAtIndex:i] longLongValue];
+}
+
+- (NPDictionary *)attrsOfRun:(size_t)i {
+    return (NPDictionary *)[_attrs objectAtIndex:i];
+}
+
+// 找到包含 index 的 run（线性扫，run 数量少；边界从后往前收敛）。
+- (size_t)runIndexAt:(size_t)index {
+    size_t n = [self runCount];
+    size_t found = 0;
+    for (size_t i = 0; i < n; i++) {
+        if ([self startOfRun:i] <= index) { found = i; }
+    }
+    return found;
+}
+
+- (NPDictionary *)attributesAtIndex:(size_t)index {
+    if (index >= [self length]) { return NULL; }
+    return [[self attrsOfRun:[self runIndexAt:index]] copy];
+}
+
+- (size_t)effectiveRangeLengthAtIndex:(size_t)index {
+    size_t len = [self length];
+    if (index >= len) { return 0; }
+    size_t i = [self runIndexAt:index];
+    size_t next = (i + 1 < [self runCount]) ? [self startOfRun:i + 1] : len;
+    return next - [self startOfRun:i];
+}
+
+@end
+
+// 可变子类：区间写属性（setAttributes:range: 的算法底座）。
+@interface ProbeMutableAttrString : ProbeAttrString
+- (void)splitAt:(size_t)pos;
+- (void)setAttributes:(NPDictionary *)attrs range:(NPRange)range;
+- (void)replaceCharactersInRange:(NPRange)range withString:(NPString *)replacement;
+@end
+
+@implementation ProbeMutableAttrString
+
+// 在 pos 处切分 run（pos 必须落在 (0, length) 开区间内，且不是已有边界）。
+- (void)splitAt:(size_t)pos {
+    size_t len = [self length];
+    if (pos == 0 || pos >= len) { return; }
+    size_t i = [self runIndexAt:pos];
+    if ([self startOfRun:i] == pos) { return; }
+    [_starts insertObject:[NPNumber numberWithLongLong:(long long)pos] atIndex:i + 1];
+    NPDictionary *inherited = [[_attrs objectAtIndex:i] copy];
+    [_attrs insertObject:inherited atIndex:i + 1];
+}
+
+- (void)setAttributes:(NPDictionary *)attrs range:(NPRange)range {
+    size_t len = [self length];
+    if (range.length == 0 || range.location >= len) { return; }
+    size_t end = range.location + range.length;
+    if (end > len) { end = len; }
+    [self splitAt:range.location];
+    if (end < len) { [self splitAt:end]; }
+    size_t n = [self runCount];
+    for (size_t i = 0; i < n; i++) {
+        size_t st = [self startOfRun:i];
+        if (st >= range.location && st < end) {
+            NPDictionary *copy = attrs ? [attrs copy] : [NPMutableDictionary dictionary];
+            [_attrs replaceObjectAtIndex:i withObject:copy];
+        }
+    }
+}
+
+// 区间替换：文本用子串拼接重建；run 起点整体平移（被触及的 run 归并到起点）。
+- (void)replaceCharactersInRange:(NPRange)range withString:(NPString *)replacement {
+    size_t len = [self length];
+    if (range.location >= len) { return; }
+    size_t end = range.location + range.length;
+    if (end > len) { end = len; }
+    size_t repLen = replacement ? [replacement length] : 0;
+    NPString *head = [self length] > 0 && range.location > 0
+        ? [_text substringWithRange:(NPRange){ 0, range.location }]
+        : NULL;
+    NPString *tail = end < len
+        ? [_text substringWithRange:(NPRange){ end, len - end }]
+        : NULL;
+    NPString *built = head ? [head copy] : [NPString stringWithUTF8String:""];
+    if (replacement) { built = [built stringByAppendingString:replacement]; }
+    if (tail) { built = [built stringByAppendingString:tail]; }
+    if (_text) { jeti_release(_text); }
+    _text = [built copy];
+
+    // run 边界：range.location 之后的边界随长度差平移，落在被替换区间的边界删除。
+    size_t delta = repLen - (end - range.location);
+    size_t i = 1;
+    while (i < [self runCount]) {
+        size_t st = [self startOfRun:i];
+        if (st <= range.location) { i++; continue; }
+        if (st < end) {
+            [_starts removeObjectAtIndex:i];
+            [_attrs removeObjectAtIndex:i];
+            continue;
+        }
+        size_t moved = st + delta;
+        [_starts replaceObjectAtIndex:i withObject:[NPNumber numberWithLongLong:(long long)moved]];
+        i++;
+    }
+}
+
+@end
+
+static int probe_failures = 0;
+
+static void check(int cond, const char *what) {
+    printf("%s %s\n", cond ? "PASS" : "FAIL", what);
+    if (!cond) { probe_failures++; }
+}
+
+int main(void) {
+    @noarc {
+        NPString *text = [NPString stringWithUTF8String:"ab中文cd"];
+        ProbeMutableAttrString *s = [[ProbeMutableAttrString alloc] initWithString:text];
+        check([s length] == 10, "UTF-8 length counts bytes (ab=2 + 中文=6 + cd=2)");
+        check([s runCount] == 1, "fresh string has exactly one run");
+        check([s effectiveRangeLengthAtIndex:0] == 10, "single run covers whole string");
+
+        NPMutableDictionary *bold = [NPMutableDictionary dictionary];
+        [bold setObject:[NPNumber numberWithInt:1] forKey:@".bold"];
+        [s setAttributes:bold range:(NPRange){ 2, 6 }];
+        check([s runCount] == 3, "range write splits into three runs");
+        check([s startOfRun:0] == 0 && [s startOfRun:1] == 2 && [s startOfRun:2] == 8,
+              "run starts are 0 / 2 / 8");
+        check([[s attributesAtIndex:0] count] == 0, "run before range keeps empty attrs");
+        check([[[s attributesAtIndex:3] objectForKey:@".bold"] intValue] == 1,
+              "run inside range carries .bold");
+        check([s effectiveRangeLengthAtIndex:3] == 6, "effective length inside range is 6");
+
+        // 字典 copy 隔离：改原字典不回写已生效的 run。
+        [bold setObject:[NPNumber numberWithInt:9] forKey:@".bold"];
+        check([[s attributesAtIndex:3] objectForKey:@".bold"] != NULL, "run keeps its own copy");
+        check([[[s attributesAtIndex:3] objectForKey:@".bold"] intValue] == 1,
+              "mutating the source dictionary does not leak into the run");
+
+        // 叠加一层更窄的区间。
+        NPMutableDictionary *italic = [NPMutableDictionary dictionary];
+        [italic setObject:[NPNumber numberWithInt:1] forKey:@".italic"];
+        [s setAttributes:italic range:(NPRange){ 5, 3 }];
+        check([s startOfRun:2] == 5, "narrower range adds a boundary at 5");
+        check([s effectiveRangeLengthAtIndex:5] == 3, "narrow run length is 3");
+        check([[s attributesAtIndex:5] objectForKey:@".bold"] == NULL,
+              "narrow run replaces (not merges) the previous attrs");
+
+        // 区间替换：把 "中文" 换成 "X"，被覆盖区间内的边界删除，
+        // 尾部边界随长度差平移到 3（"cd" 的起点）。
+        [s replaceCharactersInRange:(NPRange){ 2, 6 } withString:[NPString stringWithUTF8String:"X"]];
+        check([s length] == 5, "replacement shrinks length to 5 (abXcd)");
+        check([s runCount] == 3, "boundary inside the replaced span is dropped");
+        check([s startOfRun:1] == 2 && [s startOfRun:2] == 3,
+              "tail boundary shifts to the insertion end");
+    }
+    printf("%s %d failure(s)\n", probe_failures == 0 ? "PROBE OK" : "PROBE FAILED", probe_failures);
+    return probe_failures == 0 ? 0 : 1;
+}

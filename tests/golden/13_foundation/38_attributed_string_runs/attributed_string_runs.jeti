@@ -1,0 +1,89 @@
+/* NPMutableAttributedString golden —— 区间属性（run）写入。
+ *
+ * 走 .hje 多 TU 正规流程（声明伞头 + 预编译库 libjetifoundation.a）。
+ *   F1  字节单位与单 run 基线：length / runCount / effectiveRangeAtIndex
+ *   F2  区间写属性：切分 run，区间内外属性隔离
+ *   F3  addAttribute：在已有属性上叠加，不丢原有键
+ *   F4  removeAttribute：只删指定键，其他键与区间外都不受影响
+ *   F5  copy 隔离：构造后改源字典不影响已写入的 run
+ *   F6  replaceCharactersInRange：覆盖区间内的边界删除、尾部边界平移
+ *   F7  越界与空区间：写属性是 no-op，越界读取返回 nil / 长度为 0
+ * 期望输出（逐行 GOLDEN-MATCH）：F1 ok … F7 ok
+ */
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+#include <string.h>
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+
+static int s_eq(NPString *s, const char *want) {
+    return s != NULL && strcmp([s UTF8String], want) == 0;
+}
+
+static int has_key(NPMutableAttributedString *as, const char *key, size_t index) {
+    return [as attribute:S(key) atIndex:index] != NULL;
+}
+
+int main(void) {
+    @noarc {
+        /* "ab中文cd" = 2 + 6 + 2 = 10 字节 */
+        NPMutableAttributedString *as =
+            [NPMutableAttributedString attributedStringWithString:S("ab中文cd")];
+
+        /* F1：字节单位与单 run 基线 */
+        NPRange r0 = [as effectiveRangeAtIndex:0];
+        int f1 = [as length] == 10 && [as runCount] == 1
+            && r0.location == 0 && r0.length == 10
+            && [as attributesAtIndex:0] == NULL;   /* 无属性 → nil（v1 语义） */
+        printf("F1 %s\n", f1 ? "ok" : "FAIL");
+
+        /* F2：区间写属性切分 run */
+        NPMutableDictionary *bold = [NPMutableDictionary dictionary];
+        [bold setObject:[NPNumber numberWithInt:1] forKey:S("bold")];
+        [as setAttributes:bold range:(NPRange){ 2, 6 }];
+        NPRange r2 = [as effectiveRangeAtIndex:3];
+        int f2 = [as runCount] == 3
+            && r2.location == 2 && r2.length == 6
+            && has_key(as, "bold", 3) && !has_key(as, "bold", 0) && !has_key(as, "bold", 9)
+            && [as attributesAtIndex:0] == NULL;
+        printf("F2 %s\n", f2 ? "ok" : "FAIL");
+
+        /* F3：addAttribute 叠加，不丢原有键 */
+        [as addAttribute:S("italic") value:S("yes") range:(NPRange){ 5, 3 }];
+        int f3 = [as effectiveRangeLengthAtIndex:5] == 3
+            && has_key(as, "bold", 5) && has_key(as, "italic", 5)
+            && !has_key(as, "italic", 3);
+        printf("F3 %s\n", f3 ? "ok" : "FAIL");
+
+        /* F4：removeAttribute 只删指定键，区间外不动 */
+        [as removeAttribute:S("bold") range:(NPRange){ 5, 3 }];
+        int f4 = !has_key(as, "bold", 5) && has_key(as, "italic", 5)
+            && has_key(as, "bold", 3);
+        printf("F4 %s\n", f4 ? "ok" : "FAIL");
+
+        /* F5：copy 隔离（改源字典不回写已生效的 run） */
+        [bold setObject:[NPNumber numberWithInt:9] forKey:S("bold")];
+        int f5 = [[[as attribute:S("bold") atIndex:3] description] isEqualToString:S("1")];
+        printf("F5 %s\n", f5 ? "ok" : "FAIL");
+
+        /* F6：文本替换 —— 中文(6 字节) → "X"，尾部边界从 8 平移到 3 */
+        [as replaceCharactersInRange:(NPRange){ 2, 6 } withString:S("X")];
+        NPRange r6 = [as effectiveRangeAtIndex:3];
+        int f6 = [as length] == 5
+            && [as runCount] == 3
+            && r6.location == 3 && r6.length == 2
+            && [[as string] isEqualToString:S("abXcd")];
+        printf("F6 %s\n", f6 ? "ok" : "FAIL");
+
+        /* F7：越界与空区间 */
+        NPMutableDictionary *none = [NPMutableDictionary dictionary];
+        [as setAttributes:none range:(NPRange){ 9, 5 }];     /* 起点越界 → no-op */
+        [as setAttributes:none range:(NPRange){ 1, 0 }];     /* 空区间 → no-op */
+        int f7 = [as runCount] == 3
+            && [as attributesAtIndex:99] == NULL
+            && [as effectiveRangeLengthAtIndex:99] == 0
+            && [as attribute:S("bold") atIndex:99] == NULL;
+        printf("F7 %s\n", f7 ? "ok" : "FAIL");
+    }
+    return 0;
+}

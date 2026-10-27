@@ -1,0 +1,63 @@
+#import <Foundation/Foundation.jeti>
+#include <stdio.h>
+#include <string.h>
+
+// 探针：用真实 API（NPAttributedString 区间 run + NPMutableAttributedString）
+// 自包含编译运行，确认实现与 checker 都通过；入 golden 前先在这里实证。
+
+static NPString *S(const char *s) { return [NPString stringWithUTF8String:s]; }
+static int fails = 0;
+static void ck(int cond, const char *what) {
+    printf("%s %s\n", cond ? "PASS" : "FAIL", what);
+    if (!cond) { fails++; }
+}
+
+int main(void) {
+    @noarc {
+        // 字节单位：ab=2 + 中文=6 + cd=2 = 10
+        NPString *text = S("ab中文cd");
+        NPMutableAttributedString *s = [NPMutableAttributedString attributedStringWithString:text];
+        ck([s length] == 10, "length counts UTF-8 bytes");
+        ck([s runCount] == 1, "fresh string has one run");
+        ck([s attributesAtIndex:0] == NULL, "no attributes -> nil (v1 semantics)");
+        ck([s effectiveRangeLengthAtIndex:0] == 10, "single run covers the string");
+
+        NPMutableDictionary *bold = [NPMutableDictionary dictionary];
+        [bold setObject:[NPNumber numberWithInt:1] forKey:S("bold")];
+        [s setAttributes:bold range:(NPRange){ 2, 6 }];
+        ck([s runCount] == 3, "range write splits into three runs");
+        NPRange r1 = [s effectiveRangeAtIndex:3];
+        ck(r1.location == 2 && r1.length == 6, "effective range inside span is {2,6}");
+        ck([[[s attribute:S("bold") atIndex:3] description] isEqualToString:S("1")],
+           "attribute readable inside span");
+        ck([s attribute:S("bold") atIndex:0] == NULL, "attribute absent outside span");
+
+        // copy 隔离
+        [bold setObject:[NPNumber numberWithInt:9] forKey:S("bold")];
+        ck([[[s attribute:S("bold") atIndex:3] description] isEqualToString:S("1")],
+           "source dictionary mutation does not leak into runs");
+
+        // 叠加更窄区间
+        NPMutableDictionary *it = [NPMutableDictionary dictionary];
+        [it setObject:S("yes") forKey:S("italic")];
+        [s addAttribute:S("italic") value:S("yes") range:(NPRange){ 5, 3 }];
+        ck([s effectiveRangeLengthAtIndex:5] == 3, "narrower range narrows the run");
+        ck([s attribute:S("bold") atIndex:5] != NULL, "addAttribute keeps existing attrs");
+
+        // removeAttribute 只删指定键
+        [s removeAttribute:S("bold") range:(NPRange){ 5, 3 }];
+        ck([s attribute:S("bold") atIndex:5] == NULL, "removeAttribute drops the key");
+        ck([s attribute:S("italic") atIndex:5] != NULL, "removeAttribute keeps other keys");
+        ck([s attribute:S("bold") atIndex:3] != NULL, "outside the range is untouched");
+
+        // 文本替换：中文(6 字节) -> X，尾部边界平移到 3
+        [s replaceCharactersInRange:(NPRange){ 2, 6 } withString:S("X")];
+        ck([s length] == 5, "replacement shrinks length to 5");
+        ck([s runCount] == 3, "boundaries inside the replaced span are dropped");
+        NPRange r2 = [s effectiveRangeAtIndex:3];
+        ck(r2.location == 3, "tail boundary shifts with the length delta");
+        ck([s attribute:S("italic") atIndex:4] == NULL, "tail run keeps its own (empty) attrs");
+    }
+    printf("%s %d failure(s)\n", fails == 0 ? "PROBE OK" : "PROBE FAILED", fails);
+    return fails == 0 ? 0 : 1;
+}

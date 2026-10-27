@@ -1,0 +1,37 @@
+#ifndef NPMUTABLEATTRIBUTEDSTRING_NH
+#define NPMUTABLEATTRIBUTEDSTRING_NH
+
+#import <Foundation/NPAttributedString.hje>
+#import <Foundation/NPMutableDictionary.hje>
+
+// NPMutableAttributedString —— 可写区间属性的带属性字符串
+// （对应 ObjC 的 NSMutableAttributedString）。
+//
+// 写入语义对齐 ObjC：给区间写属性会在需要的位置切分 run（区间两端各切一刀），
+// 被完全覆盖的 run 换上新字典；与被写区间部分重叠的 run 只在重叠段生效——
+// 这正是「同一串不同段不同样式」的实现方式。
+//
+// 诚实边界：
+// - 下标与区间按 UTF-8 字节计（与基类 `-length` 同一单位）。
+// - 空字典写入等价于「清掉该区间的属性」（ObjC 传 nil 会抛异常，这里按空字典处理）。
+// - `-setAttributes:range:` 传入的字典被 copy 进每个覆盖的 run：之后改原字典
+//   不会回写到本对象。
+// - 不做 `-appendAttributedString:` / `-insertAttributedString:atIndex:`
+//   （跨对象拼接会牵扯属性合并策略，待需求出现）。
+@interface NPMutableAttributedString : NPAttributedString
++ (NPMutableAttributedString *)attributedStringWithString:(NPString *)str;
++ (NPMutableAttributedString *)attributedStringWithString:(NPString *)str attributes:(NPDictionary *)attrs;
+- (NPMutableAttributedString *)initWithString:(NPString *)str;
+- (NPMutableAttributedString *)initWithString:(NPString *)str attributes:(NPDictionary *)attrs;
+// 给区间整段写属性（覆盖该区间原有的全部属性）。
+- (void)setAttributes:(NPDictionary *)attrs range:(NPRange)range;
+// 在区间内追加/覆盖单个属性（保留该区间其他属性）。
+- (void)addAttribute:(NPString *)name value:(id)value range:(NPRange)range;
+// 删除区间内的单个属性（保留其他属性）；属性不存在是 no-op。
+- (void)removeAttribute:(NPString *)name range:(NPRange)range;
+// 替换文本区间：被覆盖区间内的 run 边界删除，尾部边界随长度差平移，
+// 插入文本继承插入点所在 run 的属性（ObjC 对齐）。
+- (void)replaceCharactersInRange:(NPRange)range withString:(NPString *)str;
+@end
+
+#endif
