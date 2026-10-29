@@ -89,6 +89,8 @@ node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue
 ./tools/run-vscode-extension.sh  # Extension Development Host with the extension loaded
 
 ./tools/build-foundation-lib.sh  # build target/foundation/libjetifoundation.a once
+                                 # (FOUNDATION_SHARED=1 also emits a .dylib/.so/.dll;
+                                 #  experimental — see docs/plans/architecture.md §7.2)
 ```
 
 ## Naming Conventions (used across all docs)
@@ -165,6 +167,9 @@ node .vscode/extensions/jeti-lang-support/test/extension.test.js  # VS Code glue
   declaration-only clients (source-level transitive `#import` scan decides); a TU
   that inlines Foundation implementations is skipped on purpose — do not "simplify"
   this to a generated-C text heuristic (two such heuristics were already falsified).
+  The auto-link is **static by design**: linking the shared Foundation is
+  prototyped but breaks KVC-driven code (`NPPredicate` filtering returns 0) —
+  see `docs/plans/architecture.md` §7.2 before touching this.
 - **Source location preservation:** when adding or changing AST/HIR nodes or lowering
   passes, preserve their source origin. New synthesized nodes should be marked or
   documented as synthetic and retain the originating Jeti span when one exists.

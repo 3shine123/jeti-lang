@@ -4,6 +4,8 @@
 > 历史决策与迁移过程见：`docs/plans/stable_slots_plan.md`（stable slots / multi-TU 迁移史）、`docs/plans/arc_intern_uaf.md`（ARC intern UAF 修复记录）。
 > 用户向文档见 `README.md` / `CHINESE.md`。
 
+> **Jeti = Objective-C 语法 + C++ 式静态编译（转译为 C99）+ ARC。** 动态派发的缺席是特性而非缺失：所有消息在编译期解析为 vtable 槽位，`id` 上的鸭子派发靠**全程序统一 vtable 布局**实现。这个身份决定了一切后续规则：vtable 的稳定槽位（R1）、owner/弱 stub（R2）、启动期 `__sig` 校验（R3）、ivar 布局签名（R4）、`.slots` 清单（R6）都不是"奇怪的规矩"，而是这个静态模型的直接推论。
+
 ## 1. 编译流程
 
 Jeti 是 Objective-C 风格语法转译到 C99 的静态语言。`jetic` 的流水线（Rust，`crates/`）：
@@ -121,6 +123,28 @@ jetic app.jeti -I include -L target/foundation -ljetifoundation -o app
 3. `ar` 归档为 `libjetifoundation.a`，`nm` 校验强符号（9/9）。
 
 细节：伞头 `Foundation.jeti` 不是类，被构建脚本显式跳过（归档它会重复内联全部实现）；库经 jetic auto-link 自动链接（查找顺序：二进制旁 → `target/foundation` → `/opt/jeti/lib` → `/usr/local/lib/jeti` → 用户 `-L`），仅对纯声明客户端生效；`-ffreestanding`、shared 模式、显式 `-ljetifoundation` 均抑制自动链接。
+
+### 7.1 体积：方法名表按 TU 共享（已落地）
+
+每个 TU 的启动期布局校验原本把**整张选择器名表**（Foundation 规模约 5 KB）内嵌在**每个类**的调用点里。预编译 Foundation 归档是 52 个 TU，一个 hello-world 链接进去就是 52 × 54 份 ≈ 15.2 MB 的 `__cstring`，占二进制 94%。
+
+现在每个 TU 只发一份 `static const char *const __jeti_vtable_method_list_<fnv1a>`：**指针**形式而非 `const char[]` 数组，字面量因此落在 `__cstring`，由链接器**按内容去重**（数组落在 `__TEXT,__const`，链接器不合并）。校验函数随之改名为 `jeti_verify_vtable_layout(winner, mine, method_list, class_name, tu_name)`，把类名/TU 名拆成独立短参数，诊断文本逐字不变（改动前后同一探针的 abort 输出 `cmp` 完全相同）。
+
+实测：Foundation hello-world **16.1 MB → 879 KB**（静态）；`libjetifoundation.a` 26 MB → 11 MB。回归：`test_all.sh` 591/602、`multi_tu` 19/19，与改动前逐项一致。
+
+**dead_strip 默认开启**（`-fno-dead-strip` 关闭）：Jeti 的链接模型会拉入**整个归档成员**（纯声明客户端引用它见到的每个类），所以链接进去的 Foundation 有相当部分永远到不了。macOS 用 `-Wl,-dead_strip`，ELF/Windows 用 `-ffunction-sections -fdata-sections -Wl,--gc-sections`（实测 macOS 880 KB → 674 KB，−23%；Linux 5.13 MB → 4.18 MB，−19%）。freestanding 与 shared 模式**跳过**：前者由用户掌握链接脚本，后者导出符号可能被宿主调用。
+
+**符号剥离（`strip`/`-Wl,-x`）刻意不做**：相对 dead_strip 仅再省 2–3%，却牺牲可调试性，与 `source_locations_debug_lsp_plan.md` 的方向冲突。
+
+**下一步（未实现）**：把跨 TU 校验与 stub 发射收窄到"实际引用"的类，预计再降到 200–350 KB。方案、语义边界与验证矩阵见 `docs/plans/vtable_check_scope_plan.md`。
+
+### 7.2 共享库（实验性，默认关闭）
+
+`tools/build-foundation-lib.sh` 可在 `.a` 旁额外产出动态库（`.dylib` / `.so` / `.dll`，`FOUNDATION_SHARED=1` 才构建），库内**一并包含 runtime**。原型实测：客户端 879 KB → 230 KB。
+
+**但它默认关闭，且 jetic 不链接它** —— 链接共享库会破坏 KVC 驱动的代码：`NPPredicate` 过滤恒返回 0 命中，**连纯 Foundation 对象也一样**（`@[ @1, @2, @3 ]` 用 `intValue > 1` 过滤得到 0）。根因：纯声明客户端对**非自有类**的 `NPClass` 元数据发的是**零值 tentative 定义**（其 `.kvc_entries` 按设计为 NULL，见 codegen 中 "KVC table pointer — owner static metadata only" 一段）。静态链接时归档的**强定义**赢得弱合并，客户端对象因此带着真实 KVC 表；动态链接时客户端对象指向的是它**自己**的那份零值定义，库里的 `jeti_kvc_value` 走 isa 链查不到表 → 返回 NULL。
+
+因此启用它需要先设计元数据的**跨模块插入（interposition）**方案，不是加个链接旗标。脚本在默认路径下会**删除**遗留的动态库：`-ljetifoundation` 在有 `.so`/`.dylib` 时会优先选共享库，陈旧产物会把客户端静默拖到这条路径上。细节见 `crates/jetic/src/main.rs` 中 `foundation_shared_name` 的 KNOWN ISSUE 注释与 `probes/layout_mismatch/README.md`。
 
 ## 8. 泛型：单态化为主，裸拼写擦除兼容
 

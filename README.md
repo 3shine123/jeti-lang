@@ -25,6 +25,8 @@
 
 ## **Overview**
 
+> **Jeti = Objective-C 语法 + C++ 式静态编译（转译为 C99）+ ARC。** 动态派发的缺席是特性而非缺失：所有消息在编译期解析为 vtable 槽位，`id` 上的鸭子派发靠**全程序统一 vtable 布局**实现。
+
 Jeti is a **purely static** Objective-C dialect (C superset language). Jeti source is transpiled to C99, then compiled to native machine code by Clang. No runtime message forwarding, no GC pauses, no JIT warm-up — all method dispatch, memory management, and polymorphism are resolved at compile time. It currently works — there are games and tools running in it. If you find it interesting, feel free to give it a try.
 
 I don't intend to replace ObjC or Swift. I just miss ObjC's syntax and wanted to let it live again in a statically compiled world. ☺️

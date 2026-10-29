@@ -46,6 +46,7 @@
   checker's subscript rewrite picks the selector from what the receiver class
   actually declares (indexed arrays keep `objectAtIndex:` / `setObject:atIndex:`).
 - [x] **`conformsToProtocol:` runtime** — class metadata now carries a populated protocol table and the runtime query walks class + protocol parent chains (`docs/plans/categories_protocol_plan.md` §8).
+- [ ] **Shared (dynamic) Foundation library** — *accepted as a future direction, gated on a metadata-interposition design.* The current default is **static linking by design** (the weak-merge model depends on it; see `docs/plans/architecture.md` §7.2). A prototype exists (`tools/build-foundation-lib.sh` with `FOUNDATION_SHARED=1`) but it breaks KVC-driven code: declaration-only clients emit non-owned classes' `NPClass` as zeroed tentative definitions with a NULL `.kvc_entries`, and without cross-module weak-merge those stubs win. Prerequisite: a codegen mode (`-flink-foundation=shared`) that emits pure `extern` declarations for manifest-listed classes instead of tentative definitions. Not scheduled — the trigger is a real "multiple Jeti apps sharing one Foundation install" need.
 
 ## EH known limitations (accepted, not scheduled)
 
