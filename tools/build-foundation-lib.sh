@@ -99,7 +99,7 @@ check_strong() {
     done
 }
 
-echo "[1/4] transpile + compile each Foundation TU (wrapper = decl surface + implementation)"
+echo "[1/5] transpile + compile each Foundation TU (wrapper = decl surface + implementation)"
 # Each TU is a generated WRAPPER: the full declaration surface
 # (Foundation.hje, the declaration-only umbrella) first, then the
 # implementation .jeti's own text — the
@@ -115,7 +115,7 @@ objs=()
 tus="$outdir/_tus"
 rm -rf "$tus"   # stale wrappers from an interrupted earlier run must not survive
 mkdir -p "$tus"
-rm -f "$outdir"/*.o   # stale objects from an earlier run must not linger into [3/4]
+rm -f "$outdir"/*.o   # stale objects from an earlier run must not linger into [3/5]
 # Pinned slot layout shipped beside the archive (`libjetifoundation.slots`).
 # A client that imports its OWN headers still sees the same selector→slot
 # assignment for every Foundation selector, so adding a class cannot shift a
@@ -150,22 +150,22 @@ for gm in include/Foundation/*.jeti; do
     echo "  $name"
 done
 
-echo "[2/4] archive"
+echo "[2/5] archive"
 rm -f "$lib"
 ar rcs "$lib" "${objs[@]}"
 
-echo "[3/4] verify per-TU owned metadata is strong (nm)"
+echo "[3/5] verify per-TU owned metadata is strong (nm)"
 # Every Foundation .jeti implements exactly the class it is named after, so the
 # basename IS the owned class. If any of these is weak, ownership did not
 # apply and a client TU's stub could win the link — fail loudly instead of
 # shipping a landmine.
 for gm in include/Foundation/*.jeti; do
     name="$(basename "$gm" .jeti)"
-    [[ "$name" == "Foundation" || "$name" == "NPTask" ]] && continue   # no vtable to verify (see [1/4])
+    [[ "$name" == "Foundation" || "$name" == "NPTask" ]] && continue   # no vtable to verify (see [1/5])
     check_strong "$outdir/$name.o" "$name"
 done
 
-echo "[4/4] template manifest (so clients can instantiate new specializations)"
+echo "[4/5] template manifest (so clients can instantiate new specializations)"
 # An archive carries only the specializations its own TUs demanded at build
 # time. Without the template sources, a client that spells a NEW one
 # (`NPArray<MyType *>`) gets an empty weak stub from codegen: it links, and
@@ -222,4 +222,66 @@ manifest="$outdir/libjetifoundation.templates"
 } > "$manifest"
 echo "  $manifest ($((${#tmpl_lines[@]})) templates)"
 
+echo "[5/5] shared library (dynamic linking: .dylib / .so / .dll)"
+# The shared library bundles the RUNTIME as well. That is what lets a client
+# link ~1/4 the size: with the runtime and every class inside the library, the
+# client keeps only its own translation unit. It also means a client that links
+# this library must NOT compile the bundled runtime.c — two copies of the
+# exception state / autorelease-pool head / jeti_argc would silently diverge.
+# jetic handles that side: it skips runtime.c exactly when it links the shared
+# Foundation (see `find_libjetifoundation` / the link step in main.rs).
+#
+# Failure here is NOT fatal: the static archive is already complete and is the
+# fallback, so a platform without a usable shared-lib or Blocks runtime still
+# gets a working Foundation.
+#
+# OFF BY DEFAULT, and jetic does not link the result. Linking a client against a
+# shared Foundation was measured to break KVC-driven code (NPPredicate filtering
+# returns 0 matches, even for pure Foundation objects): a declaration-only
+# client emits the non-owned classes' NPClass metadata as zeroed tentative
+# definitions with a NULL `.kvc_entries`, which statically lose the weak merge to
+# the archive's strong tables but dynamically are what the client's own objects
+# point at. Enabling this needs a metadata-interposition design first — see the
+# KNOWN ISSUE note on `foundation_shared_name` in crates/jetic/src/main.rs.
+# Set FOUNDATION_SHARED=1 to build the artifact for that work.
+if [[ "${FOUNDATION_SHARED:-0}" != "1" ]]; then
+    # Remove any shared library left by an earlier FOUNDATION_SHARED=1 run: a
+    # linker resolves `-ljetifoundation` in favour of the shared library when
+    # one sits in the search directory, so a stale artifact would silently drag
+    # clients onto the prototyped (KVC-broken) path.
+    rm -f "$outdir"/libjetifoundation.dylib "$outdir"/libjetifoundation.so \
+          "$outdir"/libjetifoundation.dll "$outdir"/runtime.o
+    echo "  (skipped: set FOUNDATION_SHARED=1 to build — see the KNOWN ISSUE in main.rs)"
+fi
+shared_lib=""
+shared_flags=()
+case "$(uname -s)" in
+    Darwin)  shared_lib="$outdir/libjetifoundation.dylib"
+             shared_flags=(-dynamiclib -install_name "@rpath/libjetifoundation.dylib") ;;
+    Linux)   shared_lib="$outdir/libjetifoundation.so"
+             shared_flags=(-shared -Wl,-soname,libjetifoundation.so) ;;
+    MINGW*|MSYS*|CYGWIN*|Windows*) shared_lib="$outdir/libjetifoundation.dll"
+             shared_flags=(-shared) ;;
+    *)       shared_lib="" ;;
+esac
+
+if [[ "${FOUNDATION_SHARED:-0}" == "1" && -n "$shared_lib" ]]; then
+    runtime_o="$outdir/runtime.o"
+    clang -c -w $cflags include/jeti/runtime.c -o "$runtime_o" -I include
+    rm -f "$shared_lib"
+    if clang "${shared_flags[@]}" -o "$shared_lib" "${objs[@]}" "$runtime_o" 2>/dev/null; then
+        echo "  $shared_lib ($(du -h "$shared_lib" | cut -f1))"
+    # Blocks need an explicit runtime on ELF (Darwin gets it from libSystem).
+    elif [[ "$(uname -s)" == "Linux" ]] \
+        && clang "${shared_flags[@]}" -o "$shared_lib" "${objs[@]}" "$runtime_o" -lBlocksRuntime 2>/dev/null; then
+        echo "  $shared_lib (+libBlocksRuntime, $(du -h "$shared_lib" | cut -f1))"
+    else
+        rm -f "$shared_lib"
+        echo "  (skipped: shared-library link failed — clients fall back to the static archive)" >&2
+    fi
+fi
+
 echo "done: $lib ($(du -h "$lib" | cut -f1))"
+if [[ -f "$shared_lib" ]]; then
+    echo "      $shared_lib ($(du -h "$shared_lib" | cut -f1)) — preferred by jetic when present"
+fi

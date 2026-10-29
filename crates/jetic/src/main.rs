@@ -417,6 +417,38 @@ fn find_libjeti(custom_libs: &[String]) -> Option<String> {
     None
 }
 
+/// The shared-Foundation file name for this platform, if `dir` holds one.
+///
+/// NOT consulted by the default link path — see the KNOWN ISSUE note below.
+/// The helper stays because the build script can produce the artifact and the
+/// investigation is expected to resume.
+///
+/// KNOWN ISSUE (measured, 2026-10): linking a client against a shared
+/// Foundation gives correct results for ordinary dispatch but breaks the
+/// KVC-driven paths — `NPPredicate` filtering returns 0 matches even for pure
+/// Foundation objects (`@[ @1, @2, @3 ]` filtered by `intValue > 1`). Cause: a
+/// declaration-only client emits the non-owned classes' `NPClass` metadata as
+/// ZEROED tentative definitions (their `.kvc_entries` is deliberately NULL —
+/// see the "KVC table pointer — owner static metadata only" note in codegen).
+/// Statically the archive's STRONG definition wins the weak merge, so the
+/// client's objects carry the real tables; dynamically the client's own
+/// definition is what its own objects point at, so the library's
+/// `jeti_kvc_value` walk finds no table and returns NULL. Enabling this
+/// therefore needs a metadata-interposition design first, not just a link
+/// flag.
+#[allow(dead_code)]
+fn foundation_shared_name(dir: &str) -> Option<&'static str> {
+    let names: &[&'static str] = if cfg!(target_os = "macos") {
+        &["libjetifoundation.dylib"]
+    } else if cfg!(target_os = "windows") {
+        &["libjetifoundation.dll", "jetifoundation.dll"]
+    } else {
+        &["libjetifoundation.so"]
+    };
+    let d = std::path::Path::new(dir);
+    names.iter().copied().find(|n| d.join(n).is_file())
+}
+
 /// Find a precompiled Foundation library, same policy as `find_libjeti`:
 /// next to the binary first, then known install/dev locations, then the
 /// user's `-L` dirs. Returns the DIRECTORY that holds `libjetifoundation.a`.
@@ -828,7 +860,7 @@ fn foundation_impl_scan(
     false
 }
 
-fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: &[String], lib_dirs: &[String], libs: &[String], asm_files: &[String], extra_c_files: &[String], extra_objects: &[String], frameworks: &[String], arch: Option<&str>, verbose: bool, no_libc: bool, nostdinc: bool, shared: bool, foundation_impl_inlined: bool, debug_symbols: bool) {
+fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: &[String], lib_dirs: &[String], libs: &[String], asm_files: &[String], extra_c_files: &[String], extra_objects: &[String], frameworks: &[String], arch: Option<&str>, verbose: bool, no_libc: bool, nostdinc: bool, shared: bool, foundation_impl_inlined: bool, debug_symbols: bool, opt_level: Option<&str>, dead_strip: bool, eh_checked: bool) {
     // Compiler may be multi-word (e.g. `zig cc`): program + leading args.
     let program = cc.first().map(|s| s.as_str()).unwrap_or("clang");
     let cc_extra: Vec<String> = cc.get(1..).unwrap_or(&[]).to_vec();
@@ -893,14 +925,36 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
         clang_args.push("-arch".to_string());
         clang_args.push(a.to_string());
     }
-    // Debug symbols (plan 阶段 3): `-g -O0` so DWARF (via the `#line`
-    // directives when enabled) points back at the .jeti/.hje. Kept separate from
-    // any future user-facing -O: -g never implies an optimization level on
-    // its own; this preset couples them for the debug workflow.
+    // Optimization level. Left to the C compiler, the default is -O0, which
+    // made every build ~2x slower than it needs to be: measured on
+    // tests/jeti_foundation_bfs_benchmark, -O0 → -O2 is 1.48x on the
+    // Foundation-container path and 2.08x on the raw C path, and -O2 → -O3
+    // another 14–17% — at an unchanged binary size (the class metadata, not the
+    // code, dominates the file). -O3 is also what the precompiled Foundation
+    // library is built with (`FOUNDATION_CFLAGS` defaults to -O3), so the client
+    // and the library now agree.
+    //
+    // Debug symbols (plan 阶段 3): `-g` keeps its historical `-g -O0` preset so
+    // DWARF (via the `#line` directives when enabled) points back at a
+    // debuggable .jeti/.hje frame. An explicit -O<level> overrides either
+    // default — clang takes the last -O on the line, and this is that last one.
     if debug_symbols {
         clang_args.push("-g".to_string());
-        clang_args.push("-O0".to_string());
     }
+    clang_args.push(match opt_level {
+        Some(level) => level.to_string(),
+        None if debug_symbols => "-O0".to_string(),
+        // The sjlj (legacy) backend keeps its historical -O0 default: its
+        // generated `setjmp`/`longjmp` state machine leaves locals that survive
+        // a longjmp non-volatile, so the optimizer caches them in registers and
+        // the handler reads stale values. Measured on tests/full_syntax_test.jeti
+        // §4.8/4.9/4.10 (bare-metal and hosted alike): -O0 gives the documented
+        // 211/11/11, while -O2/-O3 give 210/10/10 — silently wrong, no
+        // diagnostic. `checked` (the default backend) has no such coupling and
+        // keeps -O3. An explicit -O<level> still wins here.
+        None if !eh_checked => "-O0".to_string(),
+        None => "-O3".to_string(),
+    });
     // Additional translation units (multi-input mode): plain file inputs on
     // the driver line — the C compiler compiles each TU and links everything
     // in the same invocation (same shape as the bundled runtime.c below).
@@ -979,6 +1033,30 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
         // needs an explicit -lm. The linker drops it when unused (--as-needed).
         clang_args.push("-lm".to_string());
     }
+    // Dead stripping: drop functions/data the program never reaches. Jeti's
+    // link model pulls WHOLE archive members — a declaration-only client
+    // references every class it sees, and each Foundation member's KVC wrapper
+    // table references more classes — so a Foundation hello-world carries most
+    // of Foundation. Measured: macOS `-dead_strip` 880 KB → 674 KB (−23%);
+    // Linux `--gc-sections` 5.13 MB → 4.18 MB (−19%).
+    //
+    // Skipped for freestanding (the bare-metal user owns the link script and
+    // may rely on sections `--gc-sections` would collect) and for shared-library
+    // output (the host may call symbols this TU never references). `-fno-dead-strip`
+    // opts out everywhere.
+    if !no_libc && !shared && dead_strip {
+        if std::env::consts::OS == "macos" {
+            // ld64 collects at symbol/section granularity; per-function sections
+            // add nothing (measured identical output).
+            clang_args.push("-Wl,-dead_strip".to_string());
+        } else {
+            // GNU ld / lld / mingw: --gc-sections only sees whole sections, so
+            // the compiler must emit one section per function/variable first.
+            clang_args.push("-ffunction-sections".to_string());
+            clang_args.push("-fdata-sections".to_string());
+            clang_args.push("-Wl,--gc-sections".to_string());
+        }
+    }
     // Auto-link the precompiled Foundation library when one is findable —
     // same policy as libjeti: found → its real tables win the link; not
     // found → silent no-op (a TU that imports Foundation.jeti inlines the
@@ -991,6 +1069,11 @@ fn compile_to_binary(cc: &[String], c_code: &str, bin_path: &str, include_dirs: 
     // Auto-link is for declaration-only clients (`Foundation.hje`) — the
     // ObjC model. An explicit `-l jetifoundation` suppresses the auto one
     // (no duplicate).
+    //
+    // Static archive only, deliberately: linking the shared Foundation is
+    // prototyped but broken for KVC-driven code — see the KNOWN ISSUE note on
+    // `foundation_shared_name` above. Do not switch this to the shared library
+    // without fixing the metadata interposition first.
     if !no_libc && !shared && !foundation_impl_inlined && !libs.iter().any(|l| l == "jetifoundation") {
         if let Some(fdir) = find_libjetifoundation(lib_dirs) {
             if verbose { eprintln!("[jetic]   auto-linking Foundation from {}", fdir); }
@@ -1169,6 +1252,17 @@ fn norm_flag(s: &str) -> &str {
 /// Split `-flag=value` / `--flag=value` into a normalized flag and its inline
 /// value. Without `=`, returns (normalized_flag, None) so callers fall back to
 /// consuming the next argument. Currently applied to `-backend=<mode>`.
+/// Optimization level accepted as a pure passthrough to the C compiler:
+/// `-O`, `-O0`, `-O1`, `-O2`, `-O3`, `-Og`, `-Os`, `-Oz`, `-Ofast`.
+///
+/// jetic itself has no optimization level — it emits the same C either way — so
+/// without the flag nothing is forwarded and the C compiler's own default
+/// applies, exactly as before. Accepting the flag only stops these spellings
+/// from being mistaken for input file names.
+fn is_opt_flag(a: &str) -> bool {
+    matches!(a, "-O" | "-O0" | "-O1" | "-O2" | "-O3" | "-Og" | "-Os" | "-Oz" | "-Ofast")
+}
+
 fn split_flag_value(arg: &str) -> (&str, Option<&str>) {
     match arg.find('=') {
         Some(eq) => {
@@ -1285,6 +1379,10 @@ fn main() {
         println!("  -g                                   Emit debug symbols (-g -O0 to the C");
         println!("                                     compiler); with -line-directives, LLDB/");
         println!("                                     GDB show .jeti/.hje file and line numbers");
+        println!("  -O0|-O1|-O2|-O3|-Os|-Oz            Forwarded verbatim to the C compiler.");
+        println!("                                     Default: -O3. A -g build keeps its");
+        println!("                                     -g -O0 preset; an explicit level here");
+        println!("                                     overrides either default");
         println!("  -line-directives                     Emit #line <file> in generated C so");
         println!("                                     clang diagnostics point back at");
         println!("                                     the .jeti/.hje source (default: on)");
@@ -1294,6 +1392,11 @@ fn main() {
         println!("  -np-map                              Emit a versioned .jeti.map sidecar next");
         println!("                                     to the .jeti source, mapping generated");
         println!("                                     C lines back to .jeti/.hje sources");
+        println!("  -fno-dead-strip                      Keep unreferenced code/data at link");
+        println!("                                     time. Dead stripping is ON by default");
+        println!("                                     (-Wl,-dead_strip on macOS, --gc-sections");
+        println!("                                     elsewhere); freestanding and shared-library");
+        println!("                                     links skip it either way");
         println!("  -fno-jeti-arc                        Disable ARC (MRC)");
         println!("  -ffreestanding                       Bare-metal/freestanding output");
         println!("                                     (no libc headers, no TLS, no bundled");
@@ -1349,10 +1452,21 @@ fn main() {
     let mut no_checker = false;  // ARC mode by default
     let mut no_libc = false;     // bare-metal / freestanding mode
     let mut debug_symbols = false; // -g: emit DWARF via -g -O0 (plan 阶段 3)
+    // -O<level>: a pure passthrough to the C compiler. jetic emits the same C
+    // whatever the level, so leaving it unset keeps today's behaviour exactly
+    // (the C compiler's own default applies).
+    let mut opt_level: Option<String> = None;
     let mut nostdinc = false;    // strip system include paths (orthogonal flag)
     let mut no_comments = false; // readability comments in generated C (on by default)
     let mut jeti_map = false;      // -np-map: emit a .jeti.map sidecar source map
     let mut shared = false;      // dynamic library output (-shared/-dynamiclib)
+    // Drop unreferenced functions/data at link time. ON by default: Jeti's
+    // linking model pulls whole archive members (a declaration-only client
+    // references every Foundation class it sees), so plenty of the linked
+    // Foundation is never reached — measured on a Foundation hello-world,
+    // `-Wl,-dead_strip` alone takes 880 KB → 674 KB (−23%). `-fno-dead-strip`
+    // opts out (freestanding and shared-library links skip it regardless).
+    let mut dead_strip = true;
     let mut werror = false;
     let mut verbose = false;
     let mut program_args = Vec::new();
@@ -1412,10 +1526,16 @@ fn main() {
                 no_libc = true;
             } else if nj == "-g" {
                 debug_symbols = true;
+            } else if is_opt_flag(nj) {
+                opt_level = Some(nj.to_string());
             } else if nj == "-nostdinc" {
                 nostdinc = true;
             } else if nj == "-no-comments" {
                 no_comments = true;
+            } else if nj == "-fdead-strip" {
+                dead_strip = true;
+            } else if nj == "-fno-dead-strip" {
+                dead_strip = false;
             } else if nj == "-Werror" {
                 werror = true;
             } else if nj == "-arch" && j + 1 < pos {
@@ -1499,11 +1619,20 @@ fn main() {
         } else if normalized == "-g" {
             debug_symbols = true;
             i += 1;
+        } else if is_opt_flag(normalized) {
+            opt_level = Some(normalized.to_string());
+            i += 1;
         } else if normalized == "-nostdinc" {
             nostdinc = true;
             i += 1;
         } else if normalized == "-no-comments" {
             no_comments = true;
+            i += 1;
+        } else if normalized == "-fdead-strip" {
+            dead_strip = true;
+            i += 1;
+        } else if normalized == "-fno-dead-strip" {
+            dead_strip = false;
             i += 1;
         } else if normalized == "-shared" {
             shared = true;
@@ -2033,7 +2162,7 @@ fn main() {
                 p.to_string_lossy().to_string()
             });
 
-            compile_to_binary(&cc, &c_code, &bin_path, &include_dirs, &lib_dirs, &libs, &asm_files, &extra_c_files, &extra_objects, &frameworks, arch.as_deref(), verbose, no_libc, nostdinc, false, foundation_impl_inlined, debug_symbols);
+            compile_to_binary(&cc, &c_code, &bin_path, &include_dirs, &lib_dirs, &libs, &asm_files, &extra_c_files, &extra_objects, &frameworks, arch.as_deref(), verbose, no_libc, nostdinc, false, foundation_impl_inlined, debug_symbols, opt_level.as_deref(), dead_strip, eh_checked);
 
             for t in &extra_c_files {
                 let _ = fs::remove_file(t);
@@ -2084,7 +2213,7 @@ fn main() {
                 || bin_path.ends_with(".so")
                 || bin_path.ends_with(".dll");
 
-            compile_to_binary(&cc, &c_code, &bin_path, &include_dirs, &lib_dirs, &libs, &asm_files, &extra_c_files, &extra_objects, &frameworks, arch.as_deref(), verbose, no_libc, nostdinc, shared, foundation_impl_inlined, debug_symbols);
+            compile_to_binary(&cc, &c_code, &bin_path, &include_dirs, &lib_dirs, &libs, &asm_files, &extra_c_files, &extra_objects, &frameworks, arch.as_deref(), verbose, no_libc, nostdinc, shared, foundation_impl_inlined, debug_symbols, opt_level.as_deref(), dead_strip, eh_checked);
 
             for t in &extra_c_files {
                 let _ = fs::remove_file(t);
