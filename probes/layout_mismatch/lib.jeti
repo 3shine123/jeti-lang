@@ -1,0 +1,9 @@
+#import "shared_b.hje"
+#import <Foundation/Foundation.hje>
+
+/* Owner TU: it holds Thing's @implementation, so Thing's metadata is emitted
+   strong here. Importing the umbrella makes every Foundation selector public,
+   so this TU's signature segment is the whole manifest. */
+@implementation Thing
+- (int)count { return 7; }
+@end

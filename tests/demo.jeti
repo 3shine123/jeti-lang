@@ -1,6 +1,9 @@
 #include <stdio.h>
+#import <Foundation/Foundation.hje>
 
 int main(void) {
-    printf("Hello World");
+    @autoreleasepool {
+        NPLog(@"Hello, Jeti!");
+    }
     return 0;
 }

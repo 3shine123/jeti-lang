@@ -1,0 +1,48 @@
+// min_cstr_property_crash.jeti — 崩溃最小复现（**预期崩溃，不要当回归测试跑**）
+//
+// 现象：一个类只要有 `const char *` 类型的 @property，把字符串字面量赋给它，
+// 然后在作用域结束时释放该对象 → 确定性 Bus error（exit 138），崩溃点在
+// `jeti_release`，EXC_BAD_ACCESS 的地址落在 __TEXT 段。
+//
+//   jetic min_cstr_property_crash.jeti -o /tmp/mc && /tmp/mc
+//   → Bus error: 10   （5/5 次确定性复现）
+//
+// 机理（已排除 setter）：
+//   * 生成的 setter 是清白的，只有一句赋值：
+//       void P_setS_(NPObject *self, SEL _cmd, const char *value) {
+//           ((struct P *)self)->_s = value;
+//       }
+//   * 但对象释放路径把 `_s`（一个 C 字符串，住在 __TEXT/__cstring）当成对象
+//     去 release，于是 jeti_release 对 text 段地址做原子递减 → 崩。
+//   * 反证：只声明属性、**不赋值**时不崩（`_s` 仍为 0，release(NULL) 安全）；
+//     把 `double`/`int` 放在 `const char *` 之前也不崩（见下方矩阵）。
+//
+// 组合矩阵（同一形状，改 ivar 类型与赋值）：
+//   int + NPObject*                → OK
+//   double + NPObject*             → OK
+//   const char* + NPObject* 且赋值  → **崩溃**   ← 最小触发集
+//   double + const char* + NPObject*（不赋 s）→ OK
+//   int + double + NPObject*       → OK
+//
+// 来源：批次 C（probes/stress_jetic/stress_class_extreme.jeti）的"属性各类型"
+// 段；用累积前缀二分定位（K7 通过 / K8 崩溃），再逐 ivar 类型缩小到本例。
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+@interface P : NPObject { const char *_s; }
+@property const char *s;
+@end
+
+@implementation P
+@synthesize s = _s;
+@end
+
+int main(void) {
+    @autoreleasepool {
+        P *p = [[P alloc] init];
+        p.s = "x";                  // ← 这一行赋值即可触发（字面量住在 __TEXT）
+        printf("s=%s\n", p.s);
+    }
+    return 0;
+}

@@ -54,5 +54,7 @@ mimo.sh
 /target/
 editors/zed/target/
 target/probes/p2_threads/*.c
+# Probe executables: the probe SOURCES stay tracked, their built binaries do not.
+probes/layout_mismatch/probe
 editors/zed/grammar/
 editors/zed/grammars/jeti/

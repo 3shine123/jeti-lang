@@ -1,0 +1,8 @@
+/* Probe, client side: `-count` is declared here AND happens to be a selector
+   that already lives in the precompiled Foundation's `.slots` manifest. The
+   client TU does NOT import the Foundation umbrella, so its public set is just
+   {count} — its signature segment is therefore a strict subset of the owner's,
+   which is a genuine cross-TU layout disagreement. */
+@interface Thing
+- (int)count;
+@end

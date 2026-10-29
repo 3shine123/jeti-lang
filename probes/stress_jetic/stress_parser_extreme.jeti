@@ -1,0 +1,336 @@
+// stress_parser_extreme.jeti — 批次 A：parser / 预处理 极端边界
+//
+// 目标不是"能不能编译"，而是**编译出来的语义有没有被歪曲**：每一项都自检，
+// 输出 checks/failed，failed 必须为 0。写法刻意冗长、嵌套、反直觉，但全部是
+// 合法 C（Jeti 是 C 超集，这条底线不能被打破）。
+//
+// 跑法：jetic stress_parser_extreme.jeti -o /tmp/a -O2 && /tmp/a
+
+#include <stdio.h>
+#include <stddef.h>
+#include <string.h>
+
+static int g_checks = 0;
+static int g_failed = 0;
+
+#define CHECK(name, got, want)                                              \
+    do {                                                                    \
+        g_checks = g_checks + 1;                                            \
+        long long _g = (long long)(got);                                    \
+        long long _w = (long long)(want);                                   \
+        if (_g != _w) {                                                     \
+            g_failed = g_failed + 1;                                        \
+            printf("FAIL %-38s got=%lld want=%lld\n", name, _g, _w);        \
+        }                                                                   \
+    } while (0)
+
+// ── 1. 宏：嵌套 / 变参 / 字符串化 / 连接 / 条件编译 ─────────────────────────
+#define ID(x) x
+#define TWICE(x) ((x) + (x))
+#define NESTED(x) TWICE(TWICE(ID(x)))
+#define STR(x) #x
+#define CAT(a, b) a##b
+#define LOGF(fmt, ...) printf(fmt, __VA_ARGS__)
+#define SQUARE(x) ((x) * (x))
+#define MAX2(a, b) ((a) > (b) ? (a) : (b))
+#define MAX4(a, b, c, d) MAX2(MAX2(a, b), MAX2(c, d))
+
+#define LEVEL 3
+#if LEVEL > 5
+#define TIER "high"   /* NOTE: jetic 不认 `#  define`（有空格），见 repro */
+#elif LEVEL > 2
+#define TIER "mid"
+#else
+#define TIER "low"
+#endif
+
+#if defined(LEVEL) && !defined(NOT_DEFINED_AT_ALL)
+#define GUARD_OK 1
+#else
+#define GUARD_OK 0
+#endif
+
+// ── 2. 复杂声明符：函数指针 / 返回函数指针 / 指针数组 / 数组指针 ─────────────
+typedef int (*binop)(int, int);
+typedef binop (*binop_factory)(int);
+
+static int add(int a, int b) { return a + b; }
+static int sub(int a, int b) { return a - b; }
+static binop pick(int which) { return which ? sub : add; }
+static binop_factory factory_of(int unused) { (void)unused; return pick; }
+
+// NOTE: `int (*row)[4]`（指向数组的指针参数）被 checker 拒绝，见 repro
+// b2_ptr_to_array.jeti。这里改用已支持的退化写法。
+static int sum_row(int *row) {
+    int s = 0;
+    for (int i = 0; i < 4; i++) { s = s + row[i]; }
+    return s;
+}
+
+// NOTE: 返回函数指针的函数声明符（`int (*f(int))(int,int)` 或
+// `binop_factory f(int)`）目前**解析/检查**都有问题，见 repro r1/v3/v1。
+// 这里只用已确认可用的形状（typedef 变量 + 调用）。
+
+// ── 3. 类型大杂烩：嵌套 struct / 匿名 struct / union / 位域 / 数组 ──────────
+union RawWord { int i; unsigned char bytes[4]; };
+struct Inner { int a; int b; };
+struct Outer {
+    struct Inner in;
+    struct { int x; int y; } anon;         // 匿名结构体成员（C11）
+    // NOTE: 内联 union 成员里再放数组会让 codegen 把外层成员名塞进内层
+    // 声明符（生成 `unsigned char bytes u[4];`），见 repro
+    // b1_union_member.jeti；类型提到文件级即可绕开。
+    union RawWord u;
+    unsigned flags : 3;                    // 位域
+    unsigned rest  : 5;
+    int matrix[2][3];
+};
+
+enum Color { RED = 1, GREEN = 2, BLUE = 4, ALL = RED | GREEN | BLUE };
+
+typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+
+// ── 4. 指定初始化：乱序 + 嵌套 + 数组下标 ──────────────────────────────────
+static struct Outer g_designated = {
+    .rest = 7,
+    .u.i = 0x01020304,
+    .matrix = { {1, 2, 3}, {4, 5, 6} },
+    .in = { .b = 22, .a = 11 },
+    .anon = { .y = 9, .x = 8 },
+    .flags = 5,
+};
+
+static int g_sparse[8] = { [5] = 50, [0] = 1, [7] = 70 };
+
+// ── 5. 语句表达式 / 逗号运算符 / 嵌套三目 ──────────────────────────────────
+static int statement_expr(int x) {
+    int r = ({ int t = x * 2; t + 1; });    // GNU 语句表达式
+    return r;
+}
+
+static int comma_chain(void) {
+    int a = 0;
+    int b = (a = 1, a = a + 1, a = a * 10, a);
+    return b;
+}
+
+static int ternary_tower(int x) {
+    return x < 0 ? -1
+         : x == 0 ? 0
+         : x < 10 ? 1
+         : x < 100 ? 2
+         : x < 1000 ? 3
+         : 4;
+}
+
+// ── 6. 控制流极端：goto / 标签 / switch 贯穿 / do-while / 深嵌套循环 ────────
+static int goto_machine(int n) {
+    int acc = 0;
+    int i = 0;
+again:
+    if (i >= n) { goto done; }
+    if (i % 3 == 0) { goto skip; }
+    acc = acc + i;
+skip:
+    i = i + 1;
+    goto again;
+done:
+    return acc;
+}
+
+static int switch_fallthrough(int x) {
+    int r = 0;
+    switch (x) {
+        case 0:
+            r = r + 1;
+            /* fallthrough */
+        case 1:
+            r = r + 10;
+            /* fallthrough */
+        case 2:
+            r = r + 100;
+            break;
+        default:
+            r = -1;
+    }
+    return r;
+}
+
+static int deep_loops(void) {
+    int n = 0;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            for (int k = 0; k < 3; k++) {
+                do {
+                    n = n + 1;
+                } while (0);
+            }
+        }
+    }
+    return n;
+}
+
+// ── 7. 深嵌套括号 / 长表达式链 / 混合优先级 ────────────────────────────────
+static int deep_parens(void) {
+    return ((((((((((1 + 2)))))))))) * ((((((3 + 4)))))) - ((((5))));
+}
+
+static int precedence_gauntlet(void) {
+    // 1 + 2*3 - 4/2 % 3 << 1 & 0xF | 1 ^ 2 > 0 ? 10 : 20
+    return 1 + 2 * 3 - 4 / 2 % 3 << 1 & 0xF | 1 ^ (2 > 0 ? 10 : 20);
+}
+
+static int long_chain(int a, int b, int c, int d, int e) {
+    return a + b * c - d / (e + 1) + (a << 2) - (b >> 1) + (c & d) | (e ^ a);
+}
+
+// ── 8. 字符串与转义 ────────────────────────────────────────────────────────
+static const char *escapes(void) {
+    return "tab\there\nnl\"q\"bs\\end" "concat" "\x41" "\101";
+}
+
+// ── 9. 复合字面量 / 结构体作为实参 ─────────────────────────────────────────
+static int take_inner(struct Inner v) { return v.a * 100 + v.b; }
+static int use_compound(void) {
+    return take_inner((struct Inner){ .a = 3, .b = 4 })
+         + take_inner((struct Inner){ 5, 6 });
+}
+
+// ── 10. 深层调用链 ─────────────────────────────────────────────────────────
+static int f1(int x) { return x + 1; }
+static int f2(int x) { return f1(f1(x)); }
+static int f3(int x) { return f2(f2(x)); }
+static int f4(int x) { return f3(f3(x)); }
+static int f5(int x) { return f4(f4(x)); }
+
+// ── 11. 作用域遮蔽（阴阳作用域） ───────────────────────────────────────────
+static int shadowing(void) {
+    int v = 1;
+    {
+        int v = 2;
+        {
+            int v = 3;
+            if (v != 3) { return -1; }
+        }
+        if (v != 2) { return -2; }
+    }
+    return v;
+}
+
+// ── 12. 超长标识符与同名不同作用域 ─────────────────────────────────────────
+static int this_is_an_extremely_long_identifier_used_to_check_the_lexer_boundary_0001 = 4242;
+static int this_is_an_extremely_long_identifier_used_to_check_the_lexer_boundary_0002(void) {
+    int this_is_an_extremely_long_identifier_used_to_check_the_lexer_boundary_0001 = 7;
+    return this_is_an_extremely_long_identifier_used_to_check_the_lexer_boundary_0001;
+}
+
+// ── 13. 注释插在奇怪位置 ───────────────────────────────────────────────────
+static int comments_everywhere(void) {
+    int /* 类型与名字之间 */ a = /* 初始化前 */ 5;
+    a = a /* 表达式中间 */ + 1;
+    return a; // 行尾
+    /* 块注释
+       跨多行 */
+}
+
+// ── 14. 链表 + 递归 + 指针算术 ─────────────────────────────────────────────
+static int list_sum(const Node *head) {
+    const Node *p = head;
+    int s = 0;
+    while (p != 0) { s = s + p->value; p = p->next; }
+    return s;
+}
+
+int main(void) {
+    printf("=== batch A: parser / preprocessor extremes ===\n");
+
+    // 宏
+    CHECK("macro.twice", TWICE(5), 10);
+    CHECK("macro.nested", NESTED(3), 12);
+    CHECK("macro.square", SQUARE(7), 49);
+    CHECK("macro.max4", MAX4(3, 9, 4, 8), 9);
+    CHECK("macro.stringize", (int)sizeof(STR(abc)), 4);
+    // NOTE: `#`/`##` only act inside a macro BODY; `xy##z` in ordinary
+    // source is not a paste (true in C as well). Paste via CAT instead.
+    CHECK("macro.paste", ({ int CAT(pasted, _value) = 5; pasted_value; }), 5);
+    CHECK("macro.tier", strcmp(TIER, "mid") == 0, 1);
+    CHECK("macro.guard", GUARD_OK, 1);
+    LOGF("      [LOGF] %d %s %.1f\n", 1, "two", 3.0);
+
+    // 复杂声明符
+    binop b = add;
+    CHECK("decl.fnptr", b(3, 4), 7);
+    binop_factory f = factory_of(0);
+    // NOTE: 直接调用"调用的返回值"（`f(1)(10, 4)`）会被**静默丢弃内层调用**，
+    // 生成 `(10, 4)` → 得到 4 而非 6，且无任何诊断（repro q1_call_of_call）。
+    binop picked = f(1);
+    CHECK("decl.fnptr.ret", picked(10, 4), 6);
+    binop_factory g2 = factory_of(0);
+    binop picked2 = g2(1);
+    CHECK("decl.fnptr.meta", picked2(8, 3), 5);
+    binop table[2] = { add, sub };
+    // NOTE: 下标表达式直接当调用目标（`table[0](…)`）解析失败，见 repro
+    // p_subscript_call.jeti；先取到变量再调用即可。
+    binop t0 = table[0];
+    binop t1 = table[1];
+    CHECK("decl.fnptr.array", t0(2, 3) + t1(9, 4), 10);
+    int row[4] = { 1, 2, 3, 4 };
+    CHECK("decl.ptr.to.array", sum_row(row), 10);
+
+    // 结构体 / union / 位域 / 指定初始化
+    CHECK("struct.nested", g_designated.in.a * 10 + g_designated.in.b, 132);
+    CHECK("struct.anon", g_designated.anon.x * 10 + g_designated.anon.y, 89);
+    CHECK("struct.bitfield", g_designated.flags, 5);
+    CHECK("struct.bitfield.rest", g_designated.rest, 7);
+    CHECK("struct.matrix", g_designated.matrix[1][2], 6);
+    CHECK("array.sparse", g_sparse[0] + g_sparse[5] + g_sparse[7], 121);
+    CHECK("union.first.byte", g_designated.u.bytes[0], 4);          // 小端
+    CHECK("enum.or", ALL, 7);
+    CHECK("sizeof.struct", (int)sizeof(struct Inner), (int)(2 * sizeof(int)));
+
+    // 语句表达式 / 逗号 / 三目
+    CHECK("stmt.expr", statement_expr(10), 21);
+    CHECK("comma.chain", comma_chain(), 20);
+    CHECK("ternary.tower", ternary_tower(0) * 100 + ternary_tower(9) * 10 + ternary_tower(999), 13);
+    CHECK("ternary.neg", ternary_tower(-5), -1);
+
+    // 控制流
+    CHECK("goto.machine", goto_machine(10), 1 + 2 + 4 + 5 + 7 + 8);
+    CHECK("switch.fallthrough.0", switch_fallthrough(0), 111);
+    CHECK("switch.fallthrough.1", switch_fallthrough(1), 110);
+    CHECK("switch.fallthrough.2", switch_fallthrough(2), 100);
+    CHECK("switch.default", switch_fallthrough(9), -1);
+    CHECK("loops.deep", deep_loops(), 27);
+
+    // 表达式
+    CHECK("parens.deep", deep_parens(), 3 * 7 - 5);
+    CHECK("precedence", precedence_gauntlet(), 1 + 2 * 3 - 4 / 2 % 3 << 1 & 0xF | 1 ^ 10);
+    CHECK("chain.long", long_chain(1, 2, 3, 4, 5),
+          1 + 2 * 3 - 4 / (5 + 1) + (1 << 2) - (2 >> 1) + (3 & 4) | (5 ^ 1));
+
+    // 字符串
+    CHECK("string.escapes", (int)strlen(escapes()), 28);   // 20 + 6 + 1 + 1
+    CHECK("string.first", escapes()[0], 't');
+
+    // 复合字面量
+    CHECK("compound.literal", use_compound(), 304 + 506);
+
+    // 调用链 / 遮蔽 / 长标识符 / 注释
+    CHECK("calls.deep", f5(0), 16);
+    CHECK("scope.shadow", shadowing(), 1);
+    CHECK("long.ident", this_is_an_extremely_long_identifier_used_to_check_the_lexer_boundary_0001, 4242);
+    CHECK("long.ident.local", this_is_an_extremely_long_identifier_used_to_check_the_lexer_boundary_0002(), 7);
+    CHECK("comments", comments_everywhere(), 6);
+
+    // 链表
+    Node n3 = { 3, 0 };
+    Node n2 = { 2, &n3 };
+    Node n1 = { 1, &n2 };
+    CHECK("list.sum", list_sum(&n1), 6);
+
+    printf("checks=%d failed=%d\n", g_checks, g_failed);
+    return g_failed == 0 ? 0 : 1;
+}

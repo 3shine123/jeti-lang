@@ -1,0 +1,34 @@
+// Golden: `async ^` block captures enclosing locals — docs/plans/async_soft_keywords_plan §5.
+// An async block is lifted into a top-level thunk, so it has no closure
+// environment: every enclosing local its body reads is passed as an extra thunk
+// parameter and lands in the task frame (`__jeti_f->name` in the entry), rather
+// than being referenced raw (which did not compile at all). A `__block` local is
+// refused with a diagnostic instead of silently capturing a copy. Expected:
+//   sum=41 captured=41
+//   len=8
+#import <Foundation/Foundation.hje>
+#import <stdio.h>
+
+@interface Svc : NPObject
+- (async int)add:(int)x;
+- (async int)lenOf:(NPString *)s;
+@end
+
+@implementation Svc
+- (async int)add:(int)x { return await x; }
+- (async int)lenOf:(NPString *)s { return (int)[s length]; }
+@end
+
+int main(void) {
+    int local = 41;
+    NPString *s = [NPString stringWithUTF8String:"captured"];
+    [NPTask blockOn:async ^ void {
+        // `svc` is the block's own local; `local` and `s` come from main.
+        Svc *svc = [[Svc alloc] init];
+        int r = await [svc add:local];
+        int n = await [svc lenOf:s];
+        printf("sum=%d captured=%d\n", r, local);
+        printf("len=%d\n", n);
+    }];
+    return 0;
+}

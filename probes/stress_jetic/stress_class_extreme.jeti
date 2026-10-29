@@ -1,0 +1,286 @@
+// stress_class_extreme.jeti — 批次 C：类体系极端
+//
+// 目标：多层继承 / [super] 跨级 / 协议 / 泛型 / 分类 / 多态 / 消息递归 /
+// blocks 捕获 self / 属性类型 / 异常跨方法边界 —— 每项自检，failed 必须为 0。
+//
+// 跑法：jetic stress_class_extreme.jeti -o /tmp/stress/C -O2 && /tmp/stress/C
+
+#import <Foundation/Foundation.hje>
+#include <stdio.h>
+
+static int g_checks = 0;
+static int g_failed = 0;
+
+#define CHECK(name, got, want)                                              \
+    do {                                                                    \
+        g_checks = g_checks + 1;                                            \
+        long long _g = (long long)(got);                                    \
+        long long _w = (long long)(want);                                   \
+        if (_g != _w) {                                                     \
+            g_failed = g_failed + 1;                                        \
+            printf("FAIL %-34s got=%lld want=%lld\n", name, _g, _w);        \
+        }                                                                   \
+    } while (0)
+
+// ═══ 1. 五层继承链，每层都有 ivar 与覆写 + [super] ═════════════════════════
+@interface L1 : NPObject { int _v1; }
+- (int)value;
+- (int)depth;
+- (int)sum;
+@end
+@implementation L1
+- (int)value { return _v1; }
+- (int)depth { return 1; }
+- (int)sum { return _v1; }
+@end
+
+@interface L2 : L1 { int _v2; }
+- (void)set2:(int)x;
+@end
+@implementation L2
+- (void)set2:(int)x { _v2 = x; }
+- (int)depth { return 2; }
+- (int)sum { return [super sum] + _v2; }
+@end
+
+@interface L3 : L2 { int _v3; }
+- (void)set3:(int)x;
+@end
+@implementation L3
+- (void)set3:(int)x { _v3 = x; }
+- (int)depth { return 3; }
+- (int)sum { return [super sum] + _v3; }
+@end
+
+@interface L4 : L3 { int _v4; }
+- (void)set4:(int)x;
+@end
+@implementation L4
+- (void)set4:(int)x { _v4 = x; }
+- (int)depth { return 4; }
+- (int)sum { return [super sum] + _v4; }
+@end
+
+@interface L5 : L4 { int _v5; }
+- (void)set5:(int)x;
+- (int)sum;
+@end
+@implementation L5
+- (void)set5:(int)x { _v5 = x; }
+- (int)depth { return 5; }
+- (int)sum { return [super sum] + _v5; }
+@end
+
+// ═══ 2. 协议：多方法 + 协议继承 ════════════════════════════════════════════
+@protocol Named
+- (const char *)name;
+@end
+
+@protocol Describable <Named>
+- (int)describe;
+- (int)weight;
+@end
+
+@interface Thing : NPObject <Describable> { int _w; }
+- (Thing *)initWithWeight:(int)w;
+- (const char *)name;
+- (int)describe;
+- (int)weight;
+@end
+@implementation Thing
+- (Thing *)initWithWeight:(int)w { _w = w; return self; }
+- (const char *)name { return "thing"; }
+- (int)describe { return 1; }
+- (int)weight { return _w; }
+@end
+
+// ═══ 3. 分类：加在子类上，并调用父类原有方法 ═══════════════════════════════
+@interface L5 (Extra)
+- (int)sumTimes:(int)n;
+- (int)depthSquared;
+@end
+@implementation L5 (Extra)
+- (int)sumTimes:(int)n { return [self sum] * n; }
+- (int)depthSquared { return [self depth] * [self depth]; }
+@end
+
+// ═══ 4. 泛型：值类型与指针类型参数 ═════════════════════════════════════════
+@interface Box<T> : NPObject { T _held; int _set; }
+- (void)put:(T)v;
+- (T)get;
+- (int)hasValue;
+@end
+@implementation Box
+- (void)put:(T)v { _held = v; _set = 1; }
+- (T)get { return _held; }
+- (int)hasValue { return _set; }
+@end
+
+// ═══ 5. 属性各种类型 ═══════════════════════════════════════════════════════
+@interface Props : NPObject {
+    int _i;
+    double _d;
+    const char *_s;
+    NPObject *_o;
+}
+@property int i;
+@property double d;
+@property const char *s;
+@property NPObject *o;
+@end
+@implementation Props
+@synthesize i = _i;
+@synthesize d = _d;
+@synthesize s = _s;
+@synthesize o = _o;
+@end
+
+// ═══ 6. 消息递归 + 多态（基类指针） ════════════════════════════════════════
+@interface Shape : NPObject
+- (int)area;
+- (int)areaTimes:(int)n;
+@end
+@implementation Shape
+- (int)area { return 0; }
+- (int)areaTimes:(int)n { return [self area] * n; }   // 多态：调子类覆写
+@end
+
+@interface Square : Shape { int _side; }
+- (Square *)initWithSide:(int)s;
+- (int)area;
+@end
+@implementation Square
+- (Square *)initWithSide:(int)s { _side = s; return self; }
+- (int)area { return _side * _side; }
+@end
+
+@interface Fib : NPObject
+- (int)fib:(int)n;
+@end
+@implementation Fib
+- (int)fib:(int)n { return n < 2 ? n : [self fib:(n - 1)] + [self fib:(n - 2)]; }
+@end
+
+// ═══ 7. 异常跨方法边界 ═════════════════════════════════════════════════════
+@interface Thrower : NPObject
+- (int)boom:(int)x;
+- (int)wrapped:(int)x;
+@end
+@implementation Thrower
+- (int)boom:(int)x {
+    if (x < 0) { @throw [NPError errorWithCode:x domain:@"T"]; }   // NOTE: 类方法名写错时
+                                                              // jetic 降级成 `NPError->name`（非法 C），
+                                                              // 而不是清晰的"无此方法"诊断
+    return x * 2;
+}
+- (int)wrapped:(int)x {
+    @try {
+        return [self boom:x];
+    } @catch (NPError *e) {
+        return -1000 + [e code];
+    }
+}
+@end
+
+// ═══ 8. 深调用链（消息发送，非函数） ═══════════════════════════════════════
+@interface Chain : NPObject { int _n; }
+- (Chain *)initWith:(int)n;
+- (int)next;
+- (int)run:(int)depth;
+@end
+@implementation Chain
+- (Chain *)initWith:(int)n { _n = n; return self; }
+- (int)next { return _n + 1; }
+- (int)run:(int)depth {
+    if (depth == 0) { return _n; }
+    return [[[Chain alloc] initWith:[self next]] run:(depth - 1)];
+}
+@end
+
+int main(void) {
+    @autoreleasepool {
+        printf("=== batch C: class-system extremes ===\n");
+
+        // 五层继承 + 跨级 [super] 累加
+        L5 *five = [[L5 alloc] init];
+        [five set2:2];
+        [five set3:3];
+        [five set4:4];
+        [five set5:5];
+        CHECK("inherit.depth", [five depth], 5);
+        CHECK("inherit.super.sum", [five sum], 14);           // 2+3+4+5
+        CHECK("inherit.override.chain", [five value], 0);
+        // 基类指针多态
+        // NOTE: 子类指针赋给父类指针时，生成 C 没有插入隐式向上转型（clang 警告）
+        L1 *asL1 = five;
+        CHECK("poly.depth.via_base", [asL1 depth], 5);
+        CHECK("poly.sum.via_base", [asL1 sum], 14);
+
+        // 分类（加在子类上）
+        CHECK("category.times", [five sumTimes:3], 42);
+        CHECK("category.depth2", [five depthSquared], 25);
+
+        // 协议 + 协议继承
+        Thing *t = [[Thing alloc] initWithWeight:9];
+        CHECK("protocol.weight", [t weight], 9);
+        CHECK("protocol.describe", [t describe], 1);
+        CHECK("protocol.inherited", (int)strcmp([t name], "thing"), 0);
+        CHECK("protocol.conforms.describable", [t conformsToProtocol:@protocol(Describable)], 1);
+        CHECK("protocol.conforms.named", [t conformsToProtocol:@protocol(Named)], 1);
+
+        // 泛型
+        Box<int> *bi = [[Box<int> alloc] init];
+        [bi put:77];
+        CHECK("generic.int", [bi get], 77);
+        CHECK("generic.int.has", [bi hasValue], 1);
+        Box<NPString *> *bs = [[Box<NPString *> alloc] init];
+        [bs put:@"held"];
+        CHECK("generic.ptr", (int)strlen([[bs get] UTF8String]), 4);
+        CHECK("generic.ptr.has", [bs hasValue], 1);
+
+        // 属性各类型
+        Props *pr = [[Props alloc] init];
+        pr.i = 12;
+        pr.d = 2.5;
+        pr.s = "propstr";
+        // NOTE: 同上，对象赋给 NPObject* ivar 也没有隐式向上转型（clang 警告）
+        pr.o = t;
+        CHECK("prop.int", pr.i, 12);
+        CHECK("prop.double", (int)(pr.d * 10), 25);
+        CHECK("prop.cstr", (int)strlen(pr.s), 7);
+        CHECK("prop.object", [pr.o weight], 9);
+
+        // 多态：基类方法调用子类覆写
+        Shape *sh = [[Square alloc] initWithSide:6];
+        CHECK("poly.area", [sh area], 36);
+        CHECK("poly.areaTimes", [sh areaTimes:3], 108);       // 基类方法 -> 子类 area
+
+        // 消息递归
+        Fib *fib = [[Fib alloc] init];
+        CHECK("recursion.fib10", [fib fib:10], 55);
+        CHECK("recursion.fib15", [fib fib:15], 610);
+
+        // 异常跨方法
+        Thrower *th = [[Thrower alloc] init];
+        CHECK("exc.ok", [th wrapped:21], 42);
+        CHECK("exc.caught", [th wrapped:-5], -1005);
+
+        // 深消息调用链
+        Chain *c0 = [[Chain alloc] initWith:0];
+        CHECK("chain.run20", [c0 run:20], 20);
+
+        // blocks 捕获 self / 捕获对象
+        __block int acc = 0;
+        void (^adder)(int) = ^void(int v) { acc = acc + v + [five value]; };
+        adder(3);
+        adder(4);
+        CHECK("block.capture_self", acc, 7);
+
+        // nil 接收者（不应崩溃）
+        Shape *nilShape = nil;
+        CHECK("nil.receiver", [nilShape area], 0);
+
+        printf("checks=%d failed=%d\n", g_checks, g_failed);
+    }
+    return g_failed == 0 ? 0 : 1;
+}

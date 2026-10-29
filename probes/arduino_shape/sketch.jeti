@@ -1,0 +1,119 @@
+// sketch.jeti — what an "Arduino library" Jeti sketch looks like.
+//
+// The Arduino core is C++ (`Serial` is a global object, `String` is a class,
+// the HAL uses overloading and templates). Jeti is a C superset, so it does not
+// include those headers: it reaches the board through a thin `extern "C"`
+// bridge (bridge.c here, the board toolchain's job on real hardware) — exactly
+// how examples/04_soma-kernel reaches its console through `kputs`.
+//
+// Everything below is ordinary freestanding Jeti: no Foundation, no libc.
+// Build (host methodology, see tests/golden/25_freestanding/build.sh):
+//   jetic -rewrite-jeti -ffreestanding probes/arduino_shape/sketch.jeti -o sketch.c
+//   clang -I include -include jeti/runtime.h -c sketch.c -o sketch.o
+//   clang -I include -c include/jeti/runtime_freestanding.c -o rt.o
+//   clang -c probes/arduino_shape/bridge.c -o bridge.o
+//   clang sketch.o rt.o bridge.o -o sketch && ./sketch
+
+// ── 1. The bridge: the board API as plain C functions ──────────────────────
+// On a real board these are the `extern "C"` wrappers the sketch ships next to
+// the Arduino core; here bridge.c stands in for them.
+extern void ard_pinMode(int pin, int mode);
+extern void ard_digitalWrite(int pin, int value);
+extern int  ard_digitalRead(int pin);
+extern unsigned ard_millis(void);
+extern void ard_serial_begin(long baud);
+extern void ard_serial_println(const char *s);
+extern void ard_serial_printInt(int v);
+extern void ard_delay(unsigned ms);
+
+#define ARD_OUTPUT 1
+#define ARD_INPUT  0
+#define ARD_HIGH   1
+#define ARD_LOW    0
+
+// ── 2. The sketch's own device classes: Jeti's class syntax, no Foundation ──
+@namespace Board
+
+    // An implicit root class (no superclass): bare metal has no NPObject.
+    @interface Led {
+        int pin;
+        int lit;
+    }
+    + (id)alloc;                       // freestanding discipline: every root
+    - (id)initWithPin:(int)p;          // chain declares its own alloc/init
+    - (void)turnOn;
+    - (void)turnOff;
+    - (void)toggle;
+    - (int)isLit;
+    @end
+
+    @implementation Led
+    + (id)alloc { return jeti_alloc(self); }
+    - (id)initWithPin:(int)p {
+        pin = p;
+        lit = 0;
+        ard_pinMode(p, ARD_OUTPUT);
+        return self;
+    }
+    - (void)turnOn  { lit = 1; ard_digitalWrite(pin, ARD_HIGH); }
+    - (void)turnOff { lit = 0; ard_digitalWrite(pin, ARD_LOW); }
+    - (void)toggle  { if (lit) { [self turnOff]; } else { [self turnOn]; } }
+    - (int)isLit    { return lit; }
+    @end
+
+    // A second class talking to the first one by message send.
+    @interface Button {
+        int pin;
+        int last;
+    }
+    + (id)alloc;
+    - (id)initWithPin:(int)p;
+    - (int)poll;
+    @end
+
+    @implementation Button
+    + (id)alloc { return jeti_alloc(self); }
+    - (id)initWithPin:(int)p {
+        pin = p;
+        last = -1;
+        ard_pinMode(p, ARD_INPUT);
+        return self;
+    }
+    - (int)poll {
+        int now = ard_digitalRead(pin);
+        int changed = (now != last) ? 1 : 0;
+        last = now;
+        return changed;
+    }
+    @end
+
+@endnamespace
+
+// ── 3. Entry points: the Arduino core calls setup() once, then loop() ──────
+static Board::Led *g_led = 0;
+static Board::Button *g_button = 0;
+
+void setup(void) {
+    // Class metadata is statically initialized; this is the idempotent backfill
+    // the freestanding golden test calls too.
+    jeti_meta_init();
+
+    ard_serial_begin(115200);
+    g_led = [[Board::Led alloc] initWithPin:13];
+    g_button = [[Board::Button alloc] initWithPin:2];
+    ard_serial_println("setup: led=13 button=2");
+}
+
+void loop(void) {
+    [g_led toggle];
+    ard_serial_println("led -> ");
+    ard_serial_printInt([g_led isLit]);
+    ard_serial_println("");
+
+    if ([g_button poll]) {
+        ard_serial_println("button changed at t=");
+        ard_serial_printInt((int)ard_millis());
+        ard_serial_println("ms");
+    }
+    ard_delay(10);
+}

@@ -1,0 +1,11 @@
+#import "shared_a.hje"
+#include <stdio.h>
+
+/* Client TU: no Foundation umbrella, so its public set — and therefore its
+   signature segment — is a subset of the owner's. The check runs in a
+   load-time constructor, so main() itself never gets to execute: the process
+   must abort before printing anything. */
+int main(void) {
+    printf("unreachable: the layout check should have aborted at load time\n");
+    return 0;
+}

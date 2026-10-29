@@ -1,0 +1,6 @@
+/* Probe, owner side: identical class declaration, but this TU ALSO imports the
+   Foundation umbrella, so every Foundation selector is public here and the
+   signature segment covers the whole manifest. */
+@interface Thing
+- (int)count;
+@end

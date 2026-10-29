@@ -86,9 +86,9 @@ NPClass * JETI_GETCLASS_$_Bio__Animal(NPClass * self, SEL _cmd);
 NPClass * JETI_GETCLASS_$_Bio__Human(NPClass * self, SEL _cmd);
 
 /* vtable layout signature: cbf29ce484222325 (shared methods: 0) */
-__attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, unsigned long long mine, const char *method_list) {
+__attribute__((weak)) void jeti_verify_vtable_layout(unsigned long long winner, unsigned long long mine, const char *method_list, const char *class_name, const char *tu_name) {
     if (winner != mine) {
-        (void)winner; (void)mine; (void)method_list;
+        (void)winner; (void)mine; (void)method_list; (void)class_name; (void)tu_name;
         __builtin_trap();
     }
 }
@@ -108,6 +108,7 @@ struct jeti_vtable {
     void (*UUIDString)(void);
     void (*_grow)(void);
     void (*absoluteString)(void);
+    void (*addAttribute_value_range_)(void);
     void (*addCharactersInRange_)(void);
     void (*addCharactersInString_)(void);
     void (*addEntriesFromDictionary_)(void);
@@ -173,6 +174,7 @@ struct jeti_vtable {
     void (*decimalNumberByDividingBy_)(void);
     void (*decimalNumberByMultiplyingBy_)(void);
     void (*decimalNumberByNegating)(void);
+    void (*decimalNumberByRaisingToPower_)(void);
     void (*decimalNumberBySubtracting_)(void);
     void (*decodeBoolForKey_)(void);
     void (*decodeDoubleForKey_)(void);
@@ -183,6 +185,7 @@ struct jeti_vtable {
     void (*description)(void);
     void (*domain)(void);
     void (*doubleValue)(void);
+    void (*effectiveRangeAtIndex_)(void);
     void (*effectiveRangeLengthAtIndex_)(void);
     void (*encodeBool_forKey_)(void);
     void (*encodeDouble_forKey_)(void);
@@ -211,6 +214,7 @@ struct jeti_vtable {
     void (*hasHour)(void);
     void (*hasMinute)(void);
     void (*hasMonth)(void);
+    void (*hasOverflowed)(void);
     void (*hasPrefix_)(void);
     void (*hasSecond)(void);
     void (*hasSuffix_)(void);
@@ -323,6 +327,7 @@ struct jeti_vtable {
     void (*release)(void);
     void (*removeAllIndexes)(void);
     void (*removeAllObjects)(void);
+    void (*removeAttribute_range_)(void);
     void (*removeCharactersInRange_)(void);
     void (*removeCharactersInString_)(void);
     void (*removeIndex_)(void);
@@ -340,6 +345,7 @@ struct jeti_vtable {
     void (*retain)(void);
     void (*reversedSortDescriptor)(void);
     void (*run)(void);
+    void (*runCount)(void);
     void (*scanCharactersFromSet_intoString_)(void);
     void (*scanDouble_)(void);
     void (*scanInt_)(void);
@@ -350,6 +356,7 @@ struct jeti_vtable {
     void (*scanUpToString_intoString_)(void);
     void (*scheme)(void);
     void (*second)(void);
+    void (*setAttributes_range_)(void);
     void (*setCharactersToBeSkipped_)(void);
     void (*setCountLimit_)(void);
     void (*setData_)(void);
@@ -368,6 +375,7 @@ struct jeti_vtable {
     void (*setString_)(void);
     void (*setSuspended_)(void);
     void (*setTimeoutSeconds_)(void);
+    void (*setTolerance_)(void);
     void (*setTotalCostLimit_)(void);
     void (*setUTCOffsetMinutes_)(void);
     void (*setWeekday_)(void);
@@ -393,6 +401,7 @@ struct jeti_vtable {
     void (*timeIntervalSince1970)(void);
     void (*timeIntervalSinceDate_)(void);
     void (*timeoutSeconds)(void);
+    void (*tolerance)(void);
     void (*totalCostLimit)(void);
     void (*tryLock)(void);
     void (*unlock)(void);
@@ -506,6 +515,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .UUIDString = NULL,
     ._grow = NULL,
     .absoluteString = NULL,
+    .addAttribute_value_range_ = NULL,
     .addCharactersInRange_ = NULL,
     .addCharactersInString_ = NULL,
     .addEntriesFromDictionary_ = NULL,
@@ -571,6 +581,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .decimalNumberByDividingBy_ = NULL,
     .decimalNumberByMultiplyingBy_ = NULL,
     .decimalNumberByNegating = NULL,
+    .decimalNumberByRaisingToPower_ = NULL,
     .decimalNumberBySubtracting_ = NULL,
     .decodeBoolForKey_ = NULL,
     .decodeDoubleForKey_ = NULL,
@@ -581,6 +592,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
+    .effectiveRangeAtIndex_ = NULL,
     .effectiveRangeLengthAtIndex_ = NULL,
     .encodeBool_forKey_ = NULL,
     .encodeDouble_forKey_ = NULL,
@@ -609,6 +621,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .hasHour = NULL,
     .hasMinute = NULL,
     .hasMonth = NULL,
+    .hasOverflowed = NULL,
     .hasPrefix_ = NULL,
     .hasSecond = NULL,
     .hasSuffix_ = NULL,
@@ -721,6 +734,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .release = NULL,
     .removeAllIndexes = NULL,
     .removeAllObjects = NULL,
+    .removeAttribute_range_ = NULL,
     .removeCharactersInRange_ = NULL,
     .removeCharactersInString_ = NULL,
     .removeIndex_ = NULL,
@@ -738,6 +752,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .retain = NULL,
     .reversedSortDescriptor = NULL,
     .run = NULL,
+    .runCount = NULL,
     .scanCharactersFromSet_intoString_ = NULL,
     .scanDouble_ = NULL,
     .scanInt_ = NULL,
@@ -748,6 +763,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .scanUpToString_intoString_ = NULL,
     .scheme = NULL,
     .second = NULL,
+    .setAttributes_range_ = NULL,
     .setCharactersToBeSkipped_ = NULL,
     .setCountLimit_ = NULL,
     .setData_ = NULL,
@@ -766,6 +782,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .setString_ = NULL,
     .setSuspended_ = NULL,
     .setTimeoutSeconds_ = NULL,
+    .setTolerance_ = NULL,
     .setTotalCostLimit_ = NULL,
     .setUTCOffsetMinutes_ = NULL,
     .setWeekday_ = NULL,
@@ -791,6 +808,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Organism = {
     .timeIntervalSince1970 = NULL,
     .timeIntervalSinceDate_ = NULL,
     .timeoutSeconds = NULL,
+    .tolerance = NULL,
     .totalCostLimit = NULL,
     .tryLock = NULL,
     .unlock = NULL,
@@ -834,6 +852,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .UUIDString = NULL,
     ._grow = NULL,
     .absoluteString = NULL,
+    .addAttribute_value_range_ = NULL,
     .addCharactersInRange_ = NULL,
     .addCharactersInString_ = NULL,
     .addEntriesFromDictionary_ = NULL,
@@ -899,6 +918,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .decimalNumberByDividingBy_ = NULL,
     .decimalNumberByMultiplyingBy_ = NULL,
     .decimalNumberByNegating = NULL,
+    .decimalNumberByRaisingToPower_ = NULL,
     .decimalNumberBySubtracting_ = NULL,
     .decodeBoolForKey_ = NULL,
     .decodeDoubleForKey_ = NULL,
@@ -909,6 +929,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
+    .effectiveRangeAtIndex_ = NULL,
     .effectiveRangeLengthAtIndex_ = NULL,
     .encodeBool_forKey_ = NULL,
     .encodeDouble_forKey_ = NULL,
@@ -937,6 +958,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .hasHour = NULL,
     .hasMinute = NULL,
     .hasMonth = NULL,
+    .hasOverflowed = NULL,
     .hasPrefix_ = NULL,
     .hasSecond = NULL,
     .hasSuffix_ = NULL,
@@ -1049,6 +1071,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .release = NULL,
     .removeAllIndexes = NULL,
     .removeAllObjects = NULL,
+    .removeAttribute_range_ = NULL,
     .removeCharactersInRange_ = NULL,
     .removeCharactersInString_ = NULL,
     .removeIndex_ = NULL,
@@ -1066,6 +1089,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .retain = NULL,
     .reversedSortDescriptor = NULL,
     .run = NULL,
+    .runCount = NULL,
     .scanCharactersFromSet_intoString_ = NULL,
     .scanDouble_ = NULL,
     .scanInt_ = NULL,
@@ -1076,6 +1100,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .scanUpToString_intoString_ = NULL,
     .scheme = NULL,
     .second = NULL,
+    .setAttributes_range_ = NULL,
     .setCharactersToBeSkipped_ = NULL,
     .setCountLimit_ = NULL,
     .setData_ = NULL,
@@ -1094,6 +1119,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .setString_ = NULL,
     .setSuspended_ = NULL,
     .setTimeoutSeconds_ = NULL,
+    .setTolerance_ = NULL,
     .setTotalCostLimit_ = NULL,
     .setUTCOffsetMinutes_ = NULL,
     .setWeekday_ = NULL,
@@ -1119,6 +1145,7 @@ struct jeti_vtable JETI_VTABLE_$_DebugToken = {
     .timeIntervalSince1970 = NULL,
     .timeIntervalSinceDate_ = NULL,
     .timeoutSeconds = NULL,
+    .tolerance = NULL,
     .totalCostLimit = NULL,
     .tryLock = NULL,
     .unlock = NULL,
@@ -1162,6 +1189,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .UUIDString = NULL,
     ._grow = NULL,
     .absoluteString = NULL,
+    .addAttribute_value_range_ = NULL,
     .addCharactersInRange_ = NULL,
     .addCharactersInString_ = NULL,
     .addEntriesFromDictionary_ = NULL,
@@ -1227,6 +1255,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .decimalNumberByDividingBy_ = NULL,
     .decimalNumberByMultiplyingBy_ = NULL,
     .decimalNumberByNegating = NULL,
+    .decimalNumberByRaisingToPower_ = NULL,
     .decimalNumberBySubtracting_ = NULL,
     .decodeBoolForKey_ = NULL,
     .decodeDoubleForKey_ = NULL,
@@ -1237,6 +1266,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
+    .effectiveRangeAtIndex_ = NULL,
     .effectiveRangeLengthAtIndex_ = NULL,
     .encodeBool_forKey_ = NULL,
     .encodeDouble_forKey_ = NULL,
@@ -1265,6 +1295,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .hasHour = NULL,
     .hasMinute = NULL,
     .hasMonth = NULL,
+    .hasOverflowed = NULL,
     .hasPrefix_ = NULL,
     .hasSecond = NULL,
     .hasSuffix_ = NULL,
@@ -1377,6 +1408,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .release = NULL,
     .removeAllIndexes = NULL,
     .removeAllObjects = NULL,
+    .removeAttribute_range_ = NULL,
     .removeCharactersInRange_ = NULL,
     .removeCharactersInString_ = NULL,
     .removeIndex_ = NULL,
@@ -1394,6 +1426,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .retain = NULL,
     .reversedSortDescriptor = NULL,
     .run = NULL,
+    .runCount = NULL,
     .scanCharactersFromSet_intoString_ = NULL,
     .scanDouble_ = NULL,
     .scanInt_ = NULL,
@@ -1404,6 +1437,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .scanUpToString_intoString_ = NULL,
     .scheme = NULL,
     .second = NULL,
+    .setAttributes_range_ = NULL,
     .setCharactersToBeSkipped_ = NULL,
     .setCountLimit_ = NULL,
     .setData_ = NULL,
@@ -1422,6 +1456,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .setString_ = NULL,
     .setSuspended_ = NULL,
     .setTimeoutSeconds_ = NULL,
+    .setTolerance_ = NULL,
     .setTotalCostLimit_ = NULL,
     .setUTCOffsetMinutes_ = NULL,
     .setWeekday_ = NULL,
@@ -1447,6 +1482,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Animal = {
     .timeIntervalSince1970 = NULL,
     .timeIntervalSinceDate_ = NULL,
     .timeoutSeconds = NULL,
+    .tolerance = NULL,
     .totalCostLimit = NULL,
     .tryLock = NULL,
     .unlock = NULL,
@@ -1490,6 +1526,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .UUIDString = NULL,
     ._grow = NULL,
     .absoluteString = NULL,
+    .addAttribute_value_range_ = NULL,
     .addCharactersInRange_ = NULL,
     .addCharactersInString_ = NULL,
     .addEntriesFromDictionary_ = NULL,
@@ -1555,6 +1592,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .decimalNumberByDividingBy_ = NULL,
     .decimalNumberByMultiplyingBy_ = NULL,
     .decimalNumberByNegating = NULL,
+    .decimalNumberByRaisingToPower_ = NULL,
     .decimalNumberBySubtracting_ = NULL,
     .decodeBoolForKey_ = NULL,
     .decodeDoubleForKey_ = NULL,
@@ -1565,6 +1603,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .description = NULL,
     .domain = NULL,
     .doubleValue = NULL,
+    .effectiveRangeAtIndex_ = NULL,
     .effectiveRangeLengthAtIndex_ = NULL,
     .encodeBool_forKey_ = NULL,
     .encodeDouble_forKey_ = NULL,
@@ -1593,6 +1632,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .hasHour = NULL,
     .hasMinute = NULL,
     .hasMonth = NULL,
+    .hasOverflowed = NULL,
     .hasPrefix_ = NULL,
     .hasSecond = NULL,
     .hasSuffix_ = NULL,
@@ -1705,6 +1745,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .release = NULL,
     .removeAllIndexes = NULL,
     .removeAllObjects = NULL,
+    .removeAttribute_range_ = NULL,
     .removeCharactersInRange_ = NULL,
     .removeCharactersInString_ = NULL,
     .removeIndex_ = NULL,
@@ -1722,6 +1763,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .retain = NULL,
     .reversedSortDescriptor = NULL,
     .run = NULL,
+    .runCount = NULL,
     .scanCharactersFromSet_intoString_ = NULL,
     .scanDouble_ = NULL,
     .scanInt_ = NULL,
@@ -1732,6 +1774,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .scanUpToString_intoString_ = NULL,
     .scheme = NULL,
     .second = NULL,
+    .setAttributes_range_ = NULL,
     .setCharactersToBeSkipped_ = NULL,
     .setCountLimit_ = NULL,
     .setData_ = NULL,
@@ -1750,6 +1793,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .setString_ = NULL,
     .setSuspended_ = NULL,
     .setTimeoutSeconds_ = NULL,
+    .setTolerance_ = NULL,
     .setTotalCostLimit_ = NULL,
     .setUTCOffsetMinutes_ = NULL,
     .setWeekday_ = NULL,
@@ -1775,6 +1819,7 @@ struct jeti_vtable JETI_VTABLE_$_Bio__Human = {
     .timeIntervalSince1970 = NULL,
     .timeIntervalSinceDate_ = NULL,
     .timeoutSeconds = NULL,
+    .tolerance = NULL,
     .totalCostLimit = NULL,
     .tryLock = NULL,
     .unlock = NULL,
@@ -1933,14 +1978,16 @@ NPClass JETI_CLASS_$_Bio__Human = {
         .dealloc = NULL,
     };
 
+static const char *const __jeti_vtable_method_list_1c6c011de1a08832 = "UTF8String UUIDString _grow absoluteString addAttribute_value_range_ addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberByRaisingToPower_ decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeAtIndex_ effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasOverflowed hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeAttribute_range_ removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run runCount scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setAttributes_range_ setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTolerance_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds tolerance totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_";
+
 __attribute__((constructor)) static void __jeti_vtable_layout_check(void) {
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Organism)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class Bio::Organism | tu stress.jeti");
+    jeti_verify_vtable_layout((&JETI_VTABLE_$_Bio__Organism)->__sig, 0xcbf29ce484222325ULL, __jeti_vtable_method_list_1c6c011de1a08832, "Bio::Organism", "stress.jeti");
     jeti_verify_layout_sig((&JETI_VTABLE_$_Bio__Organism)->__layout_sig, 0x2494435ec6da076bULL, (&JETI_VTABLE_$_Bio__Organism)->__layout_text, "Bio__Organism < jeti_root | int age | int vitality | int _energy");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_DebugToken)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class DebugToken | tu stress.jeti");
+    jeti_verify_vtable_layout((&JETI_VTABLE_$_DebugToken)->__sig, 0xcbf29ce484222325ULL, __jeti_vtable_method_list_1c6c011de1a08832, "DebugToken", "stress.jeti");
     jeti_verify_layout_sig((&JETI_VTABLE_$_DebugToken)->__layout_sig, 0x533cafd4fc1418ecULL, (&JETI_VTABLE_$_DebugToken)->__layout_text, "DebugToken < jeti_root | int code");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Animal)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class Bio::Animal | tu stress.jeti");
+    jeti_verify_vtable_layout((&JETI_VTABLE_$_Bio__Animal)->__sig, 0xcbf29ce484222325ULL, __jeti_vtable_method_list_1c6c011de1a08832, "Bio::Animal", "stress.jeti");
     jeti_verify_layout_sig((&JETI_VTABLE_$_Bio__Animal)->__layout_sig, 0xbd12c80a24873b48ULL, (&JETI_VTABLE_$_Bio__Animal)->__layout_text, "Bio__Animal < Bio__Organism | int speed | int _strength");
-    jeti_verify_vtable_sig((&JETI_VTABLE_$_Bio__Human)->__sig, 0xcbf29ce484222325ULL, "UTF8String UUIDString _grow absoluteString addCharactersInRange_ addCharactersInString_ addEntriesFromDictionary_ addIndex_ addIndexesInRange_ addObject_ addObjectsFromArray_ addObserver_forName_object_usingBlock_ addOperationWithBlock_ allKeys allObjects allValues anyObject appendBytes_length_ appendData_ appendString_ appendUTF8String_ arguments ascending attribute_atIndex_ attributes attributesAtIndex_ boolValue broadcast byteAtIndex_ bytes canBeConvertedToEncoding_ cancel cancelAllOperations changeCurrentDirectoryAtPath_ charValue characterAtIndex_ characterIsMember_ code compareObject_toObject_ compare_ componentsFromDate_ constantValue containsIndex_ containsObject_ containsValueForKey_ contentsAtPath_ contentsOfDirectoryAtPath_ copy copyItemAtPath_toPath_ count countForObject_ countLimit createDirectoryAtPath_ createDirectoryAtPath_withIntermediateDirectories_ createFileAtPath_contents_ currentDirectoryPath dataUsingEncoding_ dataWithContentsOfURL_ dateByAddingDays_toDate_ dateFromComponents_ dateFromString_ day dayOfWeekFromDate_ daysInMonth_year_ dealloc decimalNumberByAdding_ decimalNumberByDividingBy_ decimalNumberByMultiplyingBy_ decimalNumberByNegating decimalNumberBySubtracting_ decodeBoolForKey_ decodeDoubleForKey_ decodeIntForKey_ decodeObjectForKey_ deleteBytesInRange_ deleteCharactersInRange_ description domain doubleValue effectiveRangeLengthAtIndex_ encodeBool_forKey_ encodeDouble_forKey_ encodeInt_forKey_ encodeObject_forKey_ enumerateUsingBlock_ environment environmentVariable_ evaluateWithObject_ exchangeObjectAtIndex_withObjectAtIndex_ exchangeObjectsAtIndexes_and_ expressionType expressionValueWithObject_context_ fileExistsAtPath_ filterUsingPredicate_ filteredArrayUsingPredicate_ finishEncoding fire firstIndex firstMatchLengthInString_ firstMatchLocationInString_ firstObject fragment globallyUniqueString hasDay hasHour hasMinute hasMonth hasPrefix_ hasSecond hasSuffix_ hasWeekday hasYear hash host hostName hour indexOfObjectMatchingPredicate_ indexOfObject_ init initForReadingWithData_ initWithArray_ initWithBlock_ initWithBool_ initWithBytes_length_ initWithBytes_length_encoding_ initWithCapacity_ initWithCode_domain_userInfo_ initWithCountLimit_ initWithData_encoding_ initWithDictionary_ initWithDouble_ initWithFormat_args_count_ initWithKey_ascending_comparator_ initWithLongLong_ initWithName_object_userInfo_ initWithObjects_count_ initWithSet_ initWithString_ initWithString_attributes_ initWithTimeIntervalSince1970_ initWithUTF8String_ initWithUUIDString_ insertObject_atIndex_ insertString_atIndex_ intValue intersectsIndexesInRange_ invalidate invert isAtEnd isCancelled isDirectoryAtPath_ isEqualToDate_ isEqualToNumber_ isEqualToString_ isEqual_ isExecuting isFinished isKindOfClass_ isKindOf_ isLocked isMatchInString_ isNotANumber isOperatingSystemAtLeastVersion_ isPaused isReadableAtPath_ isStarted isSuspended isValid isValidIndex_ isWritableAtPath_ join key keyPath lastIndex lastObject length lengthOfBytesUsingEncoding_ lock longLongValue lowercaseString machine maxConcurrentOperationCount minute month moveItemAtPath_toPath_ mutableBytes name nextObject np_addRange_ np_removeRange_ np_scanNumber_dbl_ np_skip numberOfCaptureGroups numberOfMatchesInString_ object objectAtIndex_ objectForKey_ observerCount operatingSystem operatingSystemVersion operatingSystemVersionString operationCount path pendingCount performBlock_ pointerValue poll port postNotificationName_object_ postNotificationName_object_userInfo_ postNotification_ predicateFormat processIdentifier query rangeOfString_ rangeValue release removeAllIndexes removeAllObjects removeCharactersInRange_ removeCharactersInString_ removeIndex_ removeIndexesInRange_ removeItemAtPath_ removeLastObject removeObjectAtIndex_ removeObjectForKey_ removeObject_ removeObserver_ removeObserver_forName_ replaceBytesInRange_withBytes_length_ replaceCharactersInRange_withString_ replaceObjectAtIndex_withObject_ retain reversedSortDescriptor run scanCharactersFromSet_intoString_ scanDouble_ scanInt_ scanLocation scanLongLong_ scanString_intoString_ scanUpToCharactersFromSet_intoString_ scanUpToString_intoString_ scheme second setCharactersToBeSkipped_ setCountLimit_ setData_ setDay_ setEnvironmentVariable_value_ setHour_ setLength_ setMaxConcurrentOperationCount_ setMinute_ setMonth_ setObject_atIndex_ setObject_forKey_ setObject_forKey_cost_ setScanLocation_ setSecond_ setString_ setSuspended_ setTimeoutSeconds_ setTotalCostLimit_ setUTCOffsetMinutes_ setWeekday_ setYear_ signal sortUsingComparator_ sortUsingDescriptors_ sortedArrayUsingComparator_ sortedArrayUsingDescriptors_ start startDetached string stringByAppendingString_ stringByAppendingUTF8String_ stringFromDate_ stringValue stringWithContentsOfURL_ subdataWithRange_ substringFromIndex_ substringToIndex_ substringWithRange_ timeInterval timeIntervalSince1970 timeIntervalSinceDate_ timeoutSeconds totalCostLimit tryLock unlock unsetEnvironmentVariable_ uppercaseString userInfo userName utcOffsetMinutes variable wait waitUntilAllOperationsAreFinished weekday writeToFile_atomically_ year localizedDescription initWithType_ npc_reserve _expandFormat_args_count_ valueForKey_ re_searchFrom_len_pos_length_ age grow legs energy setEnergy_ dump work_ strength setStrength_ think_ wisdom setWisdom_ | class Bio::Human | tu stress.jeti");
+    jeti_verify_vtable_layout((&JETI_VTABLE_$_Bio__Human)->__sig, 0xcbf29ce484222325ULL, __jeti_vtable_method_list_1c6c011de1a08832, "Bio::Human", "stress.jeti");
     jeti_verify_layout_sig((&JETI_VTABLE_$_Bio__Human)->__layout_sig, 0xca24b76152c68a42ULL, (&JETI_VTABLE_$_Bio__Human)->__layout_text, "Bio__Human < Bio__Animal | int iq | int _wisdom");
 }
 

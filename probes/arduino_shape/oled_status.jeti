@@ -1,0 +1,136 @@
+// oled_status.jeti — an Arduino-shaped Jeti sketch driving an OLED status
+// screen through a C bridge.
+//
+// A real display library (Adafruit_SSD1306 & co.) is C++, and Jeti is a C
+// superset that never includes <Arduino.h>: the library is reached through
+// extern "C" shims. Here bridge.c stands in for the board port with a
+// character-cell frame buffer, so the sketch runs on the host.
+//
+// It pins the three shapes that used to fail on the freestanding path:
+//   * an INHERITED @property read and written through dot syntax on a subclass
+//     receiver (the ancestor's getter/setter, not a raw struct field),
+//   * an `async ^` block that reads an enclosing local (the lifted thunk takes
+//     it as a parameter and carries it in the task frame),
+//   * `conformsToProtocol:` answered by the freestanding runtime itself.
+// Expected (host bridge): checks=5 failed=0
+extern void ard_serial_println(const char *s);
+extern void ard_serial_printInt(int v);
+extern unsigned ard_millis(void);
+extern void oled_begin(void);
+extern void oled_clear(void);
+extern void oled_text(int row, int col, const char *s);
+extern void oled_value(int row, const char *label, int v);
+extern void oled_flush(void);
+
+@protocol Renderable
+- (void)render;
+@end
+
+@namespace Ui
+
+    // ── base screen: the @property lives HERE ──────────────────────────────
+    @interface Screen : jeti_root {
+        int _rows;
+        int _refreshes;
+    }
+    @property int rows;
+    @property int refreshes;
+    + (id)alloc;
+    - (Screen *)initWithRows:(int)r;
+    - (void)render;
+    @end
+
+    @implementation Screen
+    @synthesize rows = _rows;
+    @synthesize refreshes = _refreshes;
+    + (id)alloc { return jeti_alloc(self); }
+    - (Screen *)initWithRows:(int)r { _rows = r; _refreshes = 0; return self; }
+    - (void)render {
+        _refreshes = _refreshes + 1;
+        oled_clear();
+        oled_text(0, 0, "Jeti status");
+    }
+    @end
+
+    // ── subclass: inherited @property + its own + a protocol ───────────────
+    @interface StatusScreen : Screen <Renderable> {
+        int _errors;
+    }
+    @property int errors;
+    - (void)render;
+    - (async void)paint:(int)ticks;
+    @end
+
+    @implementation StatusScreen
+    @synthesize errors = _errors;
+    - (void)render {
+        [super render];                      // base implementation first
+        oled_value(1, "uptime", (int)ard_millis());
+        oled_value(2, "errors", _errors);
+    }
+    - (async void)paint:(int)ticks {
+        for (int i = 0; i < ticks; i++) { [self render]; }
+    }
+    @end
+
+@endnamespace
+
+static int g_checks;
+static int g_failed;
+static int g_reported;
+static Ui::StatusScreen *g_screen;
+
+static void check(const char *what, int got, int want) {
+    g_checks = g_checks + 1;
+    if (got != want) {
+        g_failed = g_failed + 1;
+        ard_serial_println("FAIL:");
+        ard_serial_println(what);
+        ard_serial_printInt(got);
+        ard_serial_println(" != ");
+        ard_serial_printInt(want);
+        ard_serial_println("");
+    }
+}
+
+void setup(void) {
+    oled_begin();
+    g_screen = [[Ui::StatusScreen alloc] initWithRows:4];
+    g_screen.errors = 2;
+}
+
+void loop(void) {
+    // The bridge calls loop() repeatedly, the way an Arduino core does; the
+    // checks are one-shot so the report is not accumulated.
+    if (g_reported) { return; }
+    g_reported = 1;
+
+    Ui::StatusScreen *scr = g_screen;
+
+    // 1. Inherited @property through a SUBCLASS receiver: both sides of the
+    //    assignment go through the ancestor's accessors.
+    scr.rows = 6;
+    check("inherit.prop.dot", scr.rows, 6);
+
+    // 2. Protocol conformance query, answered by the freestanding runtime.
+    check("conforms.sub", [scr conformsToProtocol:@protocol(Renderable)], 1);
+
+    // 3. `async ^` block reading an enclosing local: `ticks` arrives as a thunk
+    //    parameter, so paint: loops 3 times (before the capture it did not
+    //    compile at all) and the caller's copy is untouched.
+    int ticks = 3;
+    [NPTask blockOn:async ^ void { await [scr paint:ticks]; }];
+    check("async.capture", scr.refreshes, 3);
+    check("capture.copy", ticks, 3);
+
+    // 4. The subclass's OWN @property still resolves through its own accessors.
+    check("own.prop", scr.errors, 2);
+
+    oled_flush();
+    ard_serial_println("");
+    ard_serial_println("checks=");
+    ard_serial_printInt(g_checks);
+    ard_serial_println(" failed=");
+    ard_serial_printInt(g_failed);
+    ard_serial_println("");
+}

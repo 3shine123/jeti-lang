@@ -1,0 +1,225 @@
+// advanced.jeti — how much of Jeti's ADVANCED syntax survives an
+// Arduino-shaped build: freestanding (no Foundation, no libc) + a thin C
+// bridge to the board API, with setup()/loop() as the entry points.
+//
+// This is the companion to tests/stress/baremetal/freestanding_features.jeti
+// (which already pins inheritance, generics, @defer, @autoreleasepool,
+// @synchronized, @try/@catch/@finally, async/await + NPTask blockOn). This
+// probe covers the features that one does NOT: @property/@synthesize,
+// @selector, @category, protocol conformance + runtime query, C struct/enum/
+// typedef/function pointers, __block capture, inline asm, and async driven by
+// the freestanding SCHEDULER (jeti_sched_*) rather than blockOn.
+
+extern void ard_serial_println(const char *s);
+extern void ard_serial_printInt(int v);
+
+// ── C interop surface a board HAL usually needs ────────────────────────────
+typedef struct { int pin; int mode; } ArdPin;
+enum ArdMode { ARD_IN = 0, ARD_OUT = 1, ARD_PWM = 2 };
+typedef int (*ard_read_fn)(int pin);
+
+static int host_read(int pin) { return pin + 1; }
+
+// ── A user exception class: freestanding has no NPException ────────────────
+@interface ArdError {
+    int code;
+}
++ (id)alloc;
+- (ArdError *)initWithCode:(int)c;
+- (int)code;
+@end
+
+@implementation ArdError
++ (id)alloc { return jeti_alloc(self); }
+- (ArdError *)initWithCode:(int)c { code = c; return self; }
+- (int)code { return code; }
+@end
+
+// ── @protocol ──────────────────────────────────────────────────────────────
+@protocol Actuator
+- (void)engage;
+@end
+
+@namespace Board
+
+    // ── @property / @synthesize ────────────────────────────────────────────
+    @interface Servo : jeti_root {
+        int _pin;
+        int _angle;
+    }
+    @property int angle;
+    + (id)alloc;
+    - (Servo *)initWithPin:(int)p;
+    - (void)write:(int)deg;
+    @end
+
+    @implementation Servo
+    @synthesize angle = _angle;
+    + (id)alloc { return jeti_alloc(self); }
+    - (Servo *)initWithPin:(int)p { _pin = p; _angle = 0; return self; }
+    - (void)write:(int)deg {
+        if (deg < 0 || deg > 180) { @throw [[ArdError alloc] initWithCode:7]; }
+        _angle = deg;
+    }
+    @end
+
+    // ── inheritance + protocol conformance + [super] ───────────────────────
+    @interface Stepper : Servo <Actuator> {
+        int _steps;
+    }
+    - (void)engage;
+    @end
+
+    @implementation Stepper
+    - (void)engage { _steps = _steps + 1; [super write:90]; }
+    @end
+
+    // ── @category ──────────────────────────────────────────────────────────
+    @interface Servo (Calibration)
+    - (void)center;
+    @end
+
+    @implementation Servo (Calibration)
+    - (void)center { [self write:90]; }
+    @end
+
+@endnamespace
+
+// ── async + the freestanding scheduler ────────────────────────────────────
+@namespace Board
+    @interface Sweeper : jeti_root {
+        int sweeps;
+    }
+    + (id)alloc;
+    - (id)init;
+    - (async int)oneSweep:(int)v;
+    - (int)sweeps;
+    @end
+
+    @implementation Sweeper
+    + (id)alloc { return jeti_alloc(self); }
+    - (id)init { sweeps = 0; return self; }
+    - (async int)oneSweep:(int)v {
+        sweeps = sweeps + 1;
+        return v * 2;
+    }
+    - (int)sweeps { return sweeps; }
+    @end
+@endnamespace
+
+// Deterministic clock for the scheduler (no OS tick on the host).
+static unsigned long long g_ticks = 0;
+static unsigned long long fake_clock(void) { return g_ticks; }
+
+static Board::Sweeper *g_sweeper = 0;
+static int g_reported = 0;
+static int g_checks = 0;
+static int g_failed = 0;
+
+static void check(const char *what, int got, int want) {
+    g_checks = g_checks + 1;
+    if (got != want) {
+        g_failed = g_failed + 1;
+        ard_serial_println("FAIL ");
+        ard_serial_println(what);
+        ard_serial_println(" got=");
+        ard_serial_printInt(got);
+        ard_serial_println(" want=");
+        ard_serial_printInt(want);
+        ard_serial_println("");
+    }
+}
+
+void setup(void) {
+    jeti_meta_init();
+    jeti_sched_set_clock(fake_clock);
+    ard_serial_println("=== Jeti advanced syntax, Arduino-shaped ===");
+
+    // 1. @property + @synthesize + category method
+    Board::Servo *s = [[Board::Servo alloc] initWithPin:9];
+    s.angle = 45;
+    check("property.read", s.angle, 45);
+    [s center];                       // from the @category
+    check("category.center", s.angle, 90);
+
+    // 2. inheritance + [super] + protocol conformance
+    Board::Stepper *st = [[Board::Stepper alloc] initWithPin:10];
+    [st engage];
+    check("super.write", [st angle], 90);
+    // An inherited @property also resolves through dot syntax on the subclass
+    // receiver — the ancestor's getter/setter, not a raw struct field.
+    st.angle = 120;
+    check("inherit.prop.dot", st.angle, 120);
+    check("conforms", [st conformsToProtocol:@protocol(Actuator)], 1);
+
+    // 3. @selector + SEL + runtime query
+    SEL sel = @selector(engage);
+    check("selector.name", sel.name == 0 ? 0 : 1, 1);
+    check("responds", [st respondsToSelector:@selector(engage)], 1);
+    check("responds.missing", [st respondsToSelector:@selector(nonexistentThing)], 0);
+
+    // 4. @try / @catch / @finally with a user exception class
+    int caught = 0;
+    int finally_ran = 0;
+    @try {
+        [s write:999];                // out of range -> @throw ArdError
+    } @catch (ArdError *e) {
+        caught = [e code];
+    } @finally {
+        finally_ran = 1;
+    }
+    check("catch.code", caught, 7);
+    check("finally.ran", finally_ran, 1);
+
+    // 5. blocks with __block capture
+    __block int acc = 0;
+    int (^add)(int) = ^int(int v) { acc = acc + v; return acc; };
+    (void)add(5);
+    (void)add(7);
+    check("block.__block", acc, 12);
+
+    // 6. C struct / enum / typedef / function pointer
+    ArdPin p;
+    p.pin = 3;
+    p.mode = ARD_PWM;
+    check("c.struct", p.mode, 2);
+    ard_read_fn rf = host_read;
+    check("c.fnptr", rf(41), 42);
+
+    // 7. inline asm (host: a no-op that must still compile)
+    unsigned t = 1;
+    asm volatile("" : "+r"(t));
+    check("inline.asm", (int)t, 1);
+
+    // 8. @defer runs LIFO on every exit path
+    int order = 0;
+    {
+        @defer { order = order * 10 + 1; }
+        @defer { order = order * 10 + 2; }
+        order = 0;
+    }
+    check("defer.lifo", order, 21);
+}
+
+void loop(void) {
+    // The bridge calls loop() repeatedly, the way an Arduino core does; the
+    // checks are one-shot so the report is not accumulated three times.
+    if (g_reported) { return; }
+    g_reported = 1;
+
+    // async entry driven by the freestanding scheduler. The block reads an
+    // enclosing local: the lifted thunk takes it as a parameter (frame field),
+    // so the body sees the value instead of the caller's name.
+    g_sweeper = [[Board::Sweeper alloc] init];
+    int rounds = 21;
+    [NPTask blockOn:async ^ void { await [g_sweeper oneSweep:rounds]; }];
+    check("async.await", [g_sweeper sweeps], 1);
+    check("async.capture", rounds, 21);
+
+    ard_serial_println("");
+    ard_serial_println("checks=");
+    ard_serial_printInt(g_checks);
+    ard_serial_println(" failed=");
+    ard_serial_printInt(g_failed);
+    ard_serial_println("");
+}
