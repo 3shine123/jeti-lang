@@ -422,7 +422,23 @@ impl<'a> Lexer<'a> {
                             Some(b'n') => val = b'\n',
                             Some(b't') => val = b'\t',
                             Some(b'r') => val = b'\r',
-                            Some(b'0') => val = b'\0',
+                            // C octal escape: `\` + 1..3 octal digits (`\101` =
+                            // 'A', `\0` = NUL) — the same rule as the char
+                            // literal path above; only a literal `\0` arm used
+                            // to exist, so `"\101"` failed to lex.
+                            Some(d) if (b'0'..=b'7').contains(&d) => {
+                                let mut oct = (d - b'0') as u32;
+                                for _ in 0..2 {
+                                    match self.peek() {
+                                        Some(e) if (b'0'..=b'7').contains(&e) => {
+                                            oct = oct * 8 + (e - b'0') as u32;
+                                            self.advance();
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                                val = oct as u8;
+                            }
                             Some(b'b') => val = 8,
                             Some(b'f') => val = 12,
                             Some(b'v') => val = 11,
@@ -607,7 +623,24 @@ impl<'a> Lexer<'a> {
                     Some(b'n') => val = b'\n',
                     Some(b't') => val = b'\t',
                     Some(b'r') => val = b'\r',
-                    Some(b'0') => val = b'\0',
+                    // C octal escape: `\` + 1..3 octal digits (`\101` = 'A',
+                    // `\0` = NUL). The table used to carry only a literal `\0`
+                    // arm, so every other octal escape fell through with the
+                    // backslash unconsumed and the literal failed to lex at all
+                    // (`'\101'` was a parse error while `'\x41'` worked).
+                    Some(d) if (b'0'..=b'7').contains(&d) => {
+                        let mut oct = (d - b'0') as u32;
+                        for _ in 0..2 {
+                            match self.peek() {
+                                Some(e) if (b'0'..=b'7').contains(&e) => {
+                                    oct = oct * 8 + (e - b'0') as u32;
+                                    self.advance();
+                                }
+                                _ => break,
+                            }
+                        }
+                        val = oct as u8;
+                    }
                     Some(b'b') => val = 8,
                     Some(b'f') => val = 12,
                     Some(b'v') => val = 11,

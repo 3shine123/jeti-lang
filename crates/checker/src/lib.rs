@@ -1749,6 +1749,34 @@ impl Checker {
     /// must read `int` (not `Int`) — these messages quote the user's code back
     /// at them (`illegal type 'int' in a dictionary literal`).
     fn type_display(t: &AstType) -> String {
+        // Function-pointer / block declarators embed their base type in the
+        // SUBTYPE (`binop (*g)(int)`), so the `_` arm below — which reads
+        // `t.name` — had nothing to print and fell back to the bare `Debug` of
+        // the prim: a fn-ptr typedef variable was reported as "Named *" in
+        // assignment diagnostics. Render the declarator the way the user wrote
+        // it instead.
+        if t.is_fn_ptr || t.is_block {
+            let ret = t.subtype.as_ref()
+                .map(|s| Self::type_display(s))
+                .unwrap_or_else(|| "void".into());
+            let mut params = String::new();
+            let mut bp = t.block_params.as_ref();
+            while let Some(b) = bp {
+                if !params.is_empty() { params.push_str(", "); }
+                params.push_str(&Self::type_display(b));
+                bp = b.next.as_ref();
+            }
+            if params.is_empty() { params.push_str("void"); }
+            if t.is_variadic { params.push_str(", ..."); }
+            let star = if t.is_block { "^" } else { "*" };
+            return format!(
+                "{} ({}{})({})",
+                ret,
+                star,
+                t.block_name.clone().unwrap_or_default(),
+                params
+            );
+        }
         let mut s = match t.prim {
             TypePrim::Void => "void".to_string(),
             TypePrim::Char => "char".to_string(),

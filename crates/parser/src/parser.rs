@@ -1461,6 +1461,11 @@ else if self.match_keyword(KeywordKind::Typeof) {
                 ft.subtype = Some(Box::new(t));
                 // is_name_token: `NPObject * (*copy)(NPObject *, SEL);` — the
                 // vtable's fn-ptr members named after contextual keywords.
+                // Set when this declarator is `T (*name(outer))(inner)` — a
+                // function RETURNING a function pointer. The function's own
+                // parameter list sits between the name and the `)`, which used
+                // to kill the whole declarator with a bare "expected ')'".
+                let mut returned_fnptr: Option<CstType> = None;
                 if self.is_name_token() {
                     ft.block_name = Some(self.current_text().to_string());
                     self.advance();
@@ -1479,6 +1484,45 @@ else if self.match_keyword(KeywordKind::Typeof) {
                             self.advance();
                         }
                         self.consume(TokenKind::RBracket, "expected ']'");
+                    }
+                    // `T (*name(outer))(inner)`: the function's OWN params.
+                    if self.check(TokenKind::LParen) {
+                        self.advance();
+                        let mut outer: Vec<CstType> = Vec::new();
+                        while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
+                            if let Some(mut ptype) = self.parse_type_full() {
+                                // The parameter's NAME rides on its type node:
+                                // the declaration path re-shapes this declarator
+                                // into a function declaration and reads it back
+                                // (the type model has no other slot for a
+                                // parameter list). Only this shape writes it.
+                                if self.is_name_token() {
+                                    ptype.name = Some(self.current_text().to_string());
+                                    self.advance();
+                                }
+                                outer.push(ptype);
+                            } else {
+                                self.advance();
+                            }
+                            if !self.match_token(TokenKind::Comma) { break; }
+                        }
+                        self.consume(TokenKind::RParen, "expected ')'");
+                        let mut head = None;
+                        let mut tail: &mut Option<Box<CstType>> = &mut head;
+                        for p in outer {
+                            let boxed = Box::new(p);
+                            tail = &mut tail.insert(boxed).next;
+                        }
+                        // The RETURNED type is a pointer-to-function; `name`
+                        // itself is a plain function, so the outer node keeps
+                        // `is_pointer` clear and the nested node carries it.
+                        let mut ret_ptr = CstType::new(ft.prim);
+                        ret_ptr.is_fn_ptr = true;
+                        ret_ptr.is_pointer = true;
+                        ret_ptr.subtype = ft.subtype.take();
+                        ft.is_pointer = false;
+                        ft.block_params = head;      // the function's OWN params
+                        returned_fnptr = Some(ret_ptr);
                     }
                 }
                 self.consume(TokenKind::RParen, "expected ')'");
@@ -1515,8 +1559,57 @@ else if self.match_keyword(KeywordKind::Typeof) {
                         let boxed = Box::new(p);
                         tail = &mut tail.insert(boxed).next;
                     }
-                    ft.block_params = head;
+                    match returned_fnptr.take() {
+                        // `T (*name(outer))(inner)` — this list belongs to the
+                        // RETURNED pointer-to-function, not to `name` itself
+                        // (`name`'s own list is already in `ft.block_params`).
+                        Some(mut rp) => {
+                            rp.block_params = head;
+                            rp.is_variadic = ft.is_variadic;
+                            ft.is_variadic = false;
+                            ft.subtype = Some(Box::new(rp));
+                        }
+                        None => ft.block_params = head,
+                    }
                     self.consume(TokenKind::RParen, "expected ')'");
+                } else if let Some(rp) = returned_fnptr {
+                    // `T (*name(outer))` with no inner list — the returned
+                    // pointer-to-function has an unspecified parameter list.
+                    ft.subtype = Some(Box::new(rp));
+                } else if self.check(TokenKind::LBracket) {
+                    // `T (*name)[N]` — POINTER TO ARRAY, not a function pointer.
+                    // The array suffix sits OUTSIDE the declarator parens
+                    // (`int (*row)[4]` is a pointer to `int[4]`), while
+                    // `int (*row[4])(int)` — suffix INSIDE — is an array of
+                    // function pointers and was handled above. Reading this shape
+                    // as a fn-ptr left the base under an array node whose subtype
+                    // carried the name, so the parameter's identity was lost and
+                    // the checker reported "use of undeclared identifier 'row'"
+                    // for every use in the body (probe: probes/stress_jetic).
+                    self.advance(); // '['
+                    let mut size = 0i32;
+                    let mut sname: Option<String> = None;
+                    if self.check(TokenKind::RBracket) {
+                        size = 0;
+                    } else if let Some(num) = self.current_text().parse::<i32>().ok() {
+                        size = num;
+                        self.advance();
+                    } else {
+                        sname = Some(self.current_text().to_string());
+                        self.advance();
+                    }
+                    self.consume(TokenKind::RBracket, "expected ']'");
+                    // The base type moves under a new array node; `ft` stays the
+                    // outer node, so `block_name` (the declarator name) survives
+                    // for the caller to adopt as the parameter name.
+                    let mut arr = CstType::new(ft.prim);
+                    arr.is_array = true;
+                    arr.array_size = size;
+                    arr.array_size_name = sname;
+                    arr.subtype = ft.subtype.take();
+                    ft.is_fn_ptr = false;
+                    ft.is_array = false;
+                    ft.subtype = Some(Box::new(arr));
                 }
                 t = ft;
             } else {
@@ -4913,9 +5006,21 @@ line: pri_line,
     }
 
     fn parse_function_decl_or_definition(&mut self, return_type: CstType, name: String, prefix_attrs: Vec<String>, top_level_async: bool, start: (usize, usize)) -> Option<CstDecl> {
+        self.parse_function_decl_with_params(return_type, name, prefix_attrs, top_level_async, start, None)
+    }
+
+    /// `pre_params` carries a parameter list the DECLARATOR already consumed:
+    /// `T (*name(outer))(inner)` — a function returning a function pointer —
+    /// holds its own parameter list inside the declarator parens, so there is
+    /// nothing left to read from the stream here (see the `returned_fnptr`
+    /// shape in `parse_type_full`).
+    fn parse_function_decl_with_params(&mut self, return_type: CstType, name: String, prefix_attrs: Vec<String>, top_level_async: bool, start: (usize, usize), pre_params: Option<Vec<CstParam>>) -> Option<CstDecl> {
         let mut params = Vec::new();
         let mut has_variadic = false;
 
+        if let Some(pp) = pre_params {
+            params = pp;
+        } else {
         self.consume(TokenKind::LParen, "expected '('");
         while !self.check(TokenKind::RParen) && !self.check(TokenKind::Eof) {
             if self.match_token(TokenKind::Ellipsis) {
@@ -4971,6 +5076,7 @@ line: pri_line,
             if !self.match_token(TokenKind::Comma) { break; }
         }
         self.consume(TokenKind::RParen, "expected ')'");
+        }
 
         // Trailing attributes: `int f(int) __attribute__((pure));`
         let mut trailing_attrs = self.parse_attributes();
@@ -5492,6 +5598,37 @@ line: pri_line,
             self.parse_qualified_name_with_keywords()?
         };
 
+        // `T (*name(outer))(inner)` — a function RETURNING a function pointer.
+        // The declarator consumed the function's own parameter list into
+        // `block_params` (see `returned_fnptr` in `parse_type_full`), so re-shape
+        // it here: the returned pointer-to-function becomes the return type and
+        // the recorded chain becomes the parameter list. Without this the shape
+        // fell through to the variable path and died on the body's `{`.
+        if return_type.is_fn_ptr
+            && return_type.block_params.is_some()
+            && return_type.subtype.as_ref().map_or(false, |s| s.is_fn_ptr)
+        {
+            let mut params: Vec<CstParam> = Vec::new();
+            let mut cursor = return_type.block_params.clone();
+            while let Some(mut p) = cursor {
+                let next = p.next.take();
+                let pname = p.name.take();      // the parameter's name rode here
+                params.push(CstParam {
+                    par_type: Some(Box::new(*p)),
+                    name: pname,
+                    external_name: None,
+                    attributes: Vec::new(),
+                    next: None,
+                });
+                cursor = next;
+            }
+            let ret = return_type.subtype.as_ref()
+                .map(|b| (**b).clone())
+                .unwrap_or_else(|| CstType::new(TypePrim::Int));
+            return self.parse_function_decl_with_params(
+                ret, name, mid_attrs, top_level_async, (decl_line, decl_col), Some(params));
+        }
+
         // Function or variable?
         if self.check(TokenKind::LParen) {
             self.parse_function_decl_or_definition(return_type, name, mid_attrs, top_level_async, (decl_line, decl_col))
@@ -6009,7 +6146,15 @@ if self.current.kind == TokenKind::Identifier {
                 } else {
                     String::new()
                 };
-                if !fname.is_empty() {
+                // C11 6.7.2.1p13 anonymous struct/union member: a nested
+                // aggregate with NO declarator name contributes its members to
+                // the enclosing struct. It used to be dropped here (there was no
+                // name to record), which could empty the whole field list and
+                // degrade the struct to an opaque forward declaration —
+                // "variable has incomplete type 'struct S'".
+                let is_anon_member = fname.is_empty() && ftype.anon_struct_body.is_some();
+                if !fname.is_empty() || is_anon_member {
+                    let field_name: Option<String> = if fname.is_empty() { None } else { Some(fname) };
                     // `ftype` (the base type, before this declarator's array
                     // suffixes) stays available for the comma-separated
                     // declarators below.
@@ -6080,7 +6225,7 @@ if self.current.kind == TokenKind::Identifier {
                     fields.push(CstDecl {
                         kind: CstDeclKind::Ivar,
                         line: self.previous.line, column: self.previous.column,
-                        name: Some(fname),
+                        name: field_name,
                         next: None,
                         data: CstDeclData::Ivar {
                             ivar_type: Some(Box::new(field_type)),

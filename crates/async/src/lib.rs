@@ -251,7 +251,223 @@ fn collect_body_locals(s: &AstStmt, out: &mut std::collections::HashMap<String, 
     }
 }
 
-/// Expr-statement / control-expression / initializer expressions can host
+// ─── async block captures ────────────────────────────────────────────────────
+// An `async ^` block is lifted into a top-level thunk, whose state entry runs
+// with ONLY the task in scope. The M2 frame carries the params, so an enclosing
+// local the block body reads has to enter the thunk the same way: as an extra
+// parameter. These helpers find those locals — the type comes from the enclosing
+// body's declarations and `__block`-qualified ones are refused (their copy would
+// silently drop the write-back).
+
+/// Locals DECLARED inside `body` (any depth), `name -> (type, __block?)`.
+fn body_scope_locals(body: &AstStmt) -> std::collections::HashMap<String, (AstType, bool)> {
+    let mut out = std::collections::HashMap::new();
+    collect_scope_locals(body, &mut out);
+    out
+}
+
+fn collect_scope_locals(s: &AstStmt, out: &mut std::collections::HashMap<String, (AstType, bool)>) {
+    match &s.data {
+        AstStmtData::Decl(d) => {
+            let mut cur: Option<&AstDecl> = Some(d);
+            while let Some(decl) = cur {
+                if let (Some(name), AstDeclData::Variable {
+                    var_type: Some(vt), is_block_qual, next, ..
+                }) = (&decl.name, &decl.data) {
+                    out.insert(name.clone(), (vt.as_ref().clone(), *is_block_qual));
+                    cur = next.as_deref();
+                } else {
+                    cur = None;
+                }
+            }
+        }
+        AstStmtData::Compound(stmts) => { for st in stmts { collect_scope_locals(st, out); } }
+        AstStmtData::If { then, else_, .. } => {
+            collect_scope_locals(then, out);
+            if let Some(e) = else_ { collect_scope_locals(e, out); }
+        }
+        AstStmtData::For { init, body, .. } => {
+            if let Some(i) = init { collect_scope_locals(i, out); }
+            collect_scope_locals(body, out);
+        }
+        AstStmtData::While { body, .. } | AstStmtData::Do { body, .. }
+        | AstStmtData::ForIn { body, .. } | AstStmtData::Switch { body, .. }
+        | AstStmtData::Case { body, .. } | AstStmtData::Default(body)
+        | AstStmtData::Synchronized { body, .. } | AstStmtData::Autoreleasepool(body)
+        | AstStmtData::NoArc(body) | AstStmtData::Defer(body) | AstStmtData::Finally(body)
+        | AstStmtData::Catch { body, .. } => collect_scope_locals(body, out),
+        AstStmtData::SwitchPat { arms, default_body, .. } => {
+            for a in arms { collect_scope_locals(&a.body, out); }
+            if let Some(d) = default_body { collect_scope_locals(d, out); }
+        }
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            collect_scope_locals(try_block, out);
+            for c in catches { collect_scope_locals(c, out); }
+            if let Some(f) = finally_block { collect_scope_locals(f, out); }
+        }
+        _ => {}
+    }
+}
+
+/// Names an expression reads as plain variables (VarRef only: selectors, ivars
+/// and function names are not enclosing locals).
+fn collect_free_idents_expr(e: &AstExpr, out: &mut std::collections::HashSet<String>) {
+    match &e.data {
+        AstExprData::VarRef { name, .. } => { out.insert(name.clone()); }
+        AstExprData::IvarRef { obj, .. } | AstExprData::PropRef { obj, .. } => {
+            collect_free_idents_expr(obj, out);
+        }
+        AstExprData::MsgSend { receiver, args, .. } => {
+            collect_free_idents_expr(receiver, out);
+            for a in args { collect_free_idents_expr(a, out); }
+        }
+        AstExprData::FuncCall { callee, args, .. } => {
+            if let Some(c) = callee { collect_free_idents_expr(c, out); }
+            for a in args { collect_free_idents_expr(a, out); }
+        }
+        AstExprData::Unary { operand, .. } => collect_free_idents_expr(operand, out),
+        AstExprData::Binary { left, right, .. } => {
+            collect_free_idents_expr(left, out);
+            collect_free_idents_expr(right, out);
+        }
+        AstExprData::Assign { target, value } => {
+            collect_free_idents_expr(target, out);
+            collect_free_idents_expr(value, out);
+        }
+        AstExprData::Cast { expr, .. } | AstExprData::Paren(expr)
+        | AstExprData::Boxed(expr) | AstExprData::Await { inner: expr } => {
+            collect_free_idents_expr(expr, out);
+        }
+        AstExprData::ArrayLit(v) | AstExprData::InitList(v) | AstExprData::Comma(v) => {
+            for x in v { collect_free_idents_expr(x, out); }
+        }
+        AstExprData::DictLit { keys, values } => {
+            for x in keys { collect_free_idents_expr(x, out); }
+            for x in values { collect_free_idents_expr(x, out); }
+        }
+        AstExprData::DesignatedInit { expr, .. } => collect_free_idents_expr(expr, out),
+        AstExprData::Subscript { object, key } => {
+            collect_free_idents_expr(object, out);
+            collect_free_idents_expr(key, out);
+        }
+        AstExprData::Sizeof { expr: Some(x), .. } => collect_free_idents_expr(x, out),
+        AstExprData::Ternary { cond, then, else_ } => {
+            collect_free_idents_expr(cond, out);
+            collect_free_idents_expr(then, out);
+            collect_free_idents_expr(else_, out);
+        }
+        AstExprData::Block { body: Some(b), .. } => collect_free_idents_stmt(b, out),
+        AstExprData::StmtExpr(stmts) => { for s in stmts { collect_free_idents_stmt(s, out); } }
+        _ => {}
+    }
+}
+
+fn collect_free_idents_decl(d: &AstDecl, out: &mut std::collections::HashSet<String>) {
+    if let AstDeclData::Variable { init, next, .. } = &d.data {
+        if let Some(e) = init { collect_free_idents_expr(e, out); }
+        if let Some(n) = next { collect_free_idents_decl(n, out); }
+    }
+}
+
+fn collect_free_idents_stmt(s: &AstStmt, out: &mut std::collections::HashSet<String>) {
+    match &s.data {
+        AstStmtData::Expr(e) => collect_free_idents_expr(e, out),
+        AstStmtData::Return(Some(e)) | AstStmtData::Throw(Some(e)) => {
+            collect_free_idents_expr(e, out);
+        }
+        AstStmtData::Decl(d) => collect_free_idents_decl(d, out),
+        AstStmtData::Compound(stmts) => { for st in stmts { collect_free_idents_stmt(st, out); } }
+        AstStmtData::If { cond, then, else_ } => {
+            collect_free_idents_expr(cond, out);
+            collect_free_idents_stmt(then, out);
+            if let Some(e) = else_ { collect_free_idents_stmt(e, out); }
+        }
+        AstStmtData::While { cond, body } | AstStmtData::Do { cond, body } => {
+            collect_free_idents_expr(cond, out);
+            collect_free_idents_stmt(body, out);
+        }
+        AstStmtData::For { init, cond, incr, body } => {
+            if let Some(i) = init { collect_free_idents_stmt(i, out); }
+            if let Some(c) = cond { collect_free_idents_expr(c, out); }
+            if let Some(u) = incr { collect_free_idents_expr(u, out); }
+            collect_free_idents_stmt(body, out);
+        }
+        AstStmtData::ForIn { var, collection, body } => {
+            collect_free_idents_expr(var, out);
+            collect_free_idents_expr(collection, out);
+            collect_free_idents_stmt(body, out);
+        }
+        AstStmtData::Switch { expr, body } => {
+            collect_free_idents_expr(expr, out);
+            collect_free_idents_stmt(body, out);
+        }
+        AstStmtData::SwitchPat { expr, arms, default_body, .. } => {
+            collect_free_idents_expr(expr, out);
+            for a in arms {
+                if let Some(g) = &a.guard { collect_free_idents_expr(g, out); }
+                collect_free_idents_stmt(&a.body, out);
+            }
+            if let Some(d) = default_body { collect_free_idents_stmt(d, out); }
+        }
+        AstStmtData::Case { value, body } => {
+            collect_free_idents_expr(value, out);
+            collect_free_idents_stmt(body, out);
+        }
+        AstStmtData::Default(body) | AstStmtData::Autoreleasepool(body)
+        | AstStmtData::NoArc(body) | AstStmtData::Defer(body) | AstStmtData::Finally(body)
+        | AstStmtData::Catch { body, .. } => collect_free_idents_stmt(body, out),
+        AstStmtData::Synchronized { lock, body } => {
+            collect_free_idents_expr(lock, out);
+            collect_free_idents_stmt(body, out);
+        }
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            collect_free_idents_stmt(try_block, out);
+            for c in catches { collect_free_idents_stmt(c, out); }
+            if let Some(f) = finally_block { collect_free_idents_stmt(f, out); }
+        }
+        _ => {}
+    }
+}
+
+/// Enclosing locals an `async ^` block body reads, name-sorted for deterministic
+/// output: `(name, type)`. These ride along as extra thunk parameters, so the
+/// M2 frame carries them and the entry reads `__jeti_f->name`.
+///
+/// A `__block`-qualified local is REFUSED with a diagnostic instead of being
+/// captured: the frame holds a copy, so a write inside the block would silently
+/// never reach the enclosing scope.
+fn async_block_captures(
+    params: &[(AstType, String)],
+    body: Option<&AstStmt>,
+    ctx: &mut AsyncCtx,
+) -> Vec<(String, AstType)> {
+    let Some(body) = body else { return Vec::new() };
+    let mut referenced = std::collections::HashSet::new();
+    collect_free_idents_stmt(body, &mut referenced);
+    let own = body_scope_locals(body);
+    let mut names: Vec<String> = referenced
+        .into_iter()
+        .filter(|n| n != "self")
+        .filter(|n| !params.iter().any(|(_, pn)| pn == n))
+        .filter(|n| !own.contains_key(n))
+        .filter(|n| ctx.enclosing_locals.contains_key(n))
+        .collect();
+    names.sort();
+    let mut caps: Vec<(String, AstType)> = Vec::new();
+    for n in names {
+        let (t, is_block) = ctx.enclosing_locals[&n].clone();
+        if is_block {
+            ctx.errors.push(format!(
+                "async block captures '__block {0}': the lifted thunk copies it into the task frame, so a write inside the block would never reach the enclosing scope — use a plain local for a read-only capture, or a file-scope variable (rule: async block captures)",
+                n));
+            continue;
+        }
+        caps.push((n, t));
+    }
+    caps
+}
+
+
 /// block literals (`^{ SyncB *y = …; }` bodies at ANY depth): the block's own
 /// locals must reach the receiver-class table too, or `[y run]` inside the
 /// block falls back to the global set and a same-named sync method on another
@@ -1900,6 +2116,13 @@ struct AsyncCtx {
     /// `[local sel]` resolves the receiver's static class (rebuilt per body —
     /// the desugar runs before the checker, so expr_type is unavailable).
     local_classes: std::collections::HashMap<String, String>,
+    /// Locals of the body currently being lowered, `name -> (type, __block?)`.
+    /// An `async ^` block has no closure environment in the M2 model, so every
+    /// enclosing local its body reads must be handed to the thunk as an extra
+    /// parameter (which the existing param machinery turns into a frame field).
+    /// Without this the lifted entry referenced the caller's names raw
+    /// (`use of undeclared identifier 'local'` — probe-verified).
+    enclosing_locals: std::collections::HashMap<String, (AstType, bool)>,
     task_vars: std::collections::HashSet<String>,
     /// Hidden async-block thunk function names (§5 desugar): a call to one of
     /// these yields a task handle, so statement-position IIFEs drive like
@@ -2935,6 +3158,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
     let mut ctx = AsyncCtx {
         scope: AsyncSelScope::from_unit(unit),
         local_classes: std::collections::HashMap::new(),
+        enclosing_locals: std::collections::HashMap::new(),
         task_vars: std::collections::HashSet::new(),
         async_block_fns: std::collections::HashSet::new(),
         sel_ret_obj,
@@ -2970,6 +3194,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
                         let mut locals = param_locals(params.as_deref());
                         locals.extend(body_locals(b));
                         ctx.local_classes = locals;
+                        ctx.enclosing_locals = body_scope_locals(b);
                         lower_async_blocks_stmt(b, &mut block_thunk_seq, &mut top_decls2, &mut ctx);
                     }
                 }
@@ -2980,6 +3205,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
                 let mut locals = param_locals(params.as_deref());
                 locals.extend(body_locals(b));
                 ctx.local_classes = locals;
+                ctx.enclosing_locals = body_scope_locals(b);
                 lower_async_blocks_stmt(b, &mut block_thunk_seq, &mut top_decls2, &mut ctx);
             }
             _ => {}
@@ -3000,6 +3226,7 @@ pub fn desugar_unit_m2(unit: &mut jeti_ast::AstUnit) -> (Vec<String>, Vec<String
                     let mut locals = param_locals(params.as_deref());
                     locals.extend(body_locals(b));
                     ctx.local_classes = locals;
+                    ctx.enclosing_locals = body_scope_locals(b);
                     // Extract param list (name, type) from CstParam chain.
                     let mut plist: Vec<(String, AstType)> = Vec::new();
                     let mut p = params.as_ref().map(|b| &**b);
@@ -3375,8 +3602,16 @@ fn lower_async_blocks_expr(
                             if let Some(ref mut b) = body {
                                 lower_async_blocks_stmt(b, seq, top_decls, ctx);
                             }
+                            // Enclosing locals the body reads ride along as
+                            // extra thunk params → frame fields: the M2 model
+                            // has no closure environment, and without them the
+                            // lifted entry referenced the caller's names raw
+                            // (`use of undeclared identifier 'local'`).
+                            let captures = async_block_captures(&params, body.as_deref(), ctx);
+                            let mut thunk_params = params.clone();
+                            thunk_params.extend(captures.iter().map(|(n, t)| (t.clone(), n.clone())));
                             build_async_block_thunk(
-                                &thunk_name, &params, return_type.as_deref(), body,
+                                &thunk_name, &thunk_params, return_type.as_deref(), body,
                                 top_decls, ctx,
                             );
                             ctx.async_block_fns.insert(thunk_name.clone());
@@ -3400,7 +3635,14 @@ fn lower_async_blocks_expr(
                                     end_col: 0,
                                 }
                             };
-                            let call = call_expr(&thunk_name, vec![capture], line, col);
+                            let mut call_args: Vec<AstExpr> = captures
+                                .iter()
+                                .map(|(n, _)| ident_expr(n, line, col))
+                                .collect();
+                            // Hidden self capture stays LAST, matching the thunk
+                            // signature order (params, captures, self_cap).
+                            call_args.push(capture);
+                            let call = call_expr(&thunk_name, call_args, line, col);
                             *e = AstExpr {
                                 kind: AstExprKind::Await, expr_type: None, line, col,
                                 data: AstExprData::Await { inner: Box::new(call) },
@@ -3484,13 +3726,21 @@ fn lower_async_blocks_expr(
                 if let Some(ref mut b) = body {
                     lower_async_blocks_stmt(b, seq, top_decls, ctx);
                 }
-                build_async_block_thunk(&thunk_name, &params, return_type.as_deref(), body, top_decls, ctx);
+                let captures = async_block_captures(&params, body.as_deref(), ctx);
+                let mut thunk_params = params.clone();
+                thunk_params.extend(captures.iter().map(|(n, t)| (t.clone(), n.clone())));
+                build_async_block_thunk(&thunk_name, &thunk_params, return_type.as_deref(), body, top_decls, ctx);
                 ctx.async_block_fns.insert(thunk_name.clone());
                 ctx.block_ret_obj.insert(
                     thunk_name.clone(),
                     return_type.as_deref().map_or(false, type_is_object),
                 );
                 let mut call_args = std::mem::take(args);
+                // Captured enclosing locals come BEFORE the hidden self capture
+                // (thunk signature: params, captures, self_cap).
+                for (n, _) in captures.iter() {
+                    call_args.push(ident_expr(n, line, col));
+                }
                 // Hidden capture argument: the live `self` inside a method;
                 // `(NPObject *)0` in plain functions/main (§5) — there is no
                 // self in scope there, and a block body that uses it is
@@ -3557,7 +3807,10 @@ fn lower_async_blocks_expr(
             // Thunk still carries the block's params (the body references
             // them through the frame); it just never gets CALLED here.
             let return_type = elided_block_return_type(return_type, body.as_deref(), ctx, line, col);
-            build_async_block_thunk(&thunk_name, &params, return_type.as_deref(), body, top_decls, ctx);
+            let captures = async_block_captures(&params, body.as_deref(), ctx);
+            let mut thunk_params = params.clone();
+            thunk_params.extend(captures.iter().map(|(n, t)| (t.clone(), n.clone())));
+            build_async_block_thunk(&thunk_name, &thunk_params, return_type.as_deref(), body, top_decls, ctx);
             ctx.async_block_fns.insert(thunk_name.clone());
             ctx.block_ret_obj.insert(
                 thunk_name.clone(),

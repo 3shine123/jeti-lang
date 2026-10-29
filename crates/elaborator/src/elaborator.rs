@@ -497,21 +497,22 @@ impl Elaborator {
                     _ => ce.clone(),
                 });
                 if let Some(ref ce) = callee_for_call {
-                    // Renderable call targets: member expressions (ivar access,
-                    // struct fields via dot/arrow — `w.cb(3)` where cb is a
-                    // fn-ptr, C-superset member call) and the block literal
-                    // itself (immediately-invoked block, `^{…}(args)` IIFE).
-                    // Keep the callee so codegen emits the call instead of
-                    // dropping it.
-                    if matches!(ce.data,
-                        AstExprData::IvarRef { .. } | AstExprData::PropRef { .. } | AstExprData::Block { .. }
-                        // Computed call targets — a cast (`((T(*)(…))x->m)(args)`,
-                        // the generated vtable-dispatch shape), a parenthesized or
-                        // prefix-operator receiver, an indexed one. Dropping any of
-                        // these collapsed the call to a bare `(args)`.
-                        | AstExprData::Cast { .. } | AstExprData::Paren(_)
-                        | AstExprData::Unary { .. } | AstExprData::Subscript { .. }) {
-                        // Block invocation on ivar — store callee expression
+                    // A callee that is not a plain NAME keeps its expression:
+                    // the call of a call result (`f(x)(y)`), of a subscript
+                    // (`t[i](y)`), of a member (`w.cb(y)`), of a cast, of a
+                    // prefix operator, of a block. This used to be an allow-list
+                    // enumerating the shapes someone had thought of, and every
+                    // shape missing from it was SILENTLY DROPPED: `pick(0)(10, 4)`
+                    // rendered as `(10, 4)`, so the inner call and its arguments
+                    // vanished and the comma expression's value came back as the
+                    // "result" (probe-verified silent miscompile). Invert it: a
+                    // plain name goes down the name/symbol path below, anything
+                    // else keeps its callee.
+                    let callee_is_plain_name = matches!(callee.data, CstExprData::Ident(_))
+                        && matches!(ce.data, AstExprData::VarRef { .. });
+                    if !callee_is_plain_name {
+                        // Keep the callee so codegen emits the call instead of
+                        // dropping it.
                         AstExpr { kind: AstExprKind::FuncCall, expr_type: None, line, col,
                             data: AstExprData::FuncCall { func: None, name, callee: Some(Box::new(ce.clone())), args: args_list },
                             end_line: cst_end.0,
@@ -659,6 +660,11 @@ impl Elaborator {
                 }
             }
         }
+        // Where a dot access lands: an ivar or property declared on the
+        // receiver's class OR any ancestor — `(is_ivar, defining class)`.
+        // Filled in below (pure symbol-table walk, no `&mut self`), then turned
+        // into a node once the symtab borrow is released.
+        let mut dot_hit: Option<(bool, Option<String>)> = None;
         // Non-self object access (like C's elaborator lines 259-353)
         if let Some(ref st) = self.symtab {
             if let CstExprData::Ident(ref obj_name) = object.data {
@@ -741,32 +747,51 @@ impl Elaborator {
                         }
                     }
                 }
-                // Try to find the property or ivar in the class
+                // Locate the member on the receiver's class OR any ancestor. An
+                // inherited `@property` used to miss here, fall through to the
+                // untyped PropRef below, and codegen emitted a raw member access
+                // (`st.angle` → `st->angle`, "no member named 'angle' in
+                // 'struct Sub'"). An ivar wins over a same-named property,
+                // matching the self/super path above.
                 if let Some(cls_sym) = cls {
-                    if let SymbolData::Class { ref ivars, ref properties, .. } = cls_sym.data {
-                        // Check if it's an ivar first
-                        if ivars.contains(&property.to_string()) {
-                            return AstExpr {
-                                kind: AstExprKind::IvarRef, expr_type: None, line, col,
-                                data: AstExprData::IvarRef { ivar: Some(property.to_string()), cls: Some(cls_sym.name.clone()), obj: Box::new(self.convert_expr(object).unwrap_or_else(make_self_expr)) },
-                                end_line,
-                                end_col,
-                            };
-                        }
-                        // Then check if it's a property
-                        if properties.contains(&property.to_string()) {
-                            // ObjC instances are always `Type *` in generated C,
-                            // so force `->` regardless of source `.`/`->`.
-                            return AstExpr {
-                                kind: AstExprKind::PropRef, expr_type: None, line, col,
-                                data: AstExprData::PropRef { prop: Some(property.to_string()), cls: Some(cls_sym.name.clone()), obj: Box::new(self.convert_expr(object).unwrap_or_else(make_self_expr)), name: property.to_string(), is_arrow: true },
-                                end_line,
-                                end_col,
-                            };
+                    let mut cur = Some(cls_sym);
+                    while let Some(csym) = cur {
+                        if let SymbolData::Class { ref ivars, ref properties, ref superclass, .. } = csym.data {
+                            if ivars.iter().any(|iv| iv == property) {
+                                dot_hit = Some((true, Some(csym.name.clone())));
+                                break;
+                            }
+                            if properties.iter().any(|p| p == property) {
+                                dot_hit = Some((false, Some(csym.name.clone())));
+                                break;
+                            }
+                            cur = superclass.as_ref().and_then(|s| st.find_class(s));
+                        } else {
+                            break;
                         }
                     }
                 }
             }
+        }
+        if let Some((is_ivar, owner)) = dot_hit {
+            let obj_ast = self.convert_expr(object).unwrap_or_else(make_self_expr);
+            if is_ivar {
+                return AstExpr {
+                    kind: AstExprKind::IvarRef, expr_type: None, line, col,
+                    data: AstExprData::IvarRef { ivar: Some(property.to_string()), cls: owner, obj: Box::new(obj_ast) },
+                    end_line,
+                    end_col,
+                };
+            }
+            // ObjC instances are always `Type *` in generated C, so force `->`
+            // regardless of source `.`/`->`. `cls` is the DEFINING class: an
+            // inherited property resolves through its inherited getter.
+            return AstExpr {
+                kind: AstExprKind::PropRef, expr_type: None, line, col,
+                data: AstExprData::PropRef { prop: Some(property.to_string()), cls: owner, obj: Box::new(obj_ast), name: property.to_string(), is_arrow: true },
+                end_line,
+                end_col,
+            };
         }
         let obj_ast = self.convert_expr(object).unwrap_or_else(make_self_expr);
         AstExpr {

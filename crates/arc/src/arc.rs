@@ -570,9 +570,14 @@ fn insert_exit_cleanup(
 
     // Either the expression mentions the local outright, or the local is
     // captured by a block that the expression might call. Both force the
-    // evaluate-then-release order.
-    let needs_tmp = exit_expr.map_or(false, |e| exit_expr_reads(e, vars))
-        || vars.iter().any(|v| captured.iter().any(|c| c == v));
+    // evaluate-then-release order — but ONLY when there is an exit expression
+    // to evaluate: a bare `return;` / `throw;` calls nothing at the exit, so
+    // releasing first is already correct (and forcing the temporary panicked on
+    // a missing expression — probe: bare return in a body whose local is
+    // captured by a block).
+    let needs_tmp = exit_expr.is_some()
+        && (exit_expr.map_or(false, |e| exit_expr_reads(e, vars))
+            || vars.iter().any(|v| captured.iter().any(|c| c == v)));
     // Reverse declaration order: locals unwind like a stack, and this is the
     // order ARC has always emitted (tests/golden/28_refcount_trace pins it).
     let releases: Vec<AstStmt> = vars

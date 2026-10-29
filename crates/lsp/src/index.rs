@@ -27,7 +27,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use jeti_ast::ast::{AstDecl, AstDeclData, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit, AstUsing};
+use jeti_ast::ast::{AstDecl, AstDeclData, AstDesignator, AstExpr, AstExprData, AstStmt, AstStmtData, AstType, AstUnit, AstUsing};
 use jeti_cst::source_map::{LspPosition, LspRange, SourceMap};
 use jeti_cst::{CstParam, CstType, TypePrim};
 use serde_json::{json, Value};
@@ -1626,12 +1626,12 @@ impl SymbolIndex {
         document: &str,
         text_of: &mut impl FnMut(&str) -> Option<String>,
     ) -> Option<Scope> {
-        let (params, body, self_type, return_type) = match &decl.data {
-            AstDeclData::Method { params, body, return_type, .. } => {
-                (params.as_deref(), body.as_deref(), container, return_type.as_deref())
+        let (params, body, self_type) = match &decl.data {
+            AstDeclData::Method { params, body, .. } => {
+                (params.as_deref(), body.as_deref(), container)
             }
-            AstDeclData::Function { params, body, return_type, .. } => {
-                (params.as_deref(), body.as_deref(), None, return_type.as_deref())
+            AstDeclData::Function { params, body, .. } => {
+                (params.as_deref(), body.as_deref(), None)
             }
             AstDeclData::Variable { .. } => {
                 // A file-scope variable is visible everywhere in the document.
@@ -1712,29 +1712,15 @@ impl SymbolIndex {
                     type_spelling: spelling.clone(),
                     decl_line: None,
                 });
-                // Signature inlay: the parameter's type after its name.
-                if let Some(position) =
-                    name_end_after(&text, &self.line_offsets, source_map, decl.line, decl.col, name)
-                {
-                    self.type_hints.push(InlayHint {
-                        position,
-                        label: format!(" -> {spelling}"),
-                        kind: 1,
-                    });
-                }
+                // No type hint at a DECLARATION site: the type is spelled right
+                // before the name, so `int value` reading `value -> int` is
+                // noise (clangd does not emit it either). USE sites keep their
+                // hint — see the `VarRef` arm of the body walk.
             }
             param = current.next.as_deref();
         }
-        // The return type, after the parameter list (`(int a) -> int`).
-        if let Some(return_type) = return_type {
-            if let Some(position) = param_list_end(&text, &self.line_offsets, source_map, decl) {
-                self.type_hints.push(InlayHint {
-                    position,
-                    label: format!(" -> {}", ast_type_spell(return_type)),
-                    kind: 1,
-                });
-            }
-        }
+        // No return-type hint after the parameter list: `(int a) -> int`
+        // repeats the type already spelled at the start of the same line.
         // The enclosing class's ivars are visible by name inside its methods.
         if let Some(class) = self_type {
             if let Some(info) = self.classes.get(class) {
@@ -2414,40 +2400,6 @@ fn name_end_after(
 /// The position just past a function/method's parameter list on its own line —
 /// where a return-type inlay sits (`(int a) -> int`). The `(` is the first one
 /// after the name; its matching `)` closes the list.
-fn param_list_end(
-    text: &str,
-    offsets: &[usize],
-    source_map: &SourceMap,
-    decl: &AstDecl,
-) -> Option<LspPosition> {
-    // Same flattened-line projection as `name_end_after`: the search must run
-    // on the document's own line; the span keeps the flattened line for
-    // `span_from_node` to map.
-    let (_, real_line) = source_map.locate(decl.line);
-    let line = line_slice(text, offsets, real_line as usize)?;
-    let name = decl.name.as_deref()?;
-    let name_at = line.find(name)?;
-    let open = line[name_at + name.len()..].find('(')? + name_at + name.len();
-    let mut depth = 0usize;
-    for (i, b) in line.as_bytes().iter().enumerate().skip(open) {
-        match b {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    let span = source_map.span_from_node(
-                        (decl.line as u32, (i + 2) as u32),
-                        (decl.line as u32, (i + 2) as u32),
-                    );
-                    return Some(source_map.to_lsp_range(&span, text).start);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// The aggregate name behind a spelled type: `np_u128 *`, `struct Point` and
 /// `const Foo` all name the same layout. Anything else (a block type, a
 /// function pointer, an array) is not an aggregate — `None`, so callers stay
@@ -3158,20 +3110,53 @@ impl BodyWalk<'_> {
             // Designator inlays: a positional initializer list spells no member
             // names, so show them — `int a[] = {1, 2}` reads `{[0]=1, [1]=2}`
             // and `Point p = {1, 2}` reads `{.x=1, .y=2}`.
+            //
+            // An element that already spells its own designator (`.x = 1`) gets
+            // NOTHING: the source names that member right there, so a hint would
+            // duplicate it. The positional elements around it still do, and they
+            // are labelled by where C actually puts them — the member after the
+            // LAST designator (wrapping for a struct, the next index for an
+            // array) — never by their position in the list.
             if let (Some(ty), Some(init_expr)) = (var_type.as_deref(), init.as_deref()) {
                 if let AstExprData::InitList(elems) | AstExprData::ArrayLit(elems) = &init_expr.data {
-                    for (i, elem) in elems.iter().enumerate() {
+                    // Field names, copied out so the loop below does not hold a
+                    // borrow of `self.layouts` across the hint pushes.
+                    let fields: Vec<String> = if ty.is_struct {
+                        ty.name
+                            .as_deref()
+                            .and_then(|n| self.layouts.get(n))
+                            .map(|layout| layout.fields.iter().map(|f| f.name.clone()).collect())
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    // `None` = the next position can no longer be derived (an
+                    // index designator this walk cannot evaluate, or more
+                    // elements than the layout has fields): emit nothing for the
+                    // rest rather than guess — a missing hint is acceptable, a
+                    // wrong label is not.
+                    let mut cursor: Option<usize> = Some(0);
+                    for elem in elems.iter() {
+                        if let AstExprData::DesignatedInit { designators, .. } = &elem.data {
+                            cursor = designators.last().and_then(|d| match d {
+                                AstDesignator::Member(name) => fields
+                                    .iter()
+                                    .position(|f| f == name)
+                                    .map(|i| (i + 1) % fields.len()),
+                                AstDesignator::Index(_) => None,
+                            });
+                            continue;
+                        }
+                        let Some(i) = cursor else { continue };
                         let designator = if ty.is_array {
                             format!("[{i}]=")
                         } else if ty.is_struct {
-                            match ty
-                                .name
-                                .as_deref()
-                                .and_then(|n| self.layouts.get(n))
-                                .and_then(|layout| layout.fields.get(i))
-                            {
-                                Some(field) => format!(".{}=", field.name),
-                                None => continue,
+                            match fields.get(i) {
+                                Some(name) => format!(".{name}="),
+                                None => {
+                                    cursor = None;
+                                    continue;
+                                }
                             }
                         } else {
                             continue;
@@ -3183,6 +3168,7 @@ impl BodyWalk<'_> {
                                 kind: 1,
                             });
                         }
+                        cursor = Some(i + 1);
                     }
                 }
             }
@@ -3374,13 +3360,33 @@ impl BodyWalk<'_> {
                 self.expr(obj);
             }
             AstExprData::Unary { operand, is_postfix, .. } => {
-                // A prefix operator glues to its operand (`*carry`, `&x`): a
-                // hint after the operand splits the pair. Postfix ends
-                // cleanly — keep it.
-                if !*is_postfix {
-                    self.record_chain_base(operand);
-                }
+                // An operator glues to its operand, prefix (`*carry`, `&x`) and
+                // postfix (`i++`) alike: a hint inserted between them splits the
+                // pair (`i« -> int»++`). Every tool that ships expression type
+                // hints anchors them at the END of the expression instead —
+                // gopls uses `Position: e.End()`, rust-analyzer moved its hints
+                // from before the item to after it — so the operand is recorded
+                // as a chain base and the hint is emitted after the whole
+                // expression below.
+                self.record_chain_base(operand);
                 self.expr(operand);
+                // No "is this expression itself a chain base" guard here: a
+                // postfix expression STARTS where its operand starts (the `++`
+                // comes after), so `chain_bases` would always look like a hit.
+                // The anchor below is the end of the whole expression either
+                // way, which is also the end of any enclosing prefix operator.
+                if *is_postfix {
+                    let spelling = self.expr_type_spelling(operand).unwrap_or_default();
+                    if !spelling.is_empty() {
+                        if let Some(range) = self.expr_range(expr) {
+                            self.type_hints.push(InlayHint {
+                                position: range.end,
+                                label: format!(" -> {spelling}"),
+                                kind: 1,
+                            });
+                        }
+                    }
+                }
             }
             AstExprData::Binary { left, right, .. } => {
                 self.expr(left);
@@ -4185,6 +4191,88 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_postfix_operator_keeps_its_hint_after_the_whole_expression() {
+        // `i++` is a glued pair like `*p`, so the hint goes AFTER it — never
+        // between `i` and `++` (`i« -> int»++`). That trailing anchor is what
+        // every tool shipping expression type hints does: gopls uses
+        // `Position: e.End()`, rust-analyzer moved its hints from before the
+        // item to after it. A prefix operator's operand stays unlabelled
+        // entirely (`-i`, `!i`, `*p`, `++i`), which is why only the lines below
+        // carry a hint.
+        let src = "\
+int f(int *p, int i, int j) {
+    i++;
+    ++i;
+    j = i + j;
+    int v = *p;
+    v = -i;
+    return v;
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let hints: Vec<(u32, u32, String)> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .filter(|h| h.kind == 1)
+            .map(|h| (h.position.line, h.position.character, h.label))
+            .collect();
+        assert_eq!(
+            hints,
+            vec![
+                (1, 7, " -> int".to_string()),  // `i++` — after the `++`
+                (3, 5, " -> int".to_string()),  // `j =`
+                (3, 9, " -> int".to_string()),  // `i` in `i + j`
+                (3, 13, " -> int".to_string()), // `j` in `i + j`
+                (5, 5, " -> int".to_string()),  // `v =` (`-i` stays unlabelled)
+                (6, 12, " -> int".to_string()), // `return v;`
+            ],
+            "{hints:?}"
+        );
+    }
+
+    #[test]
+    fn an_ivar_declaration_carries_no_hint_but_an_argument_use_does() {
+        // The ivar's declaration already spells `int _value`, so it gets no
+        // hint; the USE of the parameter `v` is what is worth labelling
+        // (`_value = v;` reads `_value = v -> int;`). `_value` itself — the
+        // declaration and both uses — stays unlabelled.
+        let src = "\
+@interface Holder : NPObject {
+    int _value;
+}
+@end
+@implementation Holder
+- (void)setV:(int)v {
+    _value = v;
+    _value = _value + v;
+}
+@end
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let labels: Vec<String> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .filter(|h| h.kind == 1)
+            .map(|h| h.label)
+            .collect();
+        assert_eq!(labels, vec![" -> int", " -> int"], "{labels:?}");
+    }
+
+    #[test]
     fn debug_calls() {
         let src = "\
 int helper(int value, int other) { return helper(1, 2); }
@@ -4236,9 +4324,10 @@ int f(void) {
             .filter(|h| h.kind == 1)
             .collect();
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
-        // `f`'s return type, then the three uses (the `int a` / `long i`
-        // declarations themselves are not uses).
-        assert_eq!(labels, vec![" -> int", " -> int", " -> long", " -> int"], "{hints:?}");
+        // The three uses only: the `int a` / `long i` declarations are not
+        // uses, and the signature spells its own types (no declaration-site
+        // hints).
+        assert_eq!(labels, vec![" -> int", " -> long", " -> int"], "{hints:?}");
     }
 
     #[test]
@@ -4267,16 +4356,19 @@ int f(void) {
             .filter(|h| h.kind == 1)
             .collect();
         let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
-        // `f`'s return type, then the `__auto_type` definition and the use —
-        // both inferred as `int`, never the `__auto_type` marker.
-        assert_eq!(labels, vec![" -> int", " -> int", " -> int"], "{hints:?}");
+        // The `__auto_type` definition and the use — both inferred as `int`,
+        // never the `__auto_type` marker. (The definition IS a declaration, but
+        // the type is not spelled there at all, so the hint is the only way to
+        // see it.)
+        assert_eq!(labels, vec![" -> int", " -> int"], "{hints:?}");
     }
 
     #[test]
-    fn signatures_carry_their_return_and_parameter_types() {
-        // Each parameter's type after its name, and the return type after the
-        // parameter list. The body has no variable use, so these are the only
-        // type hints.
+    fn signature_declarations_carry_no_type_hints() {
+        // A declaration spells its own type, so repeating it after the name
+        // (`int a` reading `a -> int`) or after the parameter list
+        // (`(int a) -> int`) is noise — the same choice clangd's inlay hints
+        // make. Only USE sites get a hint.
         let src = "int add(int a, int b) { return 0; }\n";
         let mut pipeline = jetic::pipeline::Pipeline::new();
         let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
@@ -4291,8 +4383,7 @@ int f(void) {
             .into_iter()
             .filter(|h| h.kind == 1)
             .collect();
-        let labels: Vec<&str> = hints.iter().map(|h| h.label.as_str()).collect();
-        assert_eq!(labels, vec![" -> int", " -> int", " -> int"], "{hints:?}");
+        assert!(hints.is_empty(), "{hints:?}");
     }
 
     #[test]
@@ -4323,6 +4414,41 @@ int use(void) {
             .filter(|l| l.ends_with('='))
             .collect();
         assert_eq!(labels, vec!["[0]=", "[1]=", "[2]=", ".x=", ".y="], "{labels:?}");
+    }
+
+    #[test]
+    fn an_explicit_designator_is_not_repeated_by_a_hint() {
+        // `.x = 1` already names its member in the source, so a hint there would
+        // duplicate it — that element gets NOTHING. The positional element after
+        // it still does, labelled by where C actually puts it (the member after
+        // the last designator, wrapping for a struct), not by its index in the
+        // list.
+        let src = "\
+struct FsPoint { int x; int y; };
+int use(void) {
+    struct FsPoint p1 = { .x = 1, 7 };
+    struct FsPoint p2 = { .y = 1, 7 };
+    return 0;
+}
+";
+        let mut pipeline = jetic::pipeline::Pipeline::new();
+        let analysis = pipeline.analyze_document(src, "/tmp/y.jeti");
+        let index = SymbolIndex::build(
+            analysis.ast.as_ref().expect("ast"),
+            &analysis.source_map,
+            &|_| Some(src.to_string()),
+            "/tmp/y.jeti",
+        );
+        let labels: Vec<String> = index
+            .inlay_hints(&crate::cheader::CSignatures::default())
+            .into_iter()
+            .map(|h| h.label)
+            .filter(|l| l.ends_with('='))
+            .collect();
+        // p1: `.x` is spelled, so only the trailing `7` is hinted — as `.y`.
+        // p2: `.y` is spelled, and C wraps the next positional element back to
+        // `x`.
+        assert_eq!(labels, vec![".y=", ".x="], "{labels:?}");
     }
 
     #[test]

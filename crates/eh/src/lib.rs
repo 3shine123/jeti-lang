@@ -1487,6 +1487,10 @@ fn rewrite_try(
     if !catches.is_empty() {
         out.push(var_decl(&done, AstType::new(TypePrim::Int), Some(int_expr(0)), line, col));
     }
+    // Catch arms are built into their own list first: the same statements are
+    // needed both at the tail (the normal path) and spliced in front of every
+    // `return` in the try body.
+    let mut catch_checks: Vec<AstStmt> = Vec::new();
 
     // Try body: rewrite; also guard trailing statements after any flag-arming
     // statement (rewrite_stmts handles statement lists; if the body is a
@@ -1566,7 +1570,7 @@ fn rewrite_try(
                 };
             }
 
-            out.push(AstStmt {
+            catch_checks.push(AstStmt {
                 kind: jeti_ast::AstStmtKind::If, line, col,
                 data: AstStmtData::If {
                     cond: Box::new(AstExpr {
@@ -1606,6 +1610,18 @@ fn rewrite_try(
         }
     }
 
+    // Route the try body's `return`s through the checks just built. A `return`
+    // inside `@try { … }` used to jump straight out of the function with the
+    // flag still armed, making every catch arm below it dead code (the
+    // exception then escaped as if there were no `@try`). See
+    // `splice_catch_check_before_returns`.
+    if !catch_checks.is_empty() {
+        if let Some(tb) = out.get_mut(try_body_idx) {
+            splice_catch_check_before_returns(tb, &catch_checks, &done, seq, line, col);
+        }
+        out.extend(catch_checks);
+    }
+
     // Finally: runs with the flag isolated from an exception already in flight
     // (ObjC completes the @finally and only then resumes unwinding), so the
     // body's own guards do not skip its remaining statements. A flag raised
@@ -1634,6 +1650,150 @@ fn rewrite_try(
         data: AstStmtData::Compound(out),
         end_line: 0,
         end_col: 0,
+    }
+}
+
+/// Build the replacement block for a `return <e>;` that sits inside a `@try`
+/// body with catch arms:
+///
+/// ```c
+/// { __auto_type __jeti_eh_ret_N = <e>;   /* evaluating may arm the flag */
+///   <catch-check copy>                   /* runs the matching arm */
+///   if (__jeti_eh_done_N != 1) return __jeti_eh_ret_N; }
+/// ```
+///
+/// Three cases, all decided by the arm latch `__jeti_eh_done_N` (an arm sets it
+/// as its first statement):
+///   * no exception      → `done` stays 0 → the value is returned, as before;
+///   * an arm handled it → `done` is 1 → the `return` is ABANDONED, which is
+///     ObjC: the catch continued after the `@try` instead of returning the
+///     thrower's zero value;
+///   * nothing matched   → `done` stays 0 and the flag stays armed → the value
+///     is returned and the exception keeps propagating to the caller.
+fn catch_check_return_block(
+    e: &AstExpr,
+    checks: &[AstStmt],
+    done: &str,
+    seq: usize,
+    line: usize,
+    col: usize,
+) -> AstStmt {
+    let ret_name = format!("__jeti_eh_ret_{}", seq);
+    let mut body: Vec<AstStmt> = Vec::with_capacity(checks.len() + 2);
+    body.push(var_decl(&ret_name, auto_type(), Some(e.clone()), line, col));
+    for c in checks {
+        body.push(c.clone());
+    }
+    body.push(AstStmt {
+        kind: jeti_ast::AstStmtKind::If,
+        line,
+        col,
+        data: AstStmtData::If {
+            cond: Box::new(AstExpr {
+                kind: jeti_ast::AstExprKind::Binary,
+                expr_type: None,
+                line,
+                col,
+                data: AstExprData::Binary {
+                    op: 13, // !=
+                    left: Box::new(varref(done)),
+                    right: Box::new(int_expr(1)),
+                },
+                end_line: 0,
+                end_col: 0,
+            }),
+            then: Box::new(AstStmt {
+                kind: jeti_ast::AstStmtKind::Return,
+                line,
+                col,
+                data: AstStmtData::Return(Some(Box::new(varref(&ret_name)))),
+                end_line: 0,
+                end_col: 0,
+            }),
+            else_: None,
+        },
+        end_line: 0,
+        end_col: 0,
+    });
+    AstStmt {
+        kind: jeti_ast::AstStmtKind::Compound,
+        line,
+        col,
+        data: AstStmtData::Compound(body),
+        end_line: 0,
+        end_col: 0,
+    }
+}
+
+/// Route every `return` inside a `@try` body through the catch checks.
+///
+/// WHY: the checked backend turns a `@throw` into "arm the flag, return a zero
+/// value" — the thrower RETURNS and the caller's guard tail notices. A `return`
+/// in the try body therefore left the function immediately, with the flag still
+/// armed: the catch arms emitted *after* the body were dead code, and the
+/// exception escaped as if the `@try` had never been written (uncaught →
+/// `jeti_eh_uncaught()`). The `@finally` splice below already handled the
+/// finally half of this; this handles the catch half.
+///
+/// Traversal mirrors [`splice_finally_before_exits`], including the descent into
+/// a nested `@try`: the inner block routed its own returns first, so the outer
+/// check lands in front of them and nesting stays inner → outer.
+fn splice_catch_check_before_returns(
+    s: &mut AstStmt,
+    checks: &[AstStmt],
+    done: &str,
+    seq: usize,
+    line: usize,
+    col: usize,
+) {
+    match &mut s.data {
+        AstStmtData::Compound(v) => {
+            let mut rewritten: Vec<AstStmt> = Vec::with_capacity(v.len());
+            for mut st in std::mem::take(v) {
+                if let AstStmtData::Return(Some(e)) = &st.data {
+                    let value = (**e).clone();
+                    rewritten.push(catch_check_return_block(&value, checks, done, seq, line, col));
+                } else {
+                    splice_catch_check_before_returns(&mut st, checks, done, seq, line, col);
+                    rewritten.push(st);
+                }
+            }
+            *v = rewritten;
+        }
+        AstStmtData::If { then, else_, .. } => {
+            splice_catch_check_before_returns(then, checks, done, seq, line, col);
+            if let Some(e) = else_ {
+                splice_catch_check_before_returns(e, checks, done, seq, line, col);
+            }
+        }
+        AstStmtData::While { body, .. } | AstStmtData::Do { body, .. }
+        | AstStmtData::For { body, .. } | AstStmtData::ForIn { body, .. } => {
+            splice_catch_check_before_returns(body, checks, done, seq, line, col);
+        }
+        AstStmtData::Switch { body, .. } | AstStmtData::Case { body, .. }
+        | AstStmtData::Default(body) => {
+            splice_catch_check_before_returns(body, checks, done, seq, line, col);
+        }
+        AstStmtData::Synchronized { body, .. } | AstStmtData::Autoreleasepool(body)
+        | AstStmtData::NoArc(body) => {
+            splice_catch_check_before_returns(body, checks, done, seq, line, col);
+        }
+        AstStmtData::Try { try_block, catches, finally_block } => {
+            splice_catch_check_before_returns(try_block, checks, done, seq, line, col);
+            for c in catches {
+                splice_catch_check_before_returns(c, checks, done, seq, line, col);
+            }
+            if let Some(f) = finally_block {
+                splice_catch_check_before_returns(f, checks, done, seq, line, col);
+            }
+        }
+        AstStmtData::Catch { body, .. } => {
+            splice_catch_check_before_returns(body, checks, done, seq, line, col);
+        }
+        AstStmtData::Finally(b) => {
+            splice_catch_check_before_returns(b, checks, done, seq, line, col);
+        }
+        _ => {}
     }
 }
 

@@ -335,7 +335,21 @@ fn resolve_source(
             }
         } else if line.trim_start().starts_with('#') {
             // Preprocessor directives: #define, #pragma, etc.
-            if let Some(rest) = trimmed.strip_prefix("#define") {
+            //
+            // C allows whitespace between the `#` and the directive name
+            // (`#  define X`). The conditional directives above already tolerate
+            // it (they match after a trim), but the checks below matched the raw
+            // text, so `#  define VAL 7` fell through to the verbatim
+            // pass-through: the line reached clang (which is happy), yet the
+            // macro never entered jetic's own table, so every `VAL` in jeti
+            // source stayed unexpanded ("use of undeclared identifier").
+            // Normalize for matching; the line keeps its original spelling when
+            // it is emitted, because clang accepts every legal form.
+            let directive: String = match trimmed.strip_prefix('#') {
+                Some(after) => format!("#{}", after.trim_start()),
+                None => trimmed.to_string(),
+            };
+            if let Some(rest) = directive.strip_prefix("#define") {
                 // Continuation lines (\) have already been joined below, so
                 // `line` here may span several source lines.
                 let name = rest.trim().split_whitespace().next().unwrap_or("").to_string();
@@ -385,7 +399,7 @@ fn resolve_source(
                         c_out.push(orig.trim().to_string());
                     }
                 }
-            } else if let Some(rest) = trimmed.strip_prefix("#undef") {
+            } else if let Some(rest) = directive.strip_prefix("#undef") {
                 // #undef removes the name from both tracks: the jeti macro
                 // table (so later invocations no longer expand) and the
                 // defined set (so #ifdef flips), then passes through to C
@@ -397,7 +411,7 @@ fn resolve_source(
                 }
                 poison_top_guard(cond_stack, c_out);
                 c_out.push(trimmed.to_string());
-            } else if trimmed.starts_with("#pragma mark") {
+            } else if directive.starts_with("#pragma mark") {
                 // `#pragma mark ...` is a purely cosmetic IDE marker (Xcode
                 // navigator). Keep it inline in the jeti stream so the parser
                 // carries it at its original position and codegen re-emits it
@@ -409,6 +423,14 @@ fn resolve_source(
                 jeti_out.push_str(line);
                 jeti_out.push('\n');
                 line_map.push((file_path.to_string(), src_line));
+            } else if directive.starts_with("#line") {
+                // `#line` is scaffolding, not content. Our own generated C
+                // re-read as input carries the previous rounds' directives;
+                // forwarding them into the prelude re-emitted the whole
+                // accumulated chain, which was the last growth layer of the
+                // re-transpile fixed-point probe (k0→k4: +308 B every round,
+                // all of it `#line`). The mapping is re-derived from real
+                // source positions, so a stale directive is dropped here.
             } else {
                 // #pragma (non-mark), #warning, etc.
                 poison_top_guard(cond_stack, c_out);

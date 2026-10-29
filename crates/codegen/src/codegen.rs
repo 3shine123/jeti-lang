@@ -99,6 +99,22 @@ fn reset_line_synthetic(out: &mut String) {
 // ─── Temp variable counter ─────────────────────────────────────────────────
 static TEMP_VAR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+/// True when a pass-through raw line IS itself a `#line` directive.
+///
+/// Generated C re-read as input carries the previous round's `#line`
+/// scaffolding. Re-emitting it wrapped the stale directive in a fresh
+/// `#line 1 "<jeti-generated>"` pair, so every re-transpile appended another
+/// layer (the last growth source after prototype dedup: a steady +308 bytes per
+/// round). The mapping is re-derived from real source positions anyway, so a
+/// stale directive is dropped rather than forwarded.
+fn is_line_directive(text: &str) -> bool {
+    let t = text.trim_start();
+    match t.strip_prefix("#line") {
+        Some(rest) => rest.is_empty() || rest.starts_with(|c: char| c.is_whitespace()),
+        None => false,
+    }
+}
+
 // ─── Block-variable names (populated during convert_decl) ────────────────────
 static BLOCK_VARS: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
     std::sync::Mutex::new(None);
@@ -954,7 +970,17 @@ fn is_owned_object_ivar_type(ty: &str) -> bool {
     // one) — releasing it would free the array, not an element.
     if t.matches('*').count() != 1 { return false; }
     let base = t.trim_end_matches('*').trim();
-    !matches!(base,
+    // Type qualifiers must not defeat the scalar check: `const char *` is plain
+    // C storage exactly like `char *`. Matching the raw spelling sent
+    // `const char *` down the "owned object" path, so the synthesized ARC
+    // dealloc released a C string — a crash at the string literal's address.
+    // (Repro: probes/stress_jetic/min_cstr_property_crash.jeti.)
+    let base = base
+        .split_whitespace()
+        .filter(|w| !matches!(*w, "const" | "volatile" | "restrict" | "_Atomic"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    !matches!(base.as_str(),
         "char" | "signed char" | "unsigned char" | "short" | "unsigned short"
         | "int" | "unsigned int" | "unsigned" | "long" | "unsigned long"
         | "long long" | "unsigned long long" | "float" | "double" | "long double"
@@ -1374,6 +1400,19 @@ fn cst_type_to_c_str(ct: &jeti_cst::CstType) -> String {
     }
     // Recurse through pointer chain to build correct type with all * levels
     if ct.is_pointer {
+        // POINTER TO ARRAY: `int (*name)[4]`. The array binds to the POINTER, so
+        // the declarator nests the name inside the parens — `int (*row)[4]`,
+        // never `int *row[4]` (that is an array of pointers).
+        if let Some(arr) = ct.subtype.as_ref().filter(|s| s.is_array) {
+            let base = arr.subtype.as_ref().map(|s| cst_type_to_c_str(s)).unwrap_or_else(|| "int".into());
+            let size = if arr.array_size > 0 {
+                arr.array_size.to_string()
+            } else {
+                arr.array_size_name.clone().unwrap_or_default()
+            };
+            let name = ct.block_name.clone().unwrap_or_default();
+            return format!("{} (*{})[{}]", base, name, size);
+        }
         let base = cst_type_to_c_str(ct.subtype.as_ref().unwrap());
         if ct.is_const {
             return format!("{} * const", base);
@@ -1515,6 +1554,22 @@ pub fn ast_type_to_c_str(t: &AstType) -> String {
         return format!("{}[]", base);
     }
     let mut s = String::new();
+
+    // POINTER TO ARRAY: `int (*name)[4]` — the array binds to the POINTER, so
+    // the declarator nests the name inside the parens (`int (*row)[4]`, never
+    // `int *row[4]`, which is an array of pointers). Same rule as the CST arm.
+    if t.is_pointer {
+        if let Some(arr) = t.subtype.as_ref().filter(|s| s.is_array) {
+            let base = arr.subtype.as_ref().map(|s| ast_type_to_c_str(s)).unwrap_or_else(|| "int".into());
+            let size = if arr.array_size > 0 {
+                arr.array_size.to_string()
+            } else {
+                arr.array_size_name.clone().unwrap_or_default()
+            };
+            let name = t.block_name.clone().unwrap_or_default();
+            return format!("{} (*{})[{}]", base, name, size);
+        }
+    }
 
     // For pointer types, const on the pointed-to type (subtype) goes BEFORE the base type
     if t.is_pointer {
@@ -1761,6 +1816,37 @@ fn render_callee_expr(ae: &AstExpr) -> String {
         // An indexed receiver: `fns[i](args)`.
         AstExprData::Subscript { object, key } => {
             format!("{}[{}]", render_callee_expr(object), render_callee_expr(key))
+        }
+        // Literals — a subscript key is usually one (`fns[0](args)`). The
+        // `_ => String::new()` fallback used to swallow it, so the callee
+        // rendered as `fns[]`: the index vanished and the call became invalid C
+        // (probe: probes/stress_jetic — `t2[0](1, 2)` → `t2[](1, 2)`).
+        AstExprData::Int(n) => n.to_string(),
+        AstExprData::Char(c) => (*c as i64).to_string(),
+        AstExprData::Bool(b) => if *b { "1".into() } else { "0".into() },
+        // A computed key or operand: `fns[i + 1](args)`.
+        AstExprData::Binary { op, left, right } => format!(
+            "({} {} {})",
+            render_callee_expr(left),
+            op_to_str(*op, false),
+            render_callee_expr(right)
+        ),
+        // A call used as a call target: `pick(0)(args)` — the function pointer a
+        // call returns, called immediately. Missing from this list, it rendered
+        // as an EMPTY callee and the whole call collapsed to `(args)`: the inner
+        // call and its arguments vanished and the comma expression's value came
+        // back as the "result" (probe-verified silent miscompile: `pick(0)(10, 4)`
+        // printed 4 instead of 14, with no diagnostic anywhere).
+        AstExprData::FuncCall { name, callee, args, .. } => {
+            let target = match callee {
+                Some(ce) => render_callee_expr(ce),
+                None => name.clone(),
+            };
+            if target.is_empty() {
+                return String::new();
+            }
+            let rendered: Vec<String> = args.iter().map(render_callee_expr).collect();
+            format!("{}({})", target, rendered.join(", "))
         }
         _ => String::new(),
     }
@@ -4417,6 +4503,26 @@ fn emit_struct_field(ft: &str, fn_: &str, fattrs: &[String], out: &mut String) {
     out.push_str("    ");
     if ft.contains("(*") || ft.contains("(^") {
         out.push_str(ft);
+    } else if let Some(close) = ft.rfind('}') {
+        // A nested INLINE aggregate body (`struct { … } in;`) is not a
+        // declarator: it can carry its own array members, and splitting the
+        // type at the first `[` landed INSIDE the body — that is what spliced
+        // the outer member name into an inner array declarator:
+        //   struct { int i; unsigned char b[4]; } in;
+        // rendered as `unsigned char b in[4];` — invalid C, and the outer
+        // member lost its name (probe: probes/stress_jetic, nested union/struct
+        // member holding an array). The name goes after the closing brace, and
+        // any array suffix on the MEMBER itself follows the name.
+        let (body, suffix) = ft.split_at(close + 1);
+        out.push_str(body);
+        // An anonymous member (C11 6.7.2.1p13) has no name of its own: its
+        // members join the enclosing aggregate, so the declarator is just the
+        // body.
+        if !fn_.is_empty() {
+            out.push(' ');
+            out.push_str(fn_);
+        }
+        out.push_str(suffix);
     } else {
         let (base, suffix) = split_array_type(ft);
         out.push_str(base);
@@ -4569,6 +4675,7 @@ fn emit_aggregate_definitions(unit: &CgUnit, out: &mut String) -> bool {
     let mut stack: Vec<(usize, bool)> = Vec::new();
     for (idx, decl) in unit.decls.iter().enumerate() {
         if let CgDeclData::RawLine(text) = &decl.data {
+            if is_line_directive(text) { continue; }
             out.push_str(text);
             out.push('\n');
             continue;
@@ -7554,6 +7661,14 @@ fn emit_expr(e: &CgExpr, out: &mut String) {
             // Re-emit the user's explicit grouping verbatim. Keeping these
             // parentheses is load-bearing: `(a = b) != c` must not collapse
             // into `a = b != c` (the assignment would swallow the comparison).
+            // A Binary inner is the exception: the Binary arm below already
+            // parenthesises unconditionally, so wrapping it again added one
+            // paren layer per re-transpile (probe: `return (a + b);` grew to
+            // `(((((a + b)))));`).
+            if matches!(e.data, CgExprData::Binary { .. }) {
+                emit_expr(e, out);
+                return;
+            }
             out.push('(');
             emit_expr(e, out);
             out.push(')');
@@ -7979,6 +8094,7 @@ pub fn emit_stmt(s: &CgStmt, out: &mut String, indent: usize) {
             // Verbatim pass-through (`_Pragma("...")` etc.): emitted where the
             // source line was, never hoisted — a pragma's meaning is its
             // position.
+            if is_line_directive(text) { return; }
             out.push_str(&ind);
             out.push_str(text);
             out.push('\n');
@@ -8248,6 +8364,7 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
         CgDeclData::RawLine(text) => {
             // Raw pass-through line (e.g. `#pragma mark - Foo`): emit it
             // verbatim at the position it appeared in the source.
+            if is_line_directive(text) { return; }
             out.push_str(text);
             out.push('\n');
         }
@@ -8259,23 +8376,44 @@ pub fn emit_decl(d: &CgDecl, out: &mut String) {
         CgDeclData::Function { return_type, params, body, is_variadic, .. } => {
             emit_attrs_prefix(&d.attributes, out);
             let has_internal_linkage = d.attributes.iter().any(|a| a.contains("internal_linkage"));
-            if body.is_some() && !has_internal_linkage {
+            // Do not stack a second `weak` onto a declaration that already
+            // carries one. jetic's own output does, so re-transpiling generated
+            // C used to double the attribute on every pass — the text never
+            // reached a fixed point (measured: 4 → 12 → 28 `weak` occurrences,
+            // 0 → 4 → 8 doubled lines over three passes).
+            let already_weak = d.attributes.iter().any(|a| a.contains("weak"));
+            if body.is_some() && !has_internal_linkage && !already_weak {
                 // can link against a separately compiled implementation file:
                 // duplicate definitions (e.g. base-class methods emitted in every
                 // TU) are coalesced by the linker instead of failing.
                 out.push_str("__attribute__((weak)) ");
             }
-            out.push_str(return_type);
-            out.push(' ');
-            out.push_str(&d.name);
-            out.push('(');
+            let mut sig_params = String::new();
             for (i, (pt, pn)) in params.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&format_param_decl(pt, pn));
+                if i > 0 { sig_params.push_str(", "); }
+                sig_params.push_str(&format_param_decl(pt, pn));
             }
-            if params.is_empty() { out.push_str("void"); }
-            if *is_variadic { out.push_str(", ..."); }
-            out.push(')');
+            if params.is_empty() { sig_params.push_str("void"); }
+            if *is_variadic { sig_params.push_str(", ..."); }
+            if let Some(pos) = return_type.find("(*)") {
+                // A function RETURNING a function pointer: the declarator nests
+                // the name and the function's own parameter list INSIDE the
+                // returned pointer's parens — `int (*pick(int which))(int, int)`,
+                // never `int (*)(int, int) pick(int which)` (invalid C).
+                // `return_type` is already the rendered pointer type, so splice
+                // at its `(*)`.
+                let (head, tail) = return_type.split_at(pos);
+                out.push_str(head);
+                out.push_str(&format!("(*{}({})", d.name, sig_params));
+                out.push_str(&tail["(*".len()..]);
+            } else {
+                out.push_str(return_type);
+                out.push(' ');
+                out.push_str(&d.name);
+                out.push('(');
+                out.push_str(&sig_params);
+                out.push(')');
+            }
             if let Some(b) = body {
                 out.push(' ');
                 emit_stmt(b, out, 0);
@@ -8772,17 +8910,41 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
 
     // Forward declarations for functions
     section_comment(&mut out, comments, "Section 6 · Function prototypes");
+    // Re-transpiling generated C re-reads the prototypes this very section
+    // emitted, so one function may arrive several times in a single unit (its
+    // source prototype plus its definition). Emitting one prototype per
+    // declaration made every `jetic gen.c` round append another layer — the
+    // fixed-point probe grew 1631 → 2024 → 2641 → 3710 → 5688 bytes. Keep the
+    // first signature only; the definition still governs linkage.
+    let mut seen_protos: std::collections::HashSet<String> = std::collections::HashSet::new();
     for decl in &unit.decls {
         if let CgDeclData::Function { ref return_type, ref params, is_variadic, .. } = decl.data {
-            emit_attrs_prefix(&decl.attributes, &mut out);
-            let _ = write!(out, "{} {}(", return_type, decl.name);
-            for (i, (pt, pn)) in params.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&format_param_decl(pt, pn));
+            let mut proto_key = format!("{} {}(", return_type, decl.name);
+            for (i, (pt, _)) in params.iter().enumerate() {
+                if i > 0 { proto_key.push(','); }
+                proto_key.push_str(pt);
             }
-            if params.is_empty() { out.push_str("void"); }
-            if is_variadic { out.push_str(", ..."); }
-            out.push_str(");\n");
+            if !seen_protos.insert(proto_key) { continue; }
+            emit_attrs_prefix(&decl.attributes, &mut out);
+            let mut sig_params = String::new();
+            for (i, (pt, pn)) in params.iter().enumerate() {
+                if i > 0 { sig_params.push_str(", "); }
+                sig_params.push_str(&format_param_decl(pt, pn));
+            }
+            if params.is_empty() { sig_params.push_str("void"); }
+            if is_variadic { sig_params.push_str(", ..."); }
+            if let Some(pos) = return_type.find("(*)") {
+                // Same declarator rule as `emit_decl`: a function RETURNING a
+                // function pointer nests its name and its own parameter list
+                // inside the returned pointer's parens.
+                let (head, tail) = return_type.split_at(pos);
+                out.push_str(head);
+                out.push_str(&format!("(*{}({})", decl.name, sig_params));
+                out.push_str(&tail["(*".len()..]);
+                out.push_str(";\n");
+            } else {
+                let _ = write!(out, "{} {}({});\n", return_type, decl.name, sig_params);
+            }
         }
     }
     if !unit.decls.is_empty() { out.push('\n'); }
@@ -8885,7 +9047,14 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
         // compiler builtin, available in hosted and freestanding alike) rather
         // than declaring stdio symbols this TU may not link against.
         let has_stdio = c_headers.iter().any(|h| h.contains("stdio.h"));
-        let _ = write!(out, "__attribute__((weak)) void jeti_verify_vtable_sig(unsigned long long winner, unsigned long long mine, const char *method_list) {{\n");
+        // The method-name table is NOT a parameter literal at each call site:
+        // it is emitted once per TU as `__jeti_vtable_method_list` (see the
+        // layout-check constructor below) and passed by pointer. The table is
+        // ~5 KB and identical at every call site, so inlining it per class made
+        // a linked Foundation archive carry one copy per class per TU — the
+        // single largest contributor to binary size. `class_name`/`tu_name` stay
+        // separate short arguments so the diagnostic text is unchanged.
+        let _ = write!(out, "__attribute__((weak)) void jeti_verify_vtable_layout(unsigned long long winner, unsigned long long mine, const char *method_list, const char *class_name, const char *tu_name) {{\n");
         let _ = write!(out, "    if (winner != mine) {{\n");
         if has_stdio {
             let _ = write!(out, "        fprintf(stderr,\n");
@@ -8905,11 +9074,11 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             let _ = write!(out, "            \"affected classes as a single TU. TU-local private methods do not\\n\"\n");
             let _ = write!(out, "            \"participate in this check.\\n\"\n");
             let _ = write!(out, "            \"See tests/multi_tu/ for worked examples of what does and does not link.\\n\"\n");
-            let _ = write!(out, "            \"\\nMethods known to this TU:\\n  %s\\n\",\n");
-            let _ = write!(out, "            (unsigned long long)winner, (unsigned long long)mine, method_list);\n");
+            let _ = write!(out, "            \"\\nMethods known to this TU:\\n  %s | class %s | tu %s\\n\",\n");
+            let _ = write!(out, "            (unsigned long long)winner, (unsigned long long)mine, method_list, class_name, tu_name);\n");
             let _ = write!(out, "        abort();\n");
         } else {
-            let _ = write!(out, "        (void)winner; (void)mine; (void)method_list;\n");
+            let _ = write!(out, "        (void)winner; (void)mine; (void)method_list; (void)class_name; (void)tu_name;\n");
             let _ = write!(out, "        __builtin_trap();\n");
         }
         let _ = write!(out, "    }}\n}}\n\n");
@@ -9542,12 +9711,32 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
     // a clear message instead.
     if any_has_instance && !unit.classes.is_empty() {
         let method_list: Vec<String> = unit.global_instance_method_names.clone();
+        // One shared copy of the method-name table per TU, held as a POINTER to
+        // the literal rather than as a `const char[]` array. The distinction is
+        // what makes the table cheap: an array is an independent object in
+        // `__TEXT,__const` that the linker cannot merge, while a string literal
+        // lives in `__cstring`, which ld64 deduplicates by CONTENT across all
+        // objects. A linked Foundation archive is 52 TUs, and the TUs that
+        // compiled the same method set therefore collapse to one shared copy
+        // instead of one per TU.
+        //
+        // This table is ~5 KB and was previously inlined at every call site,
+        // which multiplied it by (classes x TUs) and dominated binary size. The
+        // call site now passes a pointer; the diagnostic text is unchanged
+        // because the verifier concatenates the same pieces in the same order.
+        let method_list_text = method_list.join(" ");
+        let method_list_sym = format!(
+            "__jeti_vtable_method_list_{:016x}",
+            text_layout_sig(&method_list_text)
+        );
+        let _ = write!(out, "static const char *const {} = {};\n\n",
+            method_list_sym, c_string_literal(&method_list_text));
         let _ = write!(out, "__attribute__((constructor)) static void __jeti_vtable_layout_check(void) {{\n");
         for cm in &unit.classes {
             if cm.method_names.is_empty() && cm.super_name.is_none() { continue; }
             let vt_sym = meta_symbol("VTABLE_", &name_flat(&cm.class_name));
-            let _ = write!(out, "    jeti_verify_vtable_sig((&{})->__sig, 0x{:016x}ULL, \"{} | class {} | tu {}\");\n",
-                vt_sym, vtable_sig, method_list.join(" "), cm.class_name, unit.filename);
+            let _ = write!(out, "    jeti_verify_vtable_layout((&{})->__sig, 0x{:016x}ULL, {}, {}, {});\n",
+                vt_sym, vtable_sig, method_list_sym, c_string_literal(&cm.class_name), c_string_literal(&unit.filename));
             let layout_text = class_layout_text(cm);
             let _ = write!(out, "    jeti_verify_layout_sig((&{})->__layout_sig, 0x{:016x}ULL, (&{})->__layout_text, {});\n",
                 vt_sym, text_layout_sig(&layout_text), vt_sym, c_string_literal(&layout_text));
@@ -9794,6 +9983,12 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             // were already emitted above, in source order, interleaved with the
             // struct definitions they may have to precede.
             if aggregates_emitted && matches!(decl.data, CgDeclData::RawLine(_)) { continue; }
+            // File-scope pass-through lines (`_Pragma("...")`, `#pragma mark`)
+            // were already emitted above, in source order, interleaved with the
+            // struct definitions they may have to precede.
+            // A pure prototype (no body) already lives in Section 6; emitting it
+            // again here is what duplicated declarations on every re-transpile.
+            if matches!(decl.data, CgDeclData::Function { body: None, .. }) { continue; }
             if !matches!(decl.data, CgDeclData::Enum { .. })
                 && !matches!(decl.data, CgDeclData::Typedef { .. })
                 && !matches!(decl.data, CgDeclData::Variable { .. })
@@ -9812,6 +10007,9 @@ pub fn emit_unit_with_headers_mapped(unit: &CgUnit, c_headers: &[String], search
             if matches!(decl.data, CgDeclData::Variable { .. }) { continue; }
             if matches!(decl.data, CgDeclData::Struct { .. }) { continue; }
             if aggregates_emitted && matches!(decl.data, CgDeclData::RawLine(_)) { continue; }
+            // A pure prototype (no body) already lives in Section 6; emitting it
+            // again here is what duplicated declarations on every re-transpile.
+            if matches!(decl.data, CgDeclData::Function { body: None, .. }) { continue; }
             emit_decl(decl, &mut out);
             out.push('\n');
         }
@@ -9932,6 +10130,39 @@ pub fn emit_bridge_header(unit: &CgUnit) -> String {
     out
 }
 #[cfg(test)]
+mod ivar_ownership_tests {
+    use super::*;
+
+    /// ARC must not treat plain C storage as an object: a `char *`/`void *`
+    /// ivar is never released, and a qualifier in front of the scalar type must
+    /// not flip the answer. `const char *` used to fall through to "owned
+    /// object", so the synthesized dealloc released a string literal — a crash
+    /// at the literal's address (probes/stress_jetic/min_cstr_property_crash.jeti).
+    #[test]
+    fn qualifiers_do_not_turn_scalar_pointers_into_objects() {
+        for ty in [
+            "char *", "const char *", "volatile char *", "const volatile char *",
+            "const void *", "unsigned char *", "const unsigned char *",
+            "const int *", "const double *", "const long long *",
+        ] {
+            assert!(!is_owned_object_ivar_type(ty), "{ty} is plain C storage");
+        }
+        for ty in [
+            "NPObject *", "const NPObject *", "NPString *", "id", "jeti_id_t",
+            "struct NPString *", "Box<int> *",
+        ] {
+            assert!(is_owned_object_ivar_type(ty), "{ty} is an owned object");
+        }
+        // Exactly one level of indirection: `NPObject **` is a C array of
+        // objects, and releasing it would free the array, not an element.
+        assert!(!is_owned_object_ivar_type("NPObject **"));
+        // Function pointers and block layouts are not objects either.
+        assert!(!is_owned_object_ivar_type("int (*)(void)"));
+        assert!(!is_owned_object_ivar_type("struct __jeti_block *"));
+    }
+}
+
+#[cfg(test)]
 mod vtable_sig_tests {
     use super::*;
 
@@ -10021,7 +10252,24 @@ mod vtable_sig_tests {
             c.contains("__attribute__((constructor)) static void __jeti_vtable_layout_check(void)"),
             "the layout check must live in a per-TU constructor, not in weak-merged jeti_metaInit"
         );
-        assert!(c.contains("jeti_verify_vtable_sig"), "the verifier must be emitted");
+        assert!(c.contains("jeti_verify_vtable_layout"), "the verifier must be emitted");
+        assert!(
+            c.contains("static const char *const __jeti_vtable_method_list_"),
+            "the method-name table must be emitted once per TU as a pointer to its literal, \
+             so the literal lands in __cstring where the linker can deduplicate it by content"
+        );
+        // The call site must pass the shared table by pointer. Inlining the
+        // table per class is what made a linked Foundation archive carry one
+        // ~5 KB copy per class per TU; this pins the shared form.
+        let call = c
+            .lines()
+            .find(|l| l.contains("jeti_verify_vtable_layout(("))
+            .expect("the layout-check constructor must call the verifier");
+        assert!(
+            call.contains("__jeti_vtable_method_list"),
+            "the call site must reference the shared table, got: {}",
+            call
+        );
     }
 
     /// R4: the ivar-section twin of `__sig`. A stale `.hje` must change the

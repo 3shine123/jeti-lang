@@ -77,6 +77,54 @@ void jeti_free(void *ptr) {
     (void)ptr; /* bump allocator: never reuses memory */
 }
 
+// ─── Protocol conformance (D5.2) ─────────────────────────────────────────────
+// Same metadata-based algorithm as the hosted runtime (include/jeti/runtime.c):
+// proto identity/name match, or a required-method subset check through the
+// protocol graph, then the superclass chain. Bare-metal targets do not
+// necessarily provide strcmp, and equality is all this needs.
+
+static int jeti_name_eq(const char *a, const char *b) {
+    if (!a || !b) return a == b;
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+static int proto_covers(const struct NPProtocol *p, const struct NPProtocol *target);
+
+static int proto_requires(const struct NPProtocol *p, const char *sel) {
+    for (int i = 0; i < p->required_count; i++) {
+        if (jeti_name_eq(p->required_methods[i].name, sel)) return 1;
+    }
+    for (int i = 0; i < p->parent_count; i++) {
+        if (p->parents[i] && proto_requires(p->parents[i], sel)) return 1;
+    }
+    return 0;
+}
+
+static int proto_covers(const struct NPProtocol *p, const struct NPProtocol *target) {
+    if (!p || !target) return 0;
+    if (p == target) return 1;
+    if (jeti_name_eq(p->name, target->name)) return 1;
+    /* structural: p requires everything target requires (with parents) */
+    for (int i = 0; i < target->required_count; i++) {
+        if (!proto_requires(p, target->required_methods[i].name)) return 0;
+    }
+    return 1;
+}
+
+static int class_conforms(const NPClass *cls, const struct NPProtocol *proto, int depth) {
+    if (!cls || !proto || depth > 32) return 0;
+    for (int i = 0; i < cls->protocol_count; i++) {
+        if (cls->protocols[i] && proto_covers(cls->protocols[i], proto)) return 1;
+    }
+    /* walk the superclass chain — conformance is inherited */
+    return cls->superclass ? class_conforms(cls->superclass, proto, depth + 1) : 0;
+}
+
+int jeti_class_conformsToProtocol(NPClass *cls, struct NPProtocol *proto) {
+    return class_conforms(cls, proto, 0);
+}
+
 void jeti_register_category_protocols(NPClass *cls, struct NPProtocol **protocols, int count) {
     if (!cls || !protocols || count <= 0) return;
     int old_count = cls->protocol_count;
